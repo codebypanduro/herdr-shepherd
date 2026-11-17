@@ -6,7 +6,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { props, closeOverlay, setShared } from "herdr";
 import { STAGES, KINDS, MONO, VIEW, palette, groupColor, tint } from "./common.js";
-import { answerButton } from "./needs.js";
+import { answerButton, whyLine, oldRound } from "./needs.js";
 
 const toneOf = (t, result) => (result === "pass" ? t.done : result === "fail" ? t.ansi1 : result === "ask" ? t.blocked : t.working);
 
@@ -74,7 +74,8 @@ export function renderHistory(m) {
         .child(div().w(22).font_family(MONO).text_color(t.dim).child(k.key))
         .child(div().flex_1().text_color(t.muted).child(k.title))
         .child(div().font_family(MONO).text_color(t.dim).child(k.blockedBy?.length ? `after ${k.blockedBy.join(", ")}` : ""))))))
-      .when(open && Boolean(q.why), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(q.why)))
+      .when(open && Array.isArray(q.questions), (el) => el.child(oldRound(t, q)))
+      .when(open && Boolean(q.why), (el) => el.child(whyLine(t, q)))
       .when(open && (q.options ?? []).length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(
         q.options.map((o, j) => answerButton(t, `h-${i}-o${j}`, o, o === q.recommended, () => m.answer(q, o))))))
       .when(!open, (el) => el.child(h_flex().gap(4).text_size(11.5).text_color(t.muted)

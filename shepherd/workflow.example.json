@@ -15,8 +15,7 @@
     "grill": {
       "agent": "claude",
       "model": "opus",
-      "skill": "/grill-with-docs",
-      "or": "/grill-me"
+      "skill": "/grill-with-docs"
     },
     "spec": {
       "agent": "claude",
@@ -57,7 +56,7 @@
   "stuckMinutes": {
     "triage": 40,
     "grill": 30,
-    "spec": 60,
+    "spec": 120,
     "tickets": 60,
     "implement": 50,
     "review": 25,

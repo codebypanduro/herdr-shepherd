@@ -32,7 +32,7 @@ From the prototype at 1440px wide, in `docs/design/screenshots/`: board, task ov
 
 The files in `docs/design/` are **design references made in HTML**, not code to ship. Herdr mods are written in gpui-kit (JavaScript describing native GPUI elements): no HTML, no CSS, no DOM. Recreate the layout, colors, type and behavior with gpui-kit and the `herdr` module, and use `theme()` colors instead of the hex values so the layout follows light and dark themes. The prototype's numbers (times, tokens, costs, CPU) are simulated.
 
-**Fidelity: high.** Spacing, type sizes, colors and copy are final. Where the prototype does something Herdr can't (hover peek with a timer, drag and drop of spaces), see *Watch out* in RECIPE.md.
+**Superseded on grilling:** the prototype's grilling rounds and nine columns predate the Grill step; RECIPE.md is the truth there (a Grill column, one question at a time). **Fidelity: high.** Spacing, type sizes, colors and copy are final. Where the prototype does something Herdr can't (hover peek with a timer, drag and drop of spaces), see *Watch out* in RECIPE.md.
 
 ## Install
 

@@ -17,6 +17,21 @@ export function answerButton(t, id, text, recommended, onClick) {
     .when(recommended, (el) => el.child(div().text_size(10.5).text_color(t.accent).child("recommended")));
 }
 
+/** Why the asker recommends its pick (grilling questions carry one). */
+export const whyLine = (t, q) => div().text_size(11.5).text_color(t.dim).child(q.why);
+
+/** An open grilling round from before the Grill step (q.questions): read-only, answered in free text. */
+export function oldRound(t, q) {
+  return v_flex().gap(6)
+    .children(q.questions.map((g, i) => v_flex().gap(2)
+      .child(h_flex().gap(8)
+        .child(div().font_family(MONO).text_size(11).text_color(t.dim).child(`${i + 1}.`))
+        .child(div().flex_1().text_size(12.5).line_height(1.4).child(g.q ?? "")))
+      .child(div().pl(18).text_size(11.5).text_color(t.muted)
+        .child((g.options ?? []).map((o) => (o === g.recommended ? `${o} (recommended)` : o)).join(" · ")))))
+    .child(div().text_size(11.5).text_color(t.dim).child("An old grilling round: reply with your answers in order, as 1. … 2. …"));
+}
+
 /** Proposed tickets and what each waits on. */
 function ticketList(q, t) {
   const byKey = new Map(q.tickets.map((k) => [k.key, k]));
@@ -58,11 +73,12 @@ export function renderNeeds(m) {
       .child(div().text_size(14).line_height(1.4).text_color(t.foreground).child(q.text))
       .child(div().text_size(11.5).text_color(t.dim)
         .child(`asked by ${q.from ?? "shepherd"}${finding ? ` · last finding: ${finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""} ` : ""}${finding.text}` : ""}`))
+      .when(Array.isArray(q.questions), (el) => el.child(oldRound(t, q)))
       .when(q.kind === "approve" && Array.isArray(q.tickets), (el) => el.child(ticketList(q, t)))
       .when((q.options ?? []).length > 0, (el) => el.child(h_flex().gap(8).flex_wrap().children(
         q.options.map((o, i) => answerButton(t, `q-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))))
       // Why the asker recommends its pick (grilling questions carry one).
-      .when(Boolean(q.why), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(q.why)))
+      .when(Boolean(q.why), (el) => el.child(whyLine(t, q)))
       .when(Boolean(input), (el) => el.child(h_flex().gap(8).items_center()
         .child(Input.new(input).flex_1().h(30).px(9).rounded(6).border(1).border_color(t.input)
           .bg(t.background).text_size(12.5).text_color(t.foreground))

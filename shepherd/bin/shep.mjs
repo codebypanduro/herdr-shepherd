@@ -19,7 +19,8 @@
 //            [--options "One more loop|Park it|I'll take it"] [--recommended "One more loop"]   prints q1, q2, …
 //            [--why "one line: why the recommended one"]
 //            grilling: --kind grill --question <file.json>   {q, options:[…], recommended, why}: one question at a
-//                      time; the file fills --text, --options, --recommended and --why (and spares quoting a "|")
+//                      time, with 2+ options and a recommended one;
+//                      the file fills --text, --options, --recommended and --why (and spares quoting a "|")
 //            approval: --kind approve --tickets <file.json>             [{key, title, brief, blockedBy:[keys]}]
 //   shep answer <qid> "<answer>"      records the person's answer; the question leaves Needs you
 //   shep room [--wait] [--workflow f] is this machine under the workflow's CPU and memory limits? exit 0 yes, 3 no,
@@ -241,8 +242,9 @@ switch (cmd) {
     const n = state.questions.reduce((m, q) => Math.max(m, parseInt(String(q.id).slice(1), 10) || 0), 0) + 1;
     const options = typeof opt.options === "string" ? opt.options.split("|").map((x) => x.trim()).filter(Boolean)
       : (one.options ?? []).map((x) => x.trim()).filter(Boolean);
-    const recommended = typeof opt.recommended === "string" ? opt.recommended
+    const recommended = typeof opt.recommended === "string" && opt.recommended.trim() ? opt.recommended.trim()
       : typeof one.recommended === "string" && one.recommended.trim() ? one.recommended.trim() : null;
+    if (kind === "grill" && (options.length < 2 || !recommended)) die("a grilling question needs 2 or more options and a recommended one");
     if (recommended && options.length && !options.includes(recommended)) die("--recommended must be one of --options");
     const why = typeof opt.why === "string" ? opt.why : typeof one.why === "string" && one.why.trim() ? one.why.trim() : null;
     let tickets;

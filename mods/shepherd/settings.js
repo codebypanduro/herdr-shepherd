@@ -7,15 +7,16 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { spaces, terminals, run, closeOverlay, props } from "herdr";
-import { MONO, LIMITS, MAX_LOOPS, palette, machineOf } from "./common.js";
+import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
 import { chip, check, gitFacts, shepherdHome, shepherdOn, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 const MODELS = ["opus", "sonnet", "haiku"];
-/** The Grill stage's skills: /grill-with-docs also writes CONTEXT.md and docs/adr as it goes. */
-const GRILL_SKILLS = ["/grill-with-docs", "/grill-me"];
+/** The Grill stage's skills: the default (common.js, /grill-with-docs, which also keeps a glossary and
+ *  decisions) and /grill-me. */
+const GRILL_SKILLS = [STAGES.grill.skill, "/grill-me"];
 const CPU_OPTS = [60, 70, 80, 90];
 const MEM_OPTS = [70, 80, 85, 95];
 
@@ -114,8 +115,11 @@ export function renderWorkflow(m) {
       .child(row(t, "✳", title(t, "Shepherd"), "The agent you talk to. It plans the flow, hands out work and asks you questions. A new model takes effect when Shepherd restarts.", models("shepherd", wf.shepherd?.model)))
       .child(row(t, "01", title(t, "Triage", "/triage"), "Only for issues from other people. Your own work skips it.", models("triage", st.triage?.model)))
       .child(row(t, "02", title(t, "Grill", grillSkill), "Grills you until you agree. No limit.",
-        h_flex().gap(4).children(withValue(GRILL_SKILLS, grillSkill).map((k) =>
-          chip(t, `wf-grill-${k}`, k, k === grillSkill, set(["stages", "grill", "skill"], k))))))
+        v_flex().gap(4).items_end()
+          .child(h_flex().gap(4).children(withValue(GRILL_SKILLS, grillSkill).map((k) =>
+            // Element ids without the skill's "/".
+            chip(t, `wf-grill-${k.replace(/[^a-z0-9-]/gi, "")}`, k, k === grillSkill, set(["stages", "grill", "skill"], k)))))
+          .child(models("grill", st.grill?.model))))
       .child(row(t, "03", title(t, "Spec / wayfinder", "/to-spec · /wayfinder"), "Writes the spec from the grilling."))
       .child(row(t, "04", title(t, "To tickets", "/to-tickets"), "Vertical slices with blocking edges. You approve the breakdown.",
         div().text_size(12).text_color(t.muted).child("Asks you to approve")))

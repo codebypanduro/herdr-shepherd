@@ -52,7 +52,7 @@ export const ROLE = { triage: "triager", grill: "griller", spec: "planner", tick
 
 /** A working task goes stuck past its stage's limit (minutes); workflow.json's stuckMinutes wins.
  *  The clock restarts at the person's last answer in the stage (Grill waits on them between questions). */
-export const STUCK_MIN = { triage: 40, grill: 30, spec: 60, tickets: 60, implement: 50, review: 25, ci: 20, proof: 20 };
+export const STUCK_MIN = { triage: 40, grill: 30, spec: 120, tickets: 60, implement: 50, review: 25, ci: 20, proof: 20 };
 
 /** Machine load limits (percent) when the workflow sets none. Same defaults as `shep room`
  *  (shepherd/bin/shep.mjs): change both together. */

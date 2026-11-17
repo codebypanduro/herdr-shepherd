@@ -46,6 +46,7 @@ const PR_STALE_MS = 30000; // gh pr view, for the PR card's checks
 const PROOF_STALE_MS = 15000;
 const LOAD_MS = 15000; // the status bar's machine load
 const CHAT_MAX = 500; // History keeps the newest lines
+const QINDEX = new WeakMap(); // questions array → questionIndex(), so it is worked out once per load
 
 /** Task status → board status. Queued, paused and parked read as idle (grey). */
 const TASK_STATUS = { working: "working", blocked: "blocked", done: "done" };
@@ -235,17 +236,36 @@ export default class Shepherd extends View {
 
   // ---- questions -------------------------------------------------------------------------
 
+  /** Per questions array (one per load), worked out once: each grilling question's number in its
+   *  task's grilling (file order: shep only appends) and each task's answers as [asked, answered] ms. */
+  questionIndex(questions = this.state().questions ?? []) {
+    const memo = QINDEX.get(questions);
+    if (memo) return memo;
+    const grillNo = new Map(), answers = new Map(), count = new Map();
+    for (const q of questions) {
+      if (q.kind === "grill") { const n = (count.get(q.task) ?? 0) + 1; count.set(q.task, n); grillNo.set(q.id, n); }
+      if (q.answered) {
+        if (!answers.has(q.task)) answers.set(q.task, []);
+        answers.get(q.task).push([Date.parse(q.asked) || 0, Date.parse(q.answered) || 0]);
+      }
+    }
+    const idx = { grillNo, answers };
+    QINDEX.set(questions, idx);
+    return idx;
+  }
+
   /** Open questions of the shown space, oldest first, each with its task as taskObj. */
   questions() {
     const repo = this.repo();
     if (!repo) return [];
     const { tasks, questions } = this.state();
     const pending = new Set(shared(PENDING) ?? []);
+    const { grillNo } = this.questionIndex(questions ?? []);
     return (questions ?? [])
       .filter((q) => q.answer == null && !pending.has(`${repo.key}#${q.id}`))
       .map((q) => ({ ...q, taskObj: tasks.find((x) => x.id === q.task) ?? null,
         // A grilling question's number in its task's grilling (they come one at a time, no limit).
-        grillNo: q.kind === "grill" ? questions.filter((x) => x.task === q.task && x.kind === "grill" && Number(x.id.slice(1)) <= Number(q.id.slice(1))).length : null }))
+        grillNo: grillNo.get(q.id) ?? null }))
       .sort((a, b) => (Date.parse(a.asked) || 0) - (Date.parse(b.asked) || 0));
   }
 
@@ -322,8 +342,8 @@ export default class Shepherd extends View {
     const blockers = (task.blockedBy ?? []).filter((b) => b && !doneIds.has(b));
     // Stuck counts from the stage run's start or the person's last answer in it, whichever is later:
     // time waiting on the person isn't the agent being stuck.
-    const answeredAt = Math.max(0, ...(this.state().questions ?? [])
-      .filter((q) => q.task === task.id && q.answered).map((q) => Date.parse(q.answered) || 0));
+    const answeredAt = Math.max(0, ...(this.questionIndex().answers.get(task.id) ?? [])
+      .filter(([asked]) => asked >= since).map(([, answered]) => answered));
     const minutes = (Date.now() - Math.max(since, answeredAt)) / 60000;
     const limit = this.settings().stuckMinutes[task.stage];
     const stuck = task.status === "working" && !asked && limit != null && minutes > limit;
@@ -339,6 +359,8 @@ export default class Shepherd extends View {
       id: task.id,
       title: task.title ?? task.id,
       stage: STAGES[task.stage] ? task.stage : "spec",
+      // The workflow's skill for the stage where it names one (Grill: /grill-me when picked).
+      skill: this.settings().stages?.[task.stage]?.skill ?? STAGES[task.stage]?.skill ?? "",
       loop: Math.max(1, task.loop ?? 1),
       maxLoops: Math.max(1, task.maxLoops ?? MAX_LOOPS),
       status,

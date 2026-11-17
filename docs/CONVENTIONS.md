@@ -67,7 +67,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
     "from": "t5 implementer", "text": "…", "options": ["…"], "recommended": "…",
     "why": "one line: why the recommended one (grilling questions)",
     "tickets": [{ "key": "A", "title": "…", "brief": "…", "blockedBy": ["…keys"] }],
-    "asked": "2026-11-17T10:12:00Z", "answer": null
+    "asked": "2026-11-17T10:12:00Z", "answer": null, "answered": "<ISO time shep answer recorded it; the stuck clock restarts there>"
   }]
 }
 ```
@@ -93,7 +93,7 @@ Every line the board sends is also kept in chat.jsonl with `shep say --from you`
 
 Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). They never talk to the person.
 
-Planners report with `grill <id>: <path>` (one grilling question, `{q, options, recommended, why}` in `grill-<n>.json`; Shepherd asks it with `shep ask --kind grill --question <path>` and sends the answer back as `<qid> answer: <text>`), `grilled <id>: <path>` (the grilling is over: `grilling.md`), `spec <id>: <path>` and `tickets <id>: <path>`. Plan files live in `.herdr/shepherd/plans/<id>/`. A grilling question is an ordinary question of kind `grill`, answered with `answer <qid>: …` like any other; there are no rounds.
+Planners report with `grill <id>: <path>` (one grilling question, `{q, options, recommended, why}` in `grill-<n>.json`; Shepherd asks it with `shep ask --kind grill --question <path>` and sends the answer back as `grill-<n> answer: <text>`), `grilled <id>: <path>` (the grilling is over: `grilling.md`), `spec <id>: <path>` and `tickets <id>: <path>`. Plan files live in `.herdr/shepherd/plans/<id>/`. A grilling question is an ordinary question of kind `grill`, answered with `answer <qid>: …` like any other; there are no rounds.
 
 ## Workflow: `shepherd/workflow.json` (per person) and `.herdr/orchestra.json` (per space)
 
