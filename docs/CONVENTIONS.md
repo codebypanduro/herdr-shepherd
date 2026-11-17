@@ -90,6 +90,8 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 | `re HRD-144: why did loop 1 fail?` | a question or note about one task, from its Overview's Ask field; Shepherd answers with `shep say --task HRD-144` (forwarding an instruction to the task's agent), so the reply shows in the task's Comments and the History |
 | anything else | a normal message to Shepherd |
 
+With no Shepherd in the space, a line isn't sent or dropped: it waits in shared `shepherd.queued` (`[{id, space, line, task, at}]`) while the mod starts one, and the bar sends it once that Shepherd is up (see RECIPE "Starting Shepherd"); it's recorded then. Whether start.sh can run on a machine is shared as `shepherd.startable` (`{"<machine, '' here>": {dir, path} | {reason, unreachable, missing}, at}`), and a start in progress as `shepherd.starting` (`{space id: ms}`).
+
 Every line the board sends is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause, status and `re` with their task). A task's Overview shows the chat lines with its task among its Comments.
 
 Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). They never talk to the person.

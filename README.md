@@ -51,7 +51,7 @@ Merge the `layout:shepherd` section of `keys.json` into `~/.config/herdr-app/key
 ❯ Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/codebypanduro/herdr-shepherd. Clone it and link mods/shepherd and layouts/shepherd.json instead of copying them.
 ```
 
-To start a space's Shepherd, run `~/code/herdr-shepherd/shepherd/start.sh` in a terminal of that space (or **Start Shepherd** in Space settings). It needs `node`, `hc`, `claude` and `git`, and `gh` for PRs. Your settings go to `shepherd/workflow.json` (made from `workflow.example.json`, git-ignored).
+To start a space's Shepherd, click **Start Shepherd** on the tab bar's Shepherd pill (also in the bar, History and Space settings; a message written with no Shepherd starts one too), or run `~/code/herdr-shepherd/shepherd/start.sh` in a terminal of that space. On another machine it needs a checkout there: **Set up Shepherd on <machine>** clones this repo into `~/.herdr-shepherd` on it after asking. It needs `node`, `hc`, `claude` and `git`, and `gh` for PRs. Your settings go to `shepherd/workflow.json` (made from `workflow.example.json`, git-ignored).
 
 ## Sharing
 
