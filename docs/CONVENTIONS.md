@@ -66,6 +66,10 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
 }
 ```
 
+## The chat: `.herdr/shepherd/chat.jsonl`
+
+The History window's lines, one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd, Shepherd for everything it tells the person.
+
 ## Talking to Shepherd
 
 The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line>"`:

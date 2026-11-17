@@ -5,15 +5,12 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { props, terminals, closeOverlay, run } from "herdr";
-import { STAGES, ROLE, MONO, age, palette } from "./common.js";
-
-const money = (n) => `$${(n ?? 0).toFixed(2)}`;
-const kTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n ?? 0));
+import { STAGES, ROLE, MONO, age, palette, money, kTokens } from "./common.js";
 
 export function renderSteer(m) {
   const t = palette();
   const p = props() ?? {};
-  const task = (m.state().tasks ?? []).find((x) => x.id === p.task);
+  const task = m.taskById(p.task);
   const root = v_flex().id("shepherd-steer").size_full().p(4).text_color(t.foreground).text_size(12.5);
   if (!task) return root.child(div().p(10).text_color(t.dim).child(m.error() ?? "Reading the task…"));
   const close = () => closeOverlay(p.overlay);
@@ -49,7 +46,7 @@ export function renderSteer(m) {
   const input = (mode) => (cx) => { m.steerMode = mode; m.steerInput.set_value(""); m.steerInput.focus(); cx.notify(); };
 
   return root.child(head)
-    .child(item("pause", paused ? "▶" : "⏸", paused ? "Resume" : "Pause", "P", canPause, () => { m.togglePause(task); close(); }))
+    .child(item("pause", paused ? "▶" : "⏸", paused ? "Resume" : "Pause", "P", canPause, () => m.togglePause(task)))
     .child(item("redirect", "↪", "Redirect…", "R", true, input("redirect")))
     .child(item("context", "+", "Add context…", "C", true, input("context")))
     .child(item("status", "?", "Ask for status", "S", true, () => { close(); m.askStatus(task); }))
@@ -61,7 +58,7 @@ export function renderSteer(m) {
 function termInfo(m) {
   const p = props() ?? {};
   const term = terminals().find((x) => x.address === p.terminal) ?? null;
-  const task = p.task ? (m.state().tasks ?? []).find((x) => x.id === p.task) ?? null : null;
+  const task = m.taskById(p.task);
   return { p, term, task };
 }
 

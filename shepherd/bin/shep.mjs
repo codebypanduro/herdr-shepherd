@@ -19,11 +19,14 @@
 //            grilling: --kind grill --round 2 --questions <file.json>   [{q, options:[…], recommended, why}]
 //            approval: --kind approve --tickets <file.json>             [{key, title, brief, blockedBy:[keys]}]
 //   shep answer <qid> "<answer>"      records the person's answer; the question leaves Needs you
-//   shep room [--wait]                is this machine under the workflow's CPU and memory limits? exit 0 yes, 3 no;
-//                                     --wait: check every 15 s until there is room (run it in an hc terminal)
+//   shep room [--wait] [--workflow f] is this machine under the workflow's CPU and memory limits? exit 0 yes, 3 no,
+//                                     1 if load.sh failed; --wait: check every 15 s until there is room (run it in
+//                                     an hc terminal). It measures the machine shep runs on: Shepherd's, which is the
+//                                     space's machine when start.sh ran in a terminal of that space.
+//   shep say [--from shepherd|you] [--task T-3] "<text>"   a line of the History (chat.jsonl beside tasks.json)
 //   shep get <id> | shep ls
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -274,12 +277,15 @@ switch (cmd) {
     // Limits: the person's workflow ($SHEP_WORKFLOW or --workflow), the space's orchestra.json on top.
     const read = (f) => { try { return f && existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {}; } catch { return {}; } };
     const wf = typeof opt.workflow === "string" ? opt.workflow : process.env.SHEP_WORKFLOW;
+    // Defaults match LIMITS in mods/shepherd/common.js: change both together.
     const limits = { maxCpu: 80, maxMem: 85, ...read(wf).limits, ...read(join(dirname(dirname(file)), "orchestra.json")).limits };
     const loadSh = join(dirname(fileURLToPath(import.meta.url)), "load.sh");
     const sample = () => {
-      const out = execFileSync("sh", [loadSh], { encoding: "utf8" });
-      const [, cpu, mem] = out.match(/cpu (\d+) mem (\d+)/) ?? [];
-      return { cpu: Number(cpu), mem: Number(mem) };
+      let out;
+      try { out = execFileSync("sh", [loadSh], { encoding: "utf8" }); } catch (e) { die(`load.sh failed: ${e.message.split("\n")[0]}`, 1); }
+      const m = out.match(/cpu (\d+) mem (\d+)/);
+      if (!m) die(`load.sh gave no numbers: ${out.trim()}`, 1);
+      return { cpu: Number(m[1]), mem: Number(m[2]) };
     };
     const check = () => {
       const l = sample();
@@ -292,10 +298,20 @@ switch (cmd) {
     const timer = setInterval(() => { if (check()) { clearInterval(timer); process.exit(0); } }, 15000);
     break;
   }
+  case "say": {
+    // Appends (never rewrites), so the board and Shepherd can both add lines without losing one.
+    const text = args.join(" ").trim();
+    if (!text) die("say [--from shepherd|you] [--task T-3] \"<text>\"");
+    const from = opt.from === "you" ? "you" : "shepherd";
+    const line = { at: now(), from, text, ...(typeof opt.task === "string" ? { task: opt.task } : {}) };
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(join(dirname(file), "chat.jsonl"), JSON.stringify(line) + "\n");
+    break;
+  }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;
   case "ls":
     for (const t of need().tasks) console.log(`${t.id}\t${t.stage}\t${t.status}\tloop ${t.loop}/${t.maxLoops}\t${t.title}`);
     break;
   default:
-    die("commands: init add ready start end loop set finding ask answer room get ls (see the top of shep.mjs)");
+    die("commands: init add ready start end loop set finding ask answer room say get ls (see the top of shep.mjs)");
 }

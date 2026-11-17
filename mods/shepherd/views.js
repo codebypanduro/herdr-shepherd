@@ -3,15 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { shared } from "herdr";
-import { STAGES, ORDER, MONO, palette, stuckColor } from "./common.js";
-import { tint } from "./detail.js";
-
-const statusColor = (t, s) => t[s] ?? t.idle;
-
-const loopDots = (t, c) => h_flex().gap(3).children(Array.from({ length: c.maxLoops }, (_, i) => {
-  const n = i + 1;
-  return div().size(6).rounded(2).bg(n < c.loop ? t.muted : n === c.loop ? statusColor(t, c.status) : t.raised);
-}));
+import { STAGES, ORDER, MONO, SELECTED, palette, stuckColor, tint, statusColor, loopDots } from "./common.js";
 
 /** Rows react like cards: click opens the task, right-click steers it. */
 const rowActions = (m, el, c) => el
@@ -21,7 +13,7 @@ const rowActions = (m, el, c) => el
 export function renderPipeline(m) {
   const t = palette();
   const cards = m.pipelineOrder(m.cards().filter((c) => c.task));
-  const selected = shared("shepherd.selected");
+  const selected = shared(SELECTED);
   const CELL = 64;
   const TASK_W = 240;
 
@@ -58,7 +50,7 @@ export function renderPipeline(m) {
       .child(div().truncate().text_size(11.5).text_color(c.stuck ? stuckColor(t) : c.status === "blocked" ? t.blocked : t.muted)
         .child(c.stuckText ?? c.note)))
     .children(ORDER.map((s) => cell(c, s)))
-    .child(h_flex().w(54).flex_none().justify_end().child(loopDots(t, c)));
+    .child(h_flex().w(54).flex_none().justify_end().child(loopDots(t, c, 2)));
 
   return v_flex().id("shepherd-pipeline").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
     .child(m.header("pipeline", `${m.space()?.name ?? "—"} · ${cards.length} task${cards.length === 1 ? "" : "s"}`))
@@ -126,7 +118,7 @@ export function renderDeps(m) {
         : [div().flex().items_center().px(2).font_family(MONO).text_size(13).text_color(t.dim).child("→"), node(c, `dep-${i}-${j}`)]))));
 
   return v_flex().id("shepherd-deps").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
-    .child(m.header("pipeline", `${m.space()?.name ?? "—"} · ${cards.length} task${cards.length === 1 ? "" : "s"}`))
+    .child(m.header("dependencies", `${m.space()?.name ?? "—"} · ${cards.length} task${cards.length === 1 ? "" : "s"}`))
     .child(v_flex().id("deps-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).gap(10)
       .child(div().text_size(12).text_color(t.muted).child("Tickets that wait on other tickets. A chain only moves when the ticket on the left is done."))
       .when(rows.length === 0, (el) => el.child(div().pt(40).flex().justify_center().text_size(13).text_color(t.dim)

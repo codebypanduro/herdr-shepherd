@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, ROLE, groupColor, stageGroup, age, palette } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, palette, tint, money, kTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 
@@ -13,8 +13,7 @@ export const TABS = ["overview", "review", "changes", "files", "proof"];
 const TAB_TITLES = { overview: "Overview", review: "Review", changes: "Changes", files: "Files", proof: "Proof" };
 const BUILD = ["implement", "review", "ci", "proof"];
 
-/** A theme color with alpha, for tints (theme colors are #rrggbb). */
-export const tint = (c, a) => (/^#[0-9a-f]{6}$/i.test(c) ? `${c}${Math.round(a * 255).toString(16).padStart(2, "0")}` : c);
+export { tint };
 
 const ms = (r, now) => Math.max(0, (Date.parse(r.end ?? "") || now) - (Date.parse(r.start ?? "") || now));
 function dur(x) {
@@ -23,11 +22,9 @@ function dur(x) {
   const m = Math.round(s / 60);
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
-const money = (n) => `$${(n ?? 0).toFixed(2)}`;
-const kTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n ?? 0));
 
 export function closeDetail() {
-  setShared("shepherd.selected", null);
+  setShared(SELECTED, null);
   run("layout.hide", { id: "detail" });
 }
 

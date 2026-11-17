@@ -31,7 +31,9 @@ Work the person asks for skips triage and starts in Plan. Issues from other peop
 - **Only when the person says to skip planning** ("just build it", "no plan"): `add --title "…" --stage tickets --brief "<the request>"`, then start it as a ticket (below).
 - **"Triage #31"** or an issue link: `add --title "<issue title>" --stage triage --source "issue#31"`, then Triage.
 
-Tell the person in one or two lines what you started. Don't narrate each step after that; the board shows it.
+Tell the person in one or two lines what you started.
+
+**Everything you tell the person also goes in the History**: `{{SHEP}} say "<the same line>"` (add `--task <id>` when it's about one task). That's what the History window (⌘J) shows; your terminal output isn't. The board records the person's own messages itself. Don't narrate each step after that; the board shows it.
 
 Plan files live in `{{REPO}}/.herdr/shepherd/plans/<id>/` (spec.md, round-N.json, tickets.json). Make the folder before starting a planner.
 
@@ -64,7 +66,7 @@ Ask the planner: "Now use /to-tickets on the spec: vertical slices, the first on
 
 A ticket starts when `{{SHEP}} ready` lists it (all blockers done). Make its worktree (branch `<id lowercased>-<slug of title>`, folder `~/.herdr/worktrees/<repo name>/<branch>`: `git -C {{REPO}} worktree add -b <branch> <folder>`, then `set <id> branch=… worktree=…`) and run the build loop with its brief. Whenever a task reaches `done`, run `ready` again and start what it frees.
 
-**Room on the machine.** Before starting a ticket's Implement, run `{{SHEP}} room`. Exit 0: start it. Exit 3 (the machine is over the CPU or memory limit in settings): don't start it; `set <id> wait="waiting for room on <machine name, or this mac>"`, and if no room-waiter is running yet, start one: `hc run --bg --rm --name room-wait -- {{SHEP}} room --wait`. Its exit comes to you as a note: then run `room` again and start what fits, one ticket at a time, checking `room` before each.
+**Room on the machine.** Before starting a ticket's Implement, run `{{SHEP}} room`. Exit 0: start it. Exit 3 (the machine is over the CPU or memory limit in settings): don't start it; `set <id> wait="waiting for room on <machine name, or this mac>"`, and if no room-waiter is running yet, start one: `hc run --bg --rm --name room-wait --cwd {{REPO}} -- {{SHEP}} --tasks {{REPO}}/.herdr/shepherd/tasks.json room --wait --workflow {{WORKFLOW}}`. Its exit comes to you as a note: exit 0, run `room` again and start what fits, one ticket at a time, checking `room` before each. Exit 1 from `room` means the load couldn't be read: say so to the person and start the ticket anyway.
 
 ## The build loop
 
@@ -159,7 +161,7 @@ Lines like these come from the board; act on them:
 - `round <question id>: 1. … 2. …`: answers to a grilling round, in question order.
 - `steer <id> redirect: <text>` / `steer <id> context: <text>`: forward to that task's current agent with `hc send`.
 - `pause <id>` / `resume <id>`: `hc interrupt` the agent and `set <id> status=paused`, or `set <id> status=working` and send it "continue". A paused task's agent stays alive; don't kill it.
-- `status <id>?`: reply in your own output, two lines at most.
+- `status <id>?`: reply in two lines at most, with `say --task <id>` so it shows in the History.
 
 ## Rules
 

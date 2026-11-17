@@ -77,8 +77,8 @@ Each group's label sits above its first column, and the column header has a 2px 
 **Status bar** (24px, mono 11px `dim`): herdr-core · <machine or local>, implement model, review model, max loops, then "cpu 34% ≤ 80%" and "mem 61% ≤ 85%": the space's machine now against the workflow's limits, red when over (read every 15 s).
 
 **Overlays.**
-- **History window** (⌘J, 760px): the full chat. Your messages are in a tinted box with ❯. Shepherd's start with ⏺, and events with ⎿ and the task id in its tone color. Questions appear inline with answer buttons.
-- **Terminal** (T, a 900×640 window): a 40px title bar (status dot, address, role · model · task, where it runs, **Keep as tab** for a sub-agent without a pane, **Steer**, ✕), the agent's real terminal, and a 30px footer with time in stage, tokens and cost. Drag it by the title bar.
+- **History window** (⌘J, the bar's **History ⌘J** button, or clicking the bar's last-event line; a 760px dialog, 85% of the window high): a 44px header (Shepherd's status dot, "Shepherd · <space>", its address and the message count, an amber "N waiting on you" chip that opens Needs you, esc), the full chat oldest first, scrolled to the newest, and a ❯ input at the bottom that talks to Shepherd. Your messages are in a tinted box with ❯. Shepherd's start with ⏺, and events with ⎿ and the task id in its tone color (each stage run's start, then its result and note). Questions appear inline with answer buttons (the recommended one marked); grilling rounds list their questions with "Answer round N in Needs you →"; answered ones show "↳ you: <answer>".
+- **Terminal** (T, a 900×640 window; the title bar holds the keyboard when it opens: S steers, Esc closes): a 40px title bar (status dot, address, role · model · task, where it runs, **Keep as tab** for a sub-agent without a pane, **Steer**, ✕), the agent's real terminal, and a 30px footer with time in stage, tokens and cost. Drag it by the title bar.
 - **Steer menu** (⋯, S or right-click; 290px popup): Pause/Resume (P), Redirect… (R), Add context… (C), Ask for status (S), Open terminal (T), Open task (↵). Redirect and context open a text field: "Send to t6" (Enter sends). Ask for status sends `status <id>?` and opens Shepherd's terminal, where the reply appears.
 - **Peek**: hover a card for 380 ms to see its terminal's last lines.
 - **Digest** (D, a 720×480 dialog): "Today · <space> · Tue 17 Nov"; shipped, in flight, waiting on you (with the oldest wait), today's spend and tokens; then Shipped, Stuck, Most expensive (with a bar) and "Needed more than one loop". Today counts tasks with a stage run since local midnight; rows open the task.
@@ -96,7 +96,7 @@ Each group's label sits above its first column, and the column header has a 2px 
 - **Triage.** Issues from other people start in Triage (`/triage`). Shepherd asks you for a label (needs-info / ready-for-agent / ready-for-human / wontfix) and recommends one.
 - **Spec.** Work you ask for skips triage and starts in Spec (`/to-spec`; `/wayfinder` when it's too big for one session). Grilling rounds come to you as one card per round.
 - **Tickets.** `/to-tickets` proposes vertical slices with blocking edges, the first one a prefactor. You approve or ask to merge them. The tickets appear in Tickets as ready-for-agent, or "blocked by X".
-- **Build loop.** A ticket starts when its blockers are done **and** its space's machine is under the CPU and memory limits (`shep room`); otherwise Shepherd sets its note to "waiting for room on vps" and runs `shep room --wait` in an hc terminal, whose exit tells it to try again. Then Implement (`/implement`) → Code review (`/code-review`) → CI (the space's command) → Proof (headless browser: screenshots and a recording).
+- **Build loop.** A ticket starts when its blockers are done **and** its space's machine is under the CPU and memory limits (`shep room`, measured where Shepherd runs: the space's machine when start.sh ran in a terminal of that space, as it should); otherwise Shepherd sets its note to "waiting for room on vps" and runs `shep room --wait` in an hc terminal, whose exit tells it to try again. Then Implement (`/implement`) → Code review (`/code-review`) → CI (the space's command) → Proof (headless browser: screenshots and a recording).
   - A review finding or a failing check sends the ticket back to Implement and uses a loop.
   - After the last loop Shepherd asks you: One more loop / Park it / I'll take it.
 - **Ship.** On a pass Shepherd opens a PR and asks to merge. Merge squashes it and removes the branch and worktree. Send back returns the ticket to Implement.
@@ -119,12 +119,14 @@ Each group's label sits above its first column, and the column header has a 2px 
 - J / K (or ↓ / ↑) to move between cards, ↵ to open one, Esc to close it
 - A to accept the recommended answer (or Merge / Approve)
 - S steer, P pause, T terminal
-- C new task
-- D digest
+- C new task (the bar takes the keyboard with "add " typed)
+- D digest (again: closes it)
 - N new space, F new folder (slice 8)
 - 1–5 task tabs
 - Esc closes the top overlay
-- ⌘⇧D digest, ⌘⌥1–4 the four views (keys.json)
+- ⌘⇧D digest, ⌘⌥1–4 the four views, ↓ / ↑ like J / K: not in the design, added for this build
+- Not built: R (reply to the next question), W (workflow settings), U (weekly usage)
+- Esc closes, in order: the steer popup, digest or History (Herdr closes the top dialog or popup), the terminal window (only while its title bar has the keyboard), then the open task, then the keyboard focus on the board
 
 **Stuck.** A working task goes stuck past its stage's limit: triage 40m, spec 2h, tickets 1h, implement 50m, review 25m, CI 20m, proof 20m (`stuckMinutes` in workflow.json; the space's orchestra.json wins). Time in stage counts from the stage run's start in tasks.json.
 
@@ -141,7 +143,8 @@ Each group's label sits above its first column, and the column header has a 2px 
   - the status bar (px 24)
 - **Shepherd agent**: one per space, started by `shepherd/start.sh [--space <id>] [repo]`: `hc run --bg --keep --outlive-parent --label herdr.space=<id> --label herdr.tab=shepherd-<id> --label herdr.role=shepherd --label shepherd.dir=<repo> -- claude --model <workflow shepherd.model> --append-system-prompt-file <PROMPT.md with paths filled in>`. It changes tasks.json only through `shepherd/bin/shep.mjs`. It starts sub-agents with `hc run --bg` and labels them (see CONVENTIONS), reads their reports from its input (`<hc from=…>`), and writes task state to `.herdr/shepherd/tasks.json` in the repo.
 - **Overlays** are the same mod with other props: the steer menu (`openOverlay` popup, `{panel:"steer", task}`), the digest (dialog, `{panel:"digest"}`), and the terminal window (`kind:"window"`, key `shepherd-terminal`, a column layout: `{panel:"term", terminal, task}` 40px, `{terminal}`, `{panel:"termfoot", …}` 30px).
-- **Keys**: `keys.json` in this repo has the `layout:shepherd` section (⌘K palette, ⌘⇧D digest, ⌘⌥1–4 views as `shepherd.<command>`); merge it into `~/.config/herdr-app/keys.json`. Plain letters (J K G S P T A C D 1–5 ↵ Esc) are the board's own `on_key_down`, only while the board holds the keyboard.
+- **Keys**: `keys.json` in this repo has the `layout:shepherd` section (⌘K palette, ⌘J History, ⌘⇧D digest, ⌘⌥1–4 views as `shepherd.<command>`); merge it into `~/.config/herdr-app/keys.json`. Plain letters (J K G S P T A C D 1–5 ↵ Esc) are the board's own `on_key_down`, only while the board (not Needs you) holds the keyboard. `mod.json` has `"focusable": true`, so `pane.go` and a closing popup hand the board the keyboard back (`"focus"` from `nextCommand()`).
+- **History** reads `.herdr/shepherd/chat.jsonl` (`shep say`, appended): the board records every line it sends Shepherd (bar, History input, steer, pause, status), and Shepherd records what it tells the person. Events and questions come from tasks.json.
 - **Mods** read `agents()`, `terminals()` (parent, labels), `spaces()`, `machines()` and `watchFolder()` on the tasks file. They answer questions with `hc send <shepherd> …`. Commands used: `terminal.peek`, `terminal.keep`, `terminal.park`, `tab.new`, `app.palette`, `space.new {machine, folder}`, `layout.show/hide`, `notify`, `playSound("blocked")`, `openOverlay`.
 - **Programs run**: `git worktree`, `gh pr` (PR, checks, merge), `shepherd/bin/load.sh` (CPU from `ps` and memory from `vm_stat` on macOS, `/proc/stat` and `/proc/meminfo` on Linux) through `exec … {on: machine}` for the status bar and through `shep room` for Shepherd, the space's CI command, and Claude or Codex for usage.
 
@@ -174,10 +177,12 @@ Each group's label sits above its first column, and the column header has a 2px 
 - Proof screenshots are copied to `~/.config/herdr-app/data/shepherd-proof/` because `image()` only reads under the app's home; remote spaces show checks but not screenshots.
 - The PR card shows GitHub's checks from `gh pr view --json statusCheckRollup`, plus Shepherd's own CI and Proof results.
 - `shep`'s own path option is `--tasks`; `--file` belongs to `finding add` (the finding's file).
-- Plain-letter keys in `keys.json` would also fire while you type in the bar: the board takes them itself with a focus handle (`track_focus` + `on_key_down`), focusing itself when the layout shows and when clicked. Click the board before using them if the bar or a window has the keyboard.
+- Plain-letter keys in `keys.json` would also fire while you type in the bar: the board takes them itself with a focus handle (`track_focus` + `on_key_down`) when clicked or handed `"focus"`. It doesn't take the keyboard on load, so a reload never steals it from the bar or a terminal. Needs you gets no board keys at all: its reply fields would bubble into them.
+- C asks the bar for the keyboard with `run("shepherd.focus-bar")`: a mod command reaches every shown copy, and only the bar acts on it.
+- D and ⌘J toggle through shared `shepherd.digestOpen` / `shepherd.historyOpen` (the open copy's overlay id, cleared in its `close()`). If an overlay goes without `close()`, the next press only clears the stale id; press again.
+- Answers aren't chat lines: the History shows them under their question. Shepherd's own terminal output isn't the History either; only what it records with `shep say`.
 - A popup opened from a key or a `shepherd.<command>` can't use the pointer (it may be outside the window): the steer menu then opens at a fixed spot near the board's top left.
-- The terminal window isn't read-only: Herdr gives the terminal block the keyboard. Its footer says to talk through Shepherd instead.
-- Esc in the terminal window goes to the terminal (agents use it): close it with ✕.
+- The terminal window isn't read-only: Herdr has no read-only terminal block, and clicking into the terminal gives it the keyboard (then Esc goes to the agent: close with ✕). Its footer says to talk through Shepherd instead.
 - `load.sh` reads `ps` %CPU on macOS, a decaying average, not an instant sample; memory counts active + wired + compressed pages.
 - The status bar finds `load.sh` next to Shepherd's workflow file (its `shepherd.workflow` label), so a space without a Shepherd shows the limits without numbers.
 - Hover peek is not built: ⋯ on a label-only card (no task) still opens `terminal.peek`.

@@ -4,10 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay } from "herdr";
-import { STAGES, MONO, age, palette, stuckColor } from "./common.js";
-
-const money = (n) => `$${(n ?? 0).toFixed(2)}`;
-const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n ?? 0));
+import { STAGES, MONO, age, palette, stuckColor, money, kTokens } from "./common.js";
 
 export function renderDigest(m) {
   const t = palette();
@@ -28,12 +25,12 @@ export function renderDigest(m) {
       tokens: runs.reduce((n, r) => n + (r.tokens ?? 0), 0),
       shipped: c.stage === "done" && today(last?.end ?? last?.start),
     };
-  }).filter((x) => x.runs.length || x.c.asked);
+  }).filter((x) => x.runs.length);
 
   const shipped = rows.filter((x) => x.shipped);
   const inFlight = cards.filter((c) => c.status === "working");
-  // Waiting on you: tasks blocked on the person (a question, or Ready to merge), oldest first.
-  const waiting = cards.filter((c) => c.status === "blocked");
+  // Waiting on you: an open question, or Ready to merge (not an agent that is merely blocked).
+  const waiting = cards.filter((c) => c.asked || c.stage === "merge");
   const oldest = waiting.reduce((a, c) => Math.max(a, Date.now() - c.since), 0);
   const spent = rows.reduce((n, x) => n + x.cost, 0);
   const tokens = rows.reduce((n, x) => n + x.tokens, 0);

@@ -3,11 +3,9 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { GROUPS, STAGES, MONO, groupColor, age, palette, stuckColor } from "./common.js";
-import { tint } from "./detail.js";
+import { GROUPS, STAGES, MONO, SELECTED, groupColor, age, palette, stuckColor, tint, statusColor as statusOf, loopDots as dots } from "./common.js";
 
 const COL_MIN = 172;
-const SELECTED = "shepherd.selected";
 const FILTERS = "shepherd.filters";
 
 export function renderBoard(m) {
@@ -17,7 +15,7 @@ export function renderBoard(m) {
   const shown = filters.length ? all.filter((c) => filters.includes(c.status)) : all;
   const selected = shared(SELECTED);
   const now = Date.now();
-  const statusColor = (s) => t[s] ?? t.idle;
+  const statusColor = (s) => statusOf(t, s);
 
   const toggle = (s) => {
     const f = shared(FILTERS) ?? [];
@@ -44,11 +42,7 @@ export function renderBoard(m) {
         .on_click(() => setShared(FILTERS, []))
         .child("✕ clear")));
 
-  const loopDots = (c) => h_flex().gap(3).children(Array.from({ length: c.maxLoops }, (_, i) => {
-    const n = i + 1;
-    const color = n < c.loop ? t.muted : n === c.loop ? statusColor(c.status) : t.raised;
-    return div().size(6).rounded(1).bg(color);
-  }));
+  const loopDots = (c) => dots(t, c);
 
   const card = (c) => {
     const isSel = selected === c.key;

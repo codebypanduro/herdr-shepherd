@@ -4,10 +4,7 @@
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { terminals, run, shared, setShared, exec } from "herdr";
-import { MONO, localId, machineOf, palette } from "./common.js";
-
-const VIEW = "shepherd.view";
-const SWITCH = [["board", "Board"], ["pipeline", "Pipeline"], ["deps", "Dependencies"], ["needs", "Needs you"]];
+import { MONO, VIEW, VIEW_LIST, localId, machineOf, palette } from "./common.js";
 
 export function renderTabBar(m) {
   const t = palette();
@@ -60,7 +57,7 @@ export function renderTabBar(m) {
   }
 
   const seg = h_flex().p(2).rounded(6).bg(t.canvas).border(1).border_color(t.border)
-    .children(SWITCH.map(([key, label]) => h_flex().id(`view-${key}`).h(22).px(10).gap(6).items_center().rounded(4)
+    .children(VIEW_LIST.map(([key, label]) => h_flex().id(`view-${key}`).h(22).px(10).gap(6).items_center().rounded(4)
       .cursor_pointer().text_size(12)
       .bg(view === key ? t.selected : t.canvas).text_color(view === key ? t.foreground : t.dim)
       .hover((s) => s.text_color(t.foreground))
@@ -85,7 +82,7 @@ export function renderTabBar(m) {
       .child("+"))
     .child(div().flex_1())
     .child(seg)
-    .child(button("open-digest", [div().child("Digest"), div().font_family(MONO).text_size(10.5).text_color(t.dim).child("D")], () => m.openDigest()))
+    .child(button("open-digest", [div().child("Digest"), div().font_family(MONO).text_size(10.5).text_color(t.dim).child("D")], () => m.toggleDigest()))
     .child(button("open-palette", [div().font_family(MONO).text_size(11).text_color(t.muted).child("⌘K")], () => run("app.palette")))
     .child(button("open-workflow", [div().font_family(MONO).text_color(t.dim).child("⚙"), div().child("Workflow")],
       // Until the Workflow settings overlay exists, the file itself (this computer's spaces only).

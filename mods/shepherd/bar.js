@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, setShared } from "herdr";
-import { MONO, palette } from "./common.js";
+import { MONO, VIEW, palette } from "./common.js";
 import { answerButton } from "./needs.js";
 
 const WIDTH = 780;
@@ -15,7 +15,7 @@ export function renderBar(m) {
   const sh = m.shepherd();
   const status = sh?.status ?? null;
   const space = m.space();
-  const openNeeds = () => setShared("shepherd.view", "needs");
+  const openNeeds = () => setShared(VIEW, "needs");
 
   const strip = q && h_flex().id("bar-q").w_full().px(14).py(9).gap(8).items_center()
     .bg(t.raised).border_b(1).border_color(t.blocked)
@@ -50,7 +50,17 @@ export function renderBar(m) {
       .child(div().id("bar-input").w_full()
         .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); m.barInput.focus(); })
         .child(Input.new(m.barInput).w_full().h(24).text_size(15).text_color(t.foreground)))
-      .child(div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(sub)));
+      .child(div().id("bar-sub").truncate().font_family(MONO).text_size(10.5).text_color(t.dim).cursor_pointer()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click(() => m.toggleHistory(true))
+        .child(sub)))
+    .child(h_flex().id("bar-history").flex_none().h(32).px(10).gap(6).items_center().rounded(8).cursor_pointer()
+      .border(1).border_color(t.input).text_size(12).text_color(t.foreground)
+      .hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click(() => m.toggleHistory())
+      .child("History")
+      .child(div().px(4).rounded(3).border(1).border_color(t.input).font_family(MONO).text_size(10.5).text_color(t.dim).child("⌘J")));
 
   return v_flex().id("shepherd-bar").w(WIDTH).text_color(t.foreground)
     .when(Boolean(strip), (el) => el.child(strip))
