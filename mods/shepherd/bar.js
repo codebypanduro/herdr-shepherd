@@ -29,6 +29,7 @@ export function renderBar(m) {
     .when(qs.length > 1, (el) => el.child(
       div().id("bar-waiting").px(7).h(22).flex().items_center().rounded(5).cursor_pointer()
         .bg(t.blocked).text_color(t.background).text_size(11).font_semibold()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(openNeeds).child(`${qs.length} waiting`)));
 
   const dot = div().absolute().right(-2).bottom(-2).size(9).rounded(5).border(2).border_color(t.popover)
@@ -44,7 +45,11 @@ export function renderBar(m) {
   const main = h_flex().w_full().h(56).px(12).gap(12).items_center()
     .child(avatar)
     .child(v_flex().flex_1().min_w(0).gap(2)
-      .child(Input.new(m.barInput).w_full().h(24).text_size(15).text_color(t.foreground))
+      // A press the bar doesn't stop starts dragging the floating block: stop it here and focus
+      // the field ourselves, so clicking the line types instead of moving the bar.
+      .child(div().id("bar-input").w_full()
+        .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); m.barInput.focus(); })
+        .child(Input.new(m.barInput).w_full().h(24).text_size(15).text_color(t.foreground)))
       .child(div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(sub)));
 
   return v_flex().id("shepherd-bar").w(WIDTH).text_color(t.foreground)

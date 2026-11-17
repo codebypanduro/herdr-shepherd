@@ -10,6 +10,8 @@ export function answerButton(t, id, text, recommended, onClick) {
     .border(1).border_color(recommended ? t.accent : t.input)
     .bg(recommended ? t.selected : t.raised).text_color(t.foreground).text_size(12)
     .hover((s) => s.bg(t.hover))
+    // In the floating bar an unstopped press would drag the bar instead of clicking.
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_click(onClick)
     .child(text)
     .when(recommended, (el) => el.child(div().text_size(10.5).text_color(t.accent).child("recommended")));

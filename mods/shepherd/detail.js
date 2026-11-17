@@ -133,7 +133,8 @@ function overview(m, task, t) {
         `${STAGES[r.stage]?.title ?? r.stage} · loop ${r.loop ?? 1}`, r.note, r.result === "running" ? null : r.result === "fail" ? "open" : null),
     })),
     ...(task.findings ?? []).map((f) => ({
-      at: 0,
+      // Findings carry no time: place each just after the review run that found it.
+      at: (Date.parse(runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0]?.end ?? "") || 0) + 1,
       el: comment("reviewer", t.ansi5, f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : `loop ${f.loop}`, f.text, f.state),
     })),
   ].sort((a, b) => a.at - b.at).map((c) => c.el);
