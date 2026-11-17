@@ -149,6 +149,9 @@ Each group's label sits above its first column, and the column header has a 2px 
 - Weekly Claude and Codex usage isn't in Herdr; read it from each CLI's usage command, and hide the row when a tool isn't installed on any machine.
 - Don't run `/triage` on tickets made by `/to-tickets`; they are agent-ready.
 - The timeline and digest need real start and end times per stage: Shepherd must record them in tasks.json.
+- Plan purple is `theme().ansi5`: there is no purple theme color, and deriving one from `accent` needs color math the mods don't have.
+- Until Shepherd writes tasks.json (slice 2), the board reads only labels: `shepherd.task` (id), `shepherd.stage`, `shepherd.loop`, optional `shepherd.title`. Time in stage is counted by the mod from when it first sees a terminal in a stage (its `created_ms` on first sight), so it resets when the mod reloads.
+- Herdr writes `jsconfig.json` and `gpui-kit.d.ts` into each mod folder; they are git-ignored.
 
 ## Done when
 

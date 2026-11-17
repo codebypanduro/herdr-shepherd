@@ -2,9 +2,10 @@
 
 Each slice is usable on its own. Check every mod with `herdr-app check` before moving on.
 
-## 1. Board from labels
+## 1. Board from labels ✅
 A layout and a `shepherd` mod that groups `terminals()` with a `shepherd.stage` label into the nine columns, with no Shepherd yet.
 **Done when:** `hc run --label shepherd.task=T1 --label shepherd.stage=review -- sleep 600` shows a card in Code review, and it moves when you relabel it.
+**Built:** `mods/shepherd` (board + a minimal status bar; `panel:"detail"` draws an empty surface). Until slices 3 and 8, the layout uses the shipped `spaces` sidebar and has no floating bar.
 
 ## 2. Shepherd agent, one stage
 `shepherd/PROMPT.md` + `tasks.json`. Shepherd takes a request, writes a task, and runs Implement → Code review with up to 3 loops.

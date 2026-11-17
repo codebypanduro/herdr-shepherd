@@ -5,7 +5,6 @@
     "width": 1,
     "color": "border"
   },
-  "preview": "layouts/shepherd.svg",
   "children": [
     {
       "id": "sidebar",
@@ -20,7 +19,7 @@
           "id": "spaces",
           "type": "block",
           "content": {
-            "mod": "shepherd-spaces"
+            "mod": "spaces"
           }
         }
       ]
@@ -97,16 +96,6 @@
               "panel": "status"
             }
           }
-        }
-      ],
-      "floating": [
-        {
-          "id": "bar",
-          "content": {
-            "mod": "shepherd-bar"
-          },
-          "edge": "bottom",
-          "align": "center"
         }
       ]
     }
