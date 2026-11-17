@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, palette, tint, money, kTokens } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 
@@ -111,11 +111,11 @@ function overview(m, task, t) {
       .child(div().truncate().text_size(10).text_color(t.dim).child(rs.map(({ r }) => STAGES[r.stage]?.title ?? r.stage).join(" · ")));
   };
 
-  const comment = (who, color, where, text, state, fg = t.foreground) => v_flex().gap(4).p(10).rounded(6).bg(t.raised)
+  const comment = ({ who, color, where = null, text, state = null, fg = t.foreground, whereColor = t.dim }) => v_flex().gap(4).p(10).rounded(6).bg(t.raised)
     .child(h_flex().gap(7).items_center()
       .child(div().w(3).h(12).rounded(2).bg(color))
       .child(div().text_size(11.5).font_semibold().child(who))
-      .when(Boolean(where), (el) => el.child(div().font_family(MONO).text_size(10.5).text_color(t.dim).child(where)))
+      .when(Boolean(where), (el) => el.child(div().font_family(MONO).text_size(10.5).text_color(whereColor).child(where)))
       .child(div().flex_1())
       .when(Boolean(state), (el) => el.child(div().px(6).h(18).flex().items_center().rounded(4).border(1)
         .border_color(state === "resolved" ? t.done : state === "fixing" ? t.working : t.blocked)
@@ -126,23 +126,38 @@ function overview(m, task, t) {
   const comments = [
     ...runs.filter((r) => r.note).map((r) => ({
       at: Date.parse(r.end ?? r.start ?? "") || 0,
-      el: comment(`${ROLE[r.stage] ?? r.stage} · ${r.model ?? "agent"}`, RESULT_COLOR(t, r.result),
-        `${STAGES[r.stage]?.title ?? r.stage} · loop ${r.loop ?? 1}`, r.note, r.result === "running" ? null : r.result === "fail" ? "open" : null),
+      el: comment({ who: `${ROLE[r.stage] ?? r.stage} · ${r.model ?? "agent"}`, color: RESULT_COLOR(t, r.result),
+        where: `${STAGES[r.stage]?.title ?? r.stage} · loop ${r.loop ?? 1}`, text: r.note,
+        state: r.result === "running" ? null : r.result === "fail" ? "open" : null }),
     })),
-    // The task's chat (chat.jsonl lines with this task): your `re <id>: …` lines without the prefix,
-    // and what Shepherd said about it (`shep say --task`).
+    // The task's chat (chat.jsonl lines with this task): your `re <id>: …` lines as your text, the
+    // board's other lines (pause, steer, status, answers) as short events, and Shepherd's replies.
     ...m.taskChat(task.id).map((c) => ({
       at: Date.parse(c.at) || now,
-      el: c.from === "you"
-        ? comment("you", t.foreground, c.pending ? "sending…" : ago(c.at, now), String(c.text ?? "").replace(new RegExp(`^re ${esc(task.id)}:\\s*`), ""), null)
-        : comment("shepherd", t.accent, ago(c.at, now), c.text ?? "", null, t.muted),
+      el: chatComment(c, task.id, now),
     })),
     ...(task.findings ?? []).map((f) => ({
       // Findings carry no time: place each just after the review run that found it.
       at: (Date.parse(runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0]?.end ?? "") || 0) + 1,
-      el: comment("reviewer", t.ansi5, f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : `loop ${f.loop}`, f.text, f.state),
+      el: comment({ who: "reviewer", color: t.ansi5, where: f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : `loop ${f.loop}`, text: f.text, state: f.state }),
     })),
   ].sort((a, b) => a.at - b.at).map((c) => c.el);
+
+  function chatComment(c, id, now) {
+    const text = String(c.text ?? "");
+    if (c.from !== "you") return comment({ who: "shepherd", color: t.accent, where: ago(c.at, now), text, fg: t.muted });
+    const asked = text.match(new RegExp(`^re ${escRe(id)}:\\s*([\\s\\S]*)$`));
+    if (asked) {
+      return comment({ who: "you", color: t.foreground, text: asked[1],
+        where: c.failed ? `not kept in the History: ${c.failed}` : c.pending ? "sending…" : ago(c.at, now),
+        whereColor: c.failed ? t.ansi1 : t.dim });
+    }
+    // Lines the board sent about this task: one short line each, like the History's ⎿ events.
+    return h_flex().gap(8).px(2).items_start().font_family(MONO).text_size(11).text_color(t.muted)
+      .child(div().text_color(t.dim).child("⎿"))
+      .child(div().flex_1().min_w(0).child(boardEvent(text, id)))
+      .child(div().flex_none().text_color(t.dim).child(ago(c.at, now)));
+  }
 
   // 120px under the Ask field: the floating bar covers the pane's bottom, and the field is last.
   return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).pb(120).gap(16)
@@ -161,8 +176,17 @@ function overview(m, task, t) {
     .child(askField(m, task, t));
 }
 
-const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const ago = (at, now) => { const x = Date.parse(at ?? ""); return x ? (now - x < 60000 ? "just now" : `${age(now - x)} ago`) : ""; };
+/** A board line about a task (CONVENTIONS "Talking to Shepherd") as a short event. */
+function boardEvent(text, id) {
+  const i = escRe(id);
+  let x;
+  if (new RegExp(`^pause ${i}$`).test(text)) return "paused by you";
+  if (new RegExp(`^resume ${i}$`).test(text)) return "resumed by you";
+  if (new RegExp(`^status ${i}\\?$`).test(text)) return "you asked for status";
+  if ((x = text.match(new RegExp(`^steer ${i} (redirect|context):\\s*([\\s\\S]*)$`)))) return `you ${x[1] === "redirect" ? "redirected" : "added context"}: ${x[2]}`;
+  if ((x = text.match(/^answer [^:]+:\s*([\s\S]*)$/))) return `you answered: ${x[1]}`;
+  return `you: ${text}`;
+}
 
 /** "❯ Ask Shepherd about T-4…" + Send: Enter or Send sends `re T-4: <text>` (main.js askAbout). */
 function askField(m, task, t) {
@@ -180,7 +204,7 @@ function askField(m, task, t) {
     .child(div().id("ask-send").px(10).py(3).rounded(4).bg(t.raised).cursor_pointer()
       .text_size(11).text_color(empty ? t.dim : t.foreground)
       .hover((s) => s.bg(t.hover))
-      .on_click(() => m.askAbout())
+      .on_click((_e, cx) => m.askAbout(cx))
       .child("Send"));
 }
 

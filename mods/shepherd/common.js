@@ -86,6 +86,15 @@ export function age(ms) {
   return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d`;
 }
 
+/** An ISO time as "just now" (under a minute) or "<age> ago"; "" without one. */
+export function ago(at, now = Date.now()) {
+  const x = Date.parse(at ?? "");
+  return x ? (now - x < 60000 ? "just now" : `${age(now - x)} ago`) : "";
+}
+
+/** Text for use inside a RegExp, as is. */
+export const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /** Minutes as the design writes them: 45m, 2h, 1h 20m. */
 export function mins(m) {
   m = Math.max(0, Math.round(m));

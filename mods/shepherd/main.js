@@ -86,7 +86,7 @@ export default class Shepherd extends View {
       // The Overview's "Ask Shepherd about <id>…" field. No placeholder of its own: InputState can't
       // change one, so the detail draws "Ask Shepherd about <id>…" under it while it's empty.
       this.askInput = InputState.new({ placeholder: "" });
-      this.askInput.on("submit", () => this.askAbout());
+      this.askInput.on("submit", (_e, cx) => this.askAbout(cx));
       this.askInput.on("change", (_e, cx) => cx.notify());
       this.askInput.on("focus", () => { this.askFocused = true; });
       this.askInput.on("blur", () => { this.askFocused = false; });
@@ -213,6 +213,7 @@ export default class Shepherd extends View {
       // The chat (History): JSON lines; a half-written last line is skipped until it's whole.
       const chat = await readTextFile(`${repo.dir}/${CHAT}`, { on: repo.machine }).catch(() => null);
       next.chat = (chat ?? "").split("\n").slice(-CHAT_MAX).flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } });
+      this.prunePending(next.chat);
     } catch (e) {
       // Keep the last good state; shep writes atomically, so this is a hand edit gone wrong.
       next = { ...prev, error: `tasks.json: ${e.message ?? e}` };
@@ -309,34 +310,49 @@ export default class Shepherd extends View {
     if (line && this.tell(line)) this.barInput.set_value("");
   }
 
-  /** The Overview's field: `re <id>: <text>` to Shepherd, kept in the chat with the task. */
-  askAbout() {
-    const task = this.selectedTask();
+  /** The Overview's field: `re <id>: <text>` to Shepherd about the task the field's text is for. */
+  askAbout(cx) {
+    const id = this.askTask;
     const text = String(this.askInput.value() ?? "").trim();
-    if (!task || !text) return;
-    const line = `re ${task.id}: ${text}`;
-    if (!this.tell(line, task.id)) return;
-    this.askPending.push({ at: new Date().toISOString(), from: "you", text: line, task: task.id, pending: true });
+    if (!id || !text) return;
+    const line = `re ${id}: ${text}`;
+    if (!this.tell(line, id)) return;
+    // Shown at once; chat.jsonl's copy replaces it (prunePending), or it's marked when recording failed.
+    const p = { at: new Date().toISOString(), from: "you", text: line, task: id, pending: true };
+    this.askPending.push(p);
+    this.lastRecord?.then((err) => { if (err) { p.failed = err; cx.notify(); } });
     this.askInput.set_value("");
-    delete this.askDrafts[task.id];
+    delete this.askDrafts[id];
+    cx.notify();
   }
 
-  /** The field's text belongs to one task: opening another keeps it as a draft and shows that one's. */
-  askFor(task) {
-    if (!this.askInput || this.askTask === task.id) return;
+  /** The field's text belongs to one task: opening another keeps it as a draft and shows that one's.
+   *  Called outside render (render only notices the switch and spawns this). */
+  askFor(id) {
+    if (!this.askInput || this.askTask === id) return;
     if (this.askTask) this.askDrafts[this.askTask] = this.askInput.value();
-    this.askTask = task.id;
-    this.askInput.set_value(this.askDrafts[task.id] ?? "");
+    this.askTask = id;
+    this.askFocused = false; // a hidden or switched field may never send blur
+    this.askInput.set_value(id ? this.askDrafts[id] ?? "" : "");
+  }
+
+  /** Drops lines sent here once chat.jsonl holds them (a line with that text and task, written at or
+   *  after the send, give or take 5 s of clock skew); a line not seen within a minute goes too,
+   *  unless recording it failed, which stays shown as failed. */
+  prunePending(chat) {
+    if (!this.askPending?.length) return;
+    this.askPending = this.askPending.filter((p) => {
+      const sent = Date.parse(p.at);
+      if (chat.some((c) => c.from === "you" && c.task === p.task && c.text === p.text && Date.parse(c.at) >= sent - 5000)) return false;
+      return p.failed || Date.now() - sent < 60000;
+    });
   }
 
   /** chat.jsonl's lines about a task, plus what this copy sent that the file doesn't hold yet. */
   taskChat(id) {
-    const chat = this.state().chat ?? [];
-    // A sent line counts as in the file once a line with its text and task is there; a minute at most.
-    this.askPending = (this.askPending ?? []).filter((p) => Date.now() - Date.parse(p.at) < 60000
-      && !chat.some((c) => c.from === "you" && c.task === p.task && c.text === p.text));
-    return [...chat.filter((c) => c.task === id), ...this.askPending.filter((p) => p.task === id)];
+    return [...(this.state().chat ?? []).filter((c) => c.task === id), ...(this.askPending ?? []).filter((p) => p.task === id)];
   }
+
 
   /** Toast, sound and phone push for each new question. Only the bar alerts, so it happens once. */
   alert(repo) {
@@ -510,9 +526,13 @@ export default class Shepherd extends View {
   record(from, text, task = null) {
     const repo = this.repo();
     const shep = this.shepBin("shep.mjs");
-    if (!repo || !shep) return;
+    // A promise of the error (null when kept), so a caller can show a line that wasn't kept.
+    if (!repo || !shep) { this.lastRecord = Promise.resolve("no shep.mjs: Shepherd has no shepherd.workflow label"); return this.lastRecord; }
     const args = [shep, "--tasks", `${repo.dir}/${TASKS}`, "say", "--from", from, ...(task ? ["--task", task] : []), text];
-    exec("node", args, { on: repo.machine, timeout: 10000 }).catch(() => null);
+    this.lastRecord = exec("node", args, { on: repo.machine, timeout: 10000 })
+      .then((r) => (r.code === 0 ? null : (r.stderr || r.stdout || `shep say exited ${r.code}`).trim()))
+      .catch((e) => String(e?.message ?? e));
+    return this.lastRecord;
   }
 
   /** A line to this space's Shepherd (CONVENTIONS.md "Talking to Shepherd"), kept in the chat. */
@@ -865,7 +885,9 @@ export default class Shepherd extends View {
     if (p.panel === "bar") return renderBar(this);
     if (p.panel === "detail") {
       const task = this.selectedTask();
-      if (task) { this.ensureGit(task, cx); this.askFor(task); }
+      if (task) this.ensureGit(task, cx);
+      // The Ask field follows the open task; its value is switched outside render.
+      if ((task?.id ?? null) !== this.askTask) cx.spawn(async (cx) => { this.askFor(this.selectedTask()?.id ?? null); cx.notify(); });
       // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too), never
       // while typing in the Ask field: its keys bubble up here. A click in the field stops there
       // (detail.js), so this one doesn't take the keyboard from it.
