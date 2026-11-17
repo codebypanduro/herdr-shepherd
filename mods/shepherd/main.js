@@ -599,6 +599,9 @@ export default class Shepherd extends View {
       return;
     }
     if (panel) return;
+    // The spaces copy takes "new-folder"; the board re-sending it here would loop, since every
+    // copy gets every command (the board's own F key calls overlayCommand directly).
+    if (name === "new-folder") return;
     if (this.overlayCommand(name, arg)) return;
     const task = arg ? this.taskById(arg) : this.keyTask();
     if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
