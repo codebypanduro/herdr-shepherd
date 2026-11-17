@@ -50,10 +50,11 @@ export function renderTabBar(m) {
       pills.push(pill(`tab-${tab.id}`, [dot(first.status),
         div().font_family(MONO).text_size(11).child(first.address),
         div().text_color(t.dim).child(task)],
-      { onClick: () => m.openTerminal(first.address, task), onClose: () => run("terminal.park", { terminal: first.address }) }));
+      { onClick: () => m.openTerminal(first.address, task, `${task}'s agent`), onClose: () => run("terminal.park", { terminal: first.address }) }));
     } else {
-      pills.push(pill(`tab-${tab.id}`, [dot(tab.status), div().text_color(t.muted).child(tab.named ? tab.name : "shell")],
-        { onClick: () => first && m.openTerminal(first.address, null) }));
+      const name = tab.named ? tab.name : "shell";
+      pills.push(pill(`tab-${tab.id}`, [dot(tab.status), div().text_color(t.muted).child(name)],
+        { onClick: () => first && m.openTerminal(first.address, null, `The ${name} tab`) }));
     }
   }
 

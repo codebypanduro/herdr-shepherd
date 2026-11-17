@@ -4,7 +4,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, readTextFile, writeTextFile, appHome, openOverlay, terminals, hc } from "herdr";
+import { exec, readTextFile, writeTextFile, appHome, openOverlay, closeOverlay, terminals, hc } from "herdr";
 import { MONO, machineOf } from "./common.js";
 
 export const MACHINE_INFO = "shepherd.machineInfo"; // { "<machine name, '' here>": {cpu, mem, disk, kind, model, tools, at, error} }
@@ -15,18 +15,29 @@ export const SPACE_FOLDERS = "shepherd.spaceFolders"; // { space id: folder id }
 export const NEW_SPACE = "shepherd.newSpace"; // New space's pending { folder, real, before, group, start, at }
 
 /** A choice chip: the selected one is foreground on background, the others muted on an input border. */
-export const chip = (t, id, label, on, onClick, { mono = true } = {}) => div().id(id).h(24).px(9).flex().items_center()
+export const chip = (t, id, label, on, onClick, { mono = true, dim = false } = {}) => div().id(id).h(24).px(9).flex().items_center()
   .rounded(5).border(1).cursor_pointer().text_size(12).when(mono, (el) => el.font_family(MONO))
-  .border_color(on ? t.foreground : t.input).bg(on ? t.foreground : t.background).text_color(on ? t.background : t.muted)
+  .border_color(on ? t.foreground : t.input).bg(on ? t.foreground : t.background).text_color(on ? t.background : dim ? t.dim : t.muted)
   .hover((s) => (on ? s : s.text_color(t.foreground)))
   .on_click(onClick).child(label);
 
-/** A check box with its label. */
-export const check = (t, id, label, on, onClick) => h_flex().id(id).gap(6).items_center().cursor_pointer().text_size(12)
-  .on_click(onClick)
+/** A check box with its label; `disabled` greys it and drops the click. */
+export const check = (t, id, label, on, onClick, { disabled = false } = {}) => h_flex().id(id).gap(6).items_center().text_size(12)
+  .when(!disabled, (el) => el.cursor_pointer().on_click(onClick))
+  .when(disabled, (el) => el.text_color(t.dim))
   .child(div().size(14).flex_none().rounded(3).border(1).flex().items_center().justify_center().text_size(10)
-    .border_color(on ? t.accent : t.input).bg(on ? t.accent : t.background).text_color(t.accent_foreground).child(on ? "✓" : ""))
+    .border_color(disabled ? t.border : on ? t.accent : t.input).bg(disabled ? t.surface : on ? t.accent : t.background)
+    .text_color(t.accent_foreground).child(on && !disabled ? "✓" : ""))
   .child(label);
+
+/** exec that never rejects: a rejection (unreachable machine, timeout) becomes { code: -1, stderr }. */
+export const execSafe = (cmd, args, opts) => exec(cmd, args, opts).catch((e) => ({ code: -1, stdout: "", stderr: String(e?.message ?? e) }));
+
+/** Why a command failed, in one line: stderr's last line, else "exit N". */
+export const failLine = (r) => (r.stderr || "").trim().split("\n").pop() || `exit ${r.code}`;
+
+/** Whether a space (or anything with `machine`) is on that machine (null: this computer). */
+export const onMachine = (s, machine) => (s.machine ?? null) === (machine ?? null);
 
 /** "git@github.com:org/repo.git" → "github.com/org/repo". */
 export const normRemote = (url) => (url ? url.trim().replace(/^(ssh:\/\/)?(git@|https?:\/\/)/, "").replace(/^([^/:]+):/, "$1/").replace(/\.git$/, "") : null);
@@ -55,10 +66,14 @@ export async function shepherdHome(m) {
 }
 
 // On another machine: the login shell's PATH (node, hc and claude often live in ~/.nvm or
-// ~/.local/bin, which a plain `sh -c` lacks), then a shepherd/ folder with start.sh and
+// ~/.local/bin, which a plain `sh -c` lacks; `-lc` first, `-lic` only when that PATH misses one of
+// them, since an interactive shell can stop on a prompt; read after a __P= sentinel so anything a
+// logout prints is ignored), then a shepherd/ folder with start.sh and
 // bin/shep.mjs, found like shepherdHome (through that machine's mods/shepherd link) or at this
 // checkout's path ($1), then the programs start.sh needs. Prints dir= and path=, or no=<reason>.
-const SHEP_CHECK = `P=$("\${SHELL:-sh}" -lic 'printf "\\n%s\\n" "$PATH"' 2>/dev/null </dev/null | tail -n 1)
+const SHEP_CHECK = `lp() { "\${SHELL:-sh}" "$1" 'printf "__P=%s\\n" "$PATH"' 2>/dev/null </dev/null | sed -n 's/^__P=//p' | tail -n 1; }
+has() { ( PATH="$1:$PATH"; for t in node hc claude git; do command -v "$t" >/dev/null 2>&1 || exit 1; done ); }
+P=$(lp -lc); has "$P" || { Q=$(lp -lic); [ -n "$Q" ] && P=$Q; }
 [ -n "$P" ] && PATH="$P:$PATH"
 d=""
 for c in "$HOME/.config/herdr-app/mods/shepherd" "$1/../mods/shepherd"; do
@@ -70,14 +85,15 @@ echo "dir=$d"
 echo "path=$PATH"`;
 
 /** Whether start.sh can run on a machine (null: this computer): { dir, path } (path: the PATH to
- *  run it with there) or { reason }, one line. */
+ *  run it with there) or { reason, unreachable }, one line; `unreachable` when the check itself
+ *  couldn't run there (worth asking again). */
 export async function shepherdOn(m, machine) {
   const h = await shepherdHome(m);
   if (!machine) return h ? { dir: h.dir, path: null } : { reason: "mods/shepherd isn't inside a checkout with shepherd/start.sh" };
-  const r = await exec("sh", ["-c", SHEP_CHECK, "check", h?.dir ?? "/nonexistent"], { on: machine, timeout: 15000 }).catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
+  const r = await execSafe("sh", ["-c", SHEP_CHECK, "check", h?.dir ?? "/nonexistent"], { on: machine, timeout: 15000 });
   const kv = Object.fromEntries((r.stdout ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
   if (kv.dir && kv.path) return { dir: kv.dir, path: kv.path };
-  return { reason: kv.no ?? `couldn't check ${machine}: ${((r.stderr || "").trim().split("\n").pop() || `exit ${r.code}`)}` };
+  return kv.no ? { reason: kv.no } : { reason: `couldn't check ${machine}: ${failLine(r)}`, unreachable: true };
 }
 
 /** The person's workflow: workflow.json, else the example it starts from ({} when neither reads). */
@@ -147,5 +163,12 @@ export const openWorkflow = () => openOverlay({ mod: "shepherd", kind: "dialog",
 export const openPlus = () => openOverlay({ mod: "shepherd", kind: "popup", width: 210, height: 76, props: { panel: "plus" } });
 export const openMachine = (name, atPointer = false) => openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 236,
   props: { panel: "machine", machine: name ?? null }, ...popAt(atPointer) });
+/** The terminal window's key. A window isn't the top dialog or popup, so `overlay.close` without an
+ *  id leaves it open; closing it by this key always works. */
+export const TERM_WINDOW = "shepherd-terminal";
+export const closeTermWindow = (id) => {
+  closeOverlay(TERM_WINDOW);
+  if (id && id !== TERM_WINDOW) closeOverlay(id);
+};
 export const openUsage = (atPointer = false) => openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 150,
   props: { panel: "usage" }, ...popAt(atPointer) });

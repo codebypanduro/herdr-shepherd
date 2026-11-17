@@ -1,11 +1,12 @@
 // The steer menu (a popup, props {panel:"steer", task}) and the terminal window's title bar and
-// footer (props {panel:"term" | "termfoot", terminal, task}). Steering goes through Shepherd:
+// footer (props {panel:"term" | "termfoot", terminal, task, name}). Steering goes through Shepherd:
 // `steer <id> redirect: …`, `steer <id> context: …`, `pause <id>`, `resume <id>`, `status <id>?`.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { props, terminals, closeOverlay, run } from "herdr";
 import { STAGES, ROLE, MONO, age, palette, money, kTokens } from "./common.js";
+import { closeTermWindow } from "./ui.js";
 
 export function renderSteer(m) {
   const t = palette();
@@ -89,20 +90,28 @@ export function renderTermBar(m) {
     .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(11).text_color(t.dim)
       .child(`${m.space()?.machine ?? "this mac"}:${term?.cwd ?? task?.worktree ?? ""}`))
     .when(!pane && Boolean(term), (el) => el.child(button("term-keep", [div().child("Keep as tab")],
-      () => { run("terminal.keep", { terminal: p.terminal }); closeOverlay(p.overlay); })))
+      () => { run("terminal.keep", { terminal: p.terminal }); closeTermWindow(p.overlay); })))
     .when(Boolean(task), (el) => el.child(button("term-steer",
       [div().child("Steer"), div().font_family(MONO).text_size(10).text_color(t.dim).child("S")],
       () => m.openSteer(task.id, false))))
     .child(div().id("term-close").size(24).flex().items_center().justify_center().rounded(5).cursor_pointer()
       .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop)
-      .on_click(() => closeOverlay(p.overlay))
+      .on_click(() => closeTermWindow(p.overlay))
       .child("✕"));
+}
+
+/** What the footer says the window shows: a task's agent, Shepherd itself, or another terminal. */
+function footNote(m, p, term, task) {
+  if (task) return "You talk to the agent through Shepherd: Steer redirects it or adds context.";
+  if (term?.labels?.["herdr.role"] === "shepherd" || (term && term.address === m.shepherd()?.address)) return "Shepherd's own terminal.";
+  const what = p.name ? `${p.name}` : term?.labels?.["shepherd.task"] ? `${term.labels["shepherd.task"]}'s agent` : "A terminal";
+  return `${what} in ${m.space()?.name ?? "this space"}: what you type goes straight to it.`;
 }
 
 export function renderTermFoot(m) {
   const t = palette();
-  const { task } = termInfo(m);
+  const { p, term, task } = termInfo(m);
   const runs = task?.history ?? [];
   const cur = [...runs].reverse().find((r) => r.stage === task?.stage);
   const since = Date.parse(cur?.start ?? "");
@@ -113,7 +122,7 @@ export function renderTermFoot(m) {
     : "";
   return h_flex().id("shepherd-termfoot").size_full().px(14).gap(10).items_center()
     .bg(t.chrome).border_t(1).border_color(t.border).font_family(MONO).text_size(11).text_color(t.dim)
-    .child(div().child(task ? "You talk to the agent through Shepherd: Steer redirects it or adds context." : "Shepherd's own terminal."))
+    .child(div().truncate().child(footNote(m, p, term, task)))
     .child(div().flex_1())
     .child(div().child(right));
 }

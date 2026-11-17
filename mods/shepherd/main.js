@@ -33,6 +33,7 @@ import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "
 import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
 import {
   openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, readWorkflow, shepherdOn,
+  execSafe, failLine, TERM_WINDOW, closeTermWindow,
 } from "./ui.js";
 
 const REFRESH_MS = 5000;
@@ -91,8 +92,8 @@ export default class Shepherd extends View {
     // Keys (J/K, S, P, T, …) go to these copies only while they hold the keyboard, so typing in the
     // bar, a reply field or a terminal never triggers them. The board gets the keyboard when clicked
     // or from "focus" (mod.json focusable: pane.go, or a popup over it closing); popups and the
-    // terminal window's title bar take it when they open.
-    if (!p.panel || ["steer", "detail", "term", "history"].includes(p.panel)) {
+    // terminal window's title bar take it when they open (the footer takes it back when clicked).
+    if (!p.panel || ["steer", "detail", "term", "termfoot", "history"].includes(p.panel)) {
       this.keys = cx.focus_handle();
       if (p.panel === "steer" || p.panel === "term") cx.spawn(async () => { this.keys.focus(); });
       if (p.panel === "history") cx.spawn(async () => { this.historyInput.focus(); });
@@ -420,20 +421,25 @@ export default class Shepherd extends View {
 
   /** shepherd/start.sh for a space, on its machine, in the background (it starts Shepherd in its
    *  own tab). Here the script is this mod's own checkout's, found through the mods/shepherd link;
-   *  on another machine it's that machine's checkout, run with its login shell's PATH (shepherdOn). */
-  startShepherd(space) {
-    if (!space) return;
-    const dir = space.folder || this.repo(space)?.dir;
-    if (!dir) return;
+   *  on another machine it's that machine's checkout, run with its login shell's PATH (shepherdOn;
+   *  `known` is a result already asked for). One start per space at a time on this copy
+   *  (`starting`, which Space settings shows as "Starting…"): start.sh's own check for a running
+   *  Shepherd is check-then-act, so two quick clicks could start two. Resolves when it's done. */
+  startShepherd(space, known = null) {
+    const dir = space ? space.folder || this.repo(space)?.dir : null;
+    const starting = (this.starting ??= new Set());
+    if (!dir || starting.has(space.id)) return Promise.resolve();
+    starting.add(space.id);
     const machine = space.machine ?? null;
     const fail = (body) => notify({ title: "Shepherd didn't start", body, level: "error" });
-    shepherdOn(this, machine).then((s) => {
+    return (async () => {
+      const s = known?.dir ? known : await shepherdOn(this, machine);
       if (!s.dir) return fail(machine ? `${machine}: ${s.reason}` : s.reason);
       const args = [`${s.dir}/start.sh`, "--space", localId(space), dir];
-      const r = machine ? exec("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 60000 })
-        : exec("sh", args, { timeout: 60000 });
-      return r.then((r) => { if (r.code !== 0) fail((r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop()); });
-    }).catch((e) => fail(String(e)));
+      const r = machine ? await execSafe("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 60000 })
+        : await execSafe("sh", args, { timeout: 60000 });
+      if (r.code !== 0) fail(r.code === -1 ? failLine(r) : (r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop());
+    })().catch((e) => fail(String(e?.message ?? e))).finally(() => starting.delete(space.id));
   }
 
   // ---- steering and overlays --------------------------------------------------------------
@@ -486,12 +492,13 @@ export default class Shepherd extends View {
       ...(atPointer ? {} : { at: { x: 420, y: 120 } }) });
   }
 
-  /** An agent's real terminal in a window: a title bar to drag it by, the terminal, a footer. */
-  openTerminal(address, taskId) {
+  /** An agent's real terminal in a window: a title bar to drag it by, the terminal, a footer.
+   *  `name`: what the footer calls a terminal that's neither Shepherd nor a task's (a tab's name). */
+  openTerminal(address, taskId, name = null) {
     if (!address) return;
-    const bar = (panel, px) => ({ type: "block", size: { px }, content: { mod: "shepherd", props: { panel, terminal: address, task: taskId } } });
+    const bar = (panel, px) => ({ type: "block", size: { px }, content: { mod: "shepherd", props: { panel, terminal: address, task: taskId, name } } });
     openOverlay({
-      kind: "window", key: "shepherd-terminal", width: 900, height: 640,
+      kind: "window", key: TERM_WINDOW, width: 900, height: 640,
       layout: { type: "column", children: [bar("term", 40), { type: "block", content: { terminal: address } }, bar("termfoot", 30)] },
     });
   }
@@ -690,11 +697,12 @@ export default class Shepherd extends View {
   }
 
   /** The terminal window's title bar holds the keyboard when the window opens: S steers, Esc closes.
-   *  Clicking into the terminal hands it the keyboard (Herdr has no read-only terminal block). */
+   *  Clicking into the terminal hands it the keyboard (Herdr has no read-only terminal block), and
+   *  Esc then goes to the agent; clicking the title bar or footer takes it back. */
   termKey(e, cx) {
     const p = props() ?? {};
     const k = e.key.toLowerCase();
-    if (k === "escape") closeOverlay(p.overlay);
+    if (k === "escape") closeTermWindow(p.overlay);
     else if (k === "s" && p.task) this.openSteer(p.task, false);
     else return;
     cx.stop_propagation();
@@ -796,7 +804,8 @@ export default class Shepherd extends View {
     if (p.panel === "tabs") return renderTabBar(this);
     if (p.panel === "steer") return renderSteer(this).track_focus(this.keys).on_key_down((e, cx) => this.steerKey(e, cx));
     if (p.panel === "term") return renderTermBar(this).track_focus(this.keys).on_key_down((e, cx) => this.termKey(e, cx));
-    if (p.panel === "termfoot") return renderTermFoot(this);
+    if (p.panel === "termfoot") return renderTermFoot(this).track_focus(this.keys)
+      .on_mouse_down("left", () => this.keys.focus()).on_key_down((e, cx) => this.termKey(e, cx));
     if (p.panel === "digest") return renderDigest(this);
     if (p.panel === "history") return renderHistory(this);
     if (p.panel === "bar") return renderBar(this);

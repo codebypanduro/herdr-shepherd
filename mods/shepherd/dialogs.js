@@ -8,7 +8,7 @@ import {
 } from "herdr";
 import { MONO, palette } from "./common.js";
 import { KINDS } from "./machines.js";
-import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, shepherdOn } from "./ui.js";
+import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, shepherdOn, execSafe, failLine, onMachine } from "./ui.js";
 
 const stop = (_e, cx) => cx.stop_propagation();
 
@@ -73,7 +73,7 @@ function addMachine(m, cx) {
   m.am = { ...m.am, phase: 1, error: null, failedAt: null };
   cx.notify();
   cx.spawn(async (cx) => {
-    const r = await hc(c.args).catch((e) => ({ code: -1, stderr: String(e), stdout: "" }));
+    const r = await hc(c.args).catch((e) => ({ code: -1, stderr: String(e?.message ?? e), stdout: "" }));
     if (r.code === 0) {
       if (m.am.kind) setShared(MACHINE_KINDS, { ...(shared(MACHINE_KINDS) ?? {}), [c.name]: m.am.kind });
       notify({ title: `Added ${c.name}`, body: "Make a new space there, or start agents on it.", level: "info" });
@@ -141,13 +141,14 @@ const norm = (p) => (p ?? "").replace(/\/+$/, "");
 const LOCAL = ""; // this computer's key in m.ns.scans / m.ns.shep
 const keyOf = (machine) => machine ?? LOCAL;
 const onOf = (machine) => (machine ? { on: machine } : {});
-const SCAN_MS = { local: 15000, remote: 10000 };
+const SCAN_MS = { local: 15000, remote: 20000 }; // a remote scan also pays for ssh
 
 // One script, here or on another machine (exec … {on}): prints "home<TAB>$HOME", then one
 // "repo<TAB>path<TAB>origin url<TAB>branch" per git repo under the usual code folders of that
 // home and under the folders that machine's spaces sit in (their siblings: "$@", kept only when
 // inside that home). A folder reached twice (~/code and ~/Code on a case-insensitive disk) is
-// scanned once. Worktrees, .herdr/ and node_modules are skipped; at most 400 repos.
+// scanned once. Worktrees, .herdr/ and node_modules are skipped; at most 400 repos. A repo whose
+// .git is a file (a submodule, an outside worktree) gets its branch from git.
 const SCAN = `h=\${HOME%/}; printf 'home\\t%s\\n' "$h"
 { for r in code src Code Projects projects Developer dev repos work git; do printf '%s\\n' "$h/$r"; done
   for p in "$@"; do case "$p" in "$h"/?*) printf '%s\\n' "$p" ;; esac; done; } | sort -u | { seen=" "; while IFS= read -r d; do
@@ -158,8 +159,8 @@ const SCAN = `h=\${HOME%/}; printf 'home\\t%s\\n' "$h"
   find "$d" -maxdepth 3 -name .git -not -path '*/node_modules/*' -prune 2>/dev/null
 done; } | sed 's#/\\.git$##' | grep -v -e '/\\.herdr/' -e '/worktrees/' | sort -u | head -n 400 | while IFS= read -r r; do
   u=$(git -C "$r" config --get remote.origin.url 2>/dev/null)
-  b=$(sed -n 's#^ref: refs/heads/##p' "$r/.git/HEAD" 2>/dev/null)
-  [ -n "$b" ] || { [ -f "$r/.git/HEAD" ] && b=detached; }
+  if [ -d "$r/.git" ]; then b=$(sed -n 's#^ref: refs/heads/##p' "$r/.git/HEAD" 2>/dev/null); [ -n "$b" ] || b=detached
+  else b=$(git -C "$r" symbolic-ref --short -q HEAD 2>/dev/null || echo detached); fi
   printf 'repo\\t%s\\t%s\\t%s\\n' "$r" "$u" "$b"
 done; true`;
 
@@ -167,14 +168,15 @@ done; true`;
 const nsMachines = () => [{ name: null, label: "this mac" },
   ...machines().filter((x) => x.name && !x.temporary).map((x) => ({ name: x.name, label: x.name, unavailable: x.layout === "unavailable" }))];
 
-/** A folder's real path (symlinks resolved) on its machine, or null when it isn't a folder there. */
+/** A folder's real path (symlinks resolved) on its machine: { real }, { missing } when it isn't a
+ *  folder there, or { error } when the machine didn't answer. */
 const realPath = async (dir, machine) => {
-  const r = await exec("sh", ["-c", 'cd "$1" 2>/dev/null && pwd -P', "real", dir], { ...onOf(machine), timeout: 8000 }).catch(() => null);
-  return r?.code === 0 ? r.stdout.trim() : null;
+  const r = await execSafe("sh", ["-c", 'cd "$1" 2>/dev/null || exit 3; pwd -P', "real", dir], { ...onOf(machine), timeout: 8000 });
+  return r.code === 0 ? { real: r.stdout.trim() } : r.code === 3 ? { missing: true } : { error: failLine(r) };
 };
 
 /** The space already in a folder (by path or real path) on that machine, if any. */
-const spaceIn = (machine, dir, real) => spaces().find((s) => (s.machine ?? null) === machine && s.folder && [dir, real].includes(norm(s.folder)));
+const spaceIn = (machine, dir, real) => spaces().find((s) => onMachine(s, machine) && s.folder && [dir, real].includes(norm(s.folder)));
 
 export function initNewSpace(m, cx, InputState) {
   m.ns = { machine: null, scans: {}, shep: {}, sel: null, folder: "", start: false, error: null, busy: false };
@@ -188,29 +190,38 @@ export function initNewSpace(m, cx, InputState) {
 }
 
 /** Shows a machine's repos: scans it the first time (one exec there with a short timeout), and asks
- *  once whether start.sh can run there. A scan that fails keeps its error for that machine. */
+ *  once whether start.sh can run there. A scan or check that couldn't reach the machine is dropped
+ *  when it's picked again (or Retry), so it asks again. An unavailable machine isn't asked at all. */
 function pickMachine(m, cx, machine) {
   const key = keyOf(machine);
   m.ns = { ...m.ns, machine, sel: null, error: null };
+  if (m.ns.scans[key]?.error) delete m.ns.scans[key];
+  if (m.ns.shep[key]?.unreachable) delete m.ns.shep[key];
   const shep = m.ns.shep[key];
   if (m.ns.start && shep && !shep.dir) m.ns.start = false;
   cx.notify();
+  if (nsMachines().find((x) => x.name === machine)?.unavailable) {
+    const why = `${machine} is unavailable: Herdr can't reach its core right now.`;
+    m.ns.scans[key] = { repos: [], home: null, error: why };
+    m.ns.shep[key] = { reason: why.replace(/\.$/, ""), unreachable: true };
+    m.ns.start = false;
+    return;
+  }
   if (!m.ns.scans[key]) {
     m.ns.scans[key] = { repos: null, home: null, error: null };
     cx.spawn(async (cx) => {
-      const parents = spaces().filter((s) => (s.machine ?? null) === machine && s.folder).map((s) => norm(s.folder).replace(/\/[^/]+$/, ""));
+      const parents = spaces().filter((s) => onMachine(s, machine) && s.folder).map((s) => norm(s.folder).replace(/\/[^/]+$/, ""));
       const timeout = machine ? SCAN_MS.remote : SCAN_MS.local;
-      const r = await exec("sh", ["-c", SCAN, "scan", ...new Set(parents)], { ...onOf(machine), timeout })
-        .catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
+      const r = await execSafe("sh", ["-c", SCAN, "scan", ...new Set(parents)], { ...onOf(machine), timeout });
       const lines = (r.stdout ?? "").split("\n").map((l) => l.split("\t"));
       const home = lines.find((l) => l[0] === "home")?.[1] ?? null;
       if (!home) {
-        const why = (r.stderr || "").trim().split("\n").pop() || `exit ${r.code}`;
+        const why = failLine(r);
         m.ns.scans[key] = { repos: [], home: null, error: `Couldn't reach ${machine ?? "this mac"}: ${/time/i.test(why) ? `no answer in ${timeout / 1000} s` : why}` };
         cx.notify();
         return;
       }
-      const have = new Set(spaces().filter((s) => (s.machine ?? null) === machine).map((s) => norm(s.folder)).filter(Boolean));
+      const have = new Set(spaces().filter((s) => onMachine(s, machine)).map((s) => norm(s.folder)).filter(Boolean));
       const repos = lines.filter((l) => l[0] === "repo" && l[1] && !have.has(l[1])).map(([, path, url, branch]) => ({
         path, rel: path.startsWith(`${home}/`) ? path.slice(home.length + 1) : path, remote: normRemote(url || null), branch: branch ?? "",
       })).sort((a, b) => a.rel.localeCompare(b.rel));
@@ -236,13 +247,16 @@ function typedPath(m) {
   return norm(p.replace(/\/{2,}/g, "/")) || "/";
 }
 
-/** The repos matching the filter, then the typed text as a folder when no repo has that path. */
+/** The repos matching the filter, then the typed text as a folder when it looks like a path (a /, or
+ *  a leading ~) or no repo matches, and no repo has that path. */
 function nsRows(m) {
   const scan = m.ns.scans[keyOf(m.ns.machine)];
-  const q = m.nsFilter.value().trim().toLowerCase();
+  const raw = m.nsFilter.value().trim();
+  const q = raw.toLowerCase();
   const rows = (scan?.repos ?? []).filter((r) => !q || r.rel.toLowerCase().includes(q) || r.path.toLowerCase() === q);
   const typed = typedPath(m);
-  if (typed && !rows.some((r) => r.path === typed)) rows.push({ path: typed, rel: null, typed: true });
+  const pathy = raw.includes("/") || raw.startsWith("~");
+  if (typed && (pathy || !rows.length) && !rows.some((r) => r.path === typed)) rows.push({ path: typed, rel: null, typed: true });
   return rows;
 }
 
@@ -257,12 +271,14 @@ function addSpace(m, cx) {
   m.ns = { ...m.ns, busy: true, error: null };
   cx.notify();
   cx.spawn(async (cx) => {
-    const real = await realPath(dir, machine);
-    if (!real) {
-      m.ns = { ...m.ns, busy: false, error: `${dir} isn't a folder on ${machine ?? "this mac"}.` };
+    const rp = await realPath(dir, machine);
+    if (!rp.real) {
+      const where = machine ?? "this mac";
+      m.ns = { ...m.ns, busy: false, error: rp.missing ? `${dir} isn't a folder on ${where}.` : `Couldn't reach ${where}: ${rp.error}` };
       cx.notify();
       return;
     }
+    const { real } = rp;
     const old = spaceIn(machine, dir, real);
     if (old) {
       run("space.select", { id: old.id });
@@ -270,7 +286,7 @@ function addSpace(m, cx) {
     } else {
       const start = m.ns.start && Boolean(m.ns.shep[keyOf(machine)]?.dir);
       setShared(NEW_SPACE, { machine, folder: dir, real, before: spaces().map((s) => s.id), group: m.ns.folder || null, start, at: Date.now() });
-      run("space.new", { folder: dir, machine: machine ?? "" });
+      run("space.new", { folder: real, machine: machine ?? "" });
     }
     closeOverlay(props()?.overlay);
   });
@@ -279,7 +295,7 @@ function addSpace(m, cx) {
 /** For the sidebar: the space New space just made, if it has shown up. */
 export function findNewSpace(p) {
   const before = new Set(p.before ?? []);
-  return spaces().find((s) => !before.has(s.id) && (s.machine ?? null) === (p.machine ?? null)
+  return spaces().find((s) => !before.has(s.id) && onMachine(s, p.machine)
     && [p.folder, p.real].includes(norm(s.folder))) ?? null;
 }
 
@@ -291,7 +307,9 @@ export function renderNewSpace(m, folders) {
   const rows = nsRows(m);
   const shep = m.ns.shep[keyOf(machine)];
   const canStart = Boolean(shep?.dir);
-  const ok = Boolean(m.ns.sel) && !m.ns.busy;
+  // A ticked Start Shepherd waits for the check on this machine, so it's never dropped unseen.
+  const pending = m.ns.start && shep == null;
+  const ok = Boolean(m.ns.sel) && !m.ns.busy && !pending;
   const row = (r) => h_flex().id(`ns-${r.path}`).gap(10).px(8).py(6).rounded(6).border(1).cursor_pointer()
     .border_color(m.ns.sel === r.path ? t.input : t.surface).bg(m.ns.sel === r.path ? t.hover : t.surface)
     .hover((s) => s.bg(t.hover))
@@ -302,26 +320,27 @@ export function renderNewSpace(m, folders) {
       .child(div().font_family(MONO).text_size(10.5).text_color(t.dim).truncate()
         .child(r.typed ? `a folder on ${where} · checked when you add it` : r.remote ?? "no remote · local only")))
     .when(!r.typed, (el) => el.child(div().font_family(MONO).text_size(10.5).text_color(t.dim).child(r.branch)));
-  const startBox = canStart
-    ? check(t, "ns-start", "Start Shepherd", m.ns.start, (_e, cx) => { m.ns.start = !m.ns.start; cx.notify(); })
-    : h_flex().id("ns-start").gap(6).items_center().text_size(12).text_color(t.dim)
-      .child(div().size(14).flex_none().rounded(3).border(1).border_color(t.border).bg(t.surface))
-      .child("Start Shepherd");
+  const startBox = check(t, "ns-start", "Start Shepherd", m.ns.start,
+    (_e, cx) => { m.ns.start = !m.ns.start; cx.notify(); }, { disabled: !canStart && !pending });
+  const retry = (_e, cx) => pickMachine(m, cx, machine);
+  const retryLink = div().id("ns-retry").text_size(12).text_color(t.accent).cursor_pointer().hover((s) => s.underline())
+    .on_click(retry).child("Retry");
   return v_flex().id("new-space").size_full().bg(t.surface).text_color(t.foreground)
     .child(v_flex().px(18).pt(16).pb(10).gap(4)
       .child(div().text_size(15).font_semibold().child("New space"))
       .child(div().text_size(12).text_color(t.dim).child(`Pick a folder on ${where}. Herdr reads its git remote; Shepherd can start there too.`)))
     .child(h_flex().mx(18).mb(10).gap(6).items_center().flex_wrap()
       .child(div().w(22).text_size(12).text_color(t.muted).child("On"))
-      .children(nsMachines().map((x) => chip(t, `ns-m-${x.name ?? "local"}`, x.label, machine === x.name,
-        (_e, cx) => { if (machine !== x.name) pickMachine(m, cx, x.name); }))))
+      .children(nsMachines().map((x) => chip(t, `ns-m-${x.name ?? "local"}`, x.unavailable ? `${x.label} · unavailable` : x.label,
+        machine === x.name, (_e, cx) => pickMachine(m, cx, x.name), { dim: x.unavailable }))))
     .child(h_flex().mx(18).h(32).px(8).gap(4).items_center().rounded(6).border(1).border_color(t.input).bg(t.background)
-      .child(div().font_family(MONO).text_size(12).text_color(t.dim).child("~/"))
+      .when(!/^[/~]/.test(m.nsFilter.value().trim()), (el) => el.child(div().font_family(MONO).text_size(12).text_color(t.dim).child("~/")))
       .child(Input.new(m.nsFilter).flex_1().text_size(13)))
     .child(v_flex().id(`ns-list-${keyOf(machine)}`).flex_1().min_h(0).mx(18).my(8).gap(2).overflow_y_scrollbar()
       .when(!scan || scan.home == null && !scan.error, (el) => el.child(div().p(16).text_size(12).text_color(t.dim)
         .child(machine ? `reading ${machine}…` : "Looking for git repos…")))
-      .when(Boolean(scan?.error), (el) => el.child(div().p(16).text_size(12).text_color(t.ansi1).child(scan.error)))
+      .when(Boolean(scan?.error), (el) => el.child(h_flex().p(16).gap(10).items_center()
+        .child(div().flex_1().min_w(0).text_size(12).text_color(t.ansi1).child(scan.error)).child(retryLink)))
       .when(scan?.home != null, (el) => el.children(rows.map(row))
         .when(!rows.length, (el) => el.child(div().p(16).text_size(12).text_color(t.dim)
           .child(scan.repos.length ? "No folders match." : `No git repos found on ${where}: type a path.`)))))
@@ -332,8 +351,10 @@ export function renderNewSpace(m, folders) {
       .children(folders.map((f) => chip(t, `ns-f-${f.id}`, f.name, m.ns.folder === f.id, (_e, cx) => { m.ns.folder = f.id; cx.notify(); }, { mono: false })))
       .child(div().flex_1())
       .child(startBox))
-    .when(!canStart, (el) => el.child(div().mx(18).mb(10).text_size(11.5).text_color(t.dim).truncate()
-      .child(shep === null ? `Checking whether Shepherd can start on ${where}…` : `Can't start Shepherd on ${where}: ${shep?.reason ?? "unknown"}.`)))
+    .when(!canStart, (el) => el.child(h_flex().mx(18).mb(10).gap(10).items_center()
+      .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.dim).truncate()
+        .child(shep == null ? `Checking whether Shepherd can start on ${where}…` : `Can't start Shepherd on ${where}: ${shep.reason}.`))
+      .when(Boolean(shep?.unreachable) && !scan?.error, (el) => el.child(retryLink))))
     .child(h_flex().px(18).py(12).gap(8).items_center().border_t(1).border_color(t.border)
       .when(!machine, (el) => el.child(div().id("ns-finder").px(10).h(28).flex().items_center().rounded(5).border(1).border_color(t.input).cursor_pointer()
         .text_size(12).hover((s) => s.bg(t.hover))

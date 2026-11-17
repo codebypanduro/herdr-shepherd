@@ -10,7 +10,7 @@ import { spaces, terminals, run, closeOverlay, props } from "herdr";
 import { MONO, LIMITS, MAX_LOOPS, palette, machineOf } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
-import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged } from "./ui.js";
+import { chip, check, gitFacts, shepherdHome, shepherdOn, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 const MODELS = ["opus", "sonnet", "haiku"];
@@ -170,7 +170,7 @@ function limitsBlock(t, id, lim, pick, ms, sub, note, extra = null) {
 
 export function initSpaceSettings(m, cx, InputState) {
   const s = ssSpace();
-  m.ss = { error: null, ci: null, ciTouched: false };
+  m.ss = { error: null, ci: null, ciTouched: false, shep: null };
   m.ssName = InputState.new({ placeholder: s?.name ?? "" });
   m.ssName.set_value(s?.named ? s.name : "");
   m.ssCi = InputState.new({ placeholder: "none: Shepherd skips CI" });
@@ -186,6 +186,9 @@ export function initSpaceSettings(m, cx, InputState) {
   };
   m.ssCi.on("submit", saveCi);
   m.ssCi.on("blur", saveCi);
+  // Whether start.sh can run on the space's machine: asked once when the dialog opens, so Start
+  // Shepherd is greyed with the reason before anyone clicks it.
+  if (s) checkShepherd(m, cx, s);
   cx.spawn(async (cx) => {
     const repo = s ? m.repo(s) : null;
     if (repo) await m.load(repo);
@@ -194,6 +197,36 @@ export function initSpaceSettings(m, cx, InputState) {
     if (repo) m.ss.git = await gitFacts(repo.dir, repo.machine);
     cx.notify();
   });
+}
+
+function checkShepherd(m, cx, s) {
+  m.ss.shep = null;
+  cx.spawn(async (cx) => {
+    m.ss.shep = await shepherdOn(m, s.machine ?? null).catch((e) => ({ reason: String(e?.message ?? e), unreachable: true }));
+    cx.notify();
+  });
+}
+
+/** Start Shepherd, or why it can't (Retry when the machine didn't answer). */
+function startButton(m, t, s) {
+  const shep = m.ss.shep;
+  const busy = Boolean(m.starting?.has(s.id));
+  const ok = Boolean(shep?.dir) && !busy;
+  const start = (_e, cx) => {
+    if (!ok) return;
+    const done = m.startShepherd(s, shep);
+    cx.notify();
+    cx.spawn(async (cx) => { await done; cx.notify(); });
+  };
+  return h_flex().gap(10).items_center().min_w(0)
+    .when(shep != null && !shep.dir, (el) => el.child(div().min_w(0).truncate().text_size(11.5).text_color(t.dim)
+      .child(`Can't start here: ${shep.reason}`)))
+    .when(Boolean(shep?.unreachable), (el) => el.child(div().id("ss-retry").flex_none().text_size(12).text_color(t.accent).cursor_pointer()
+      .on_click((_e, cx) => { checkShepherd(m, cx, s); cx.notify(); }).child("Retry")))
+    .child(div().id("ss-start").flex_none().px(10).h(26).flex().items_center().rounded(5).text_size(12).font_semibold()
+      .bg(ok ? t.solid : t.raised).text_color(ok ? t.solid_foreground : t.dim)
+      .when(ok, (el) => el.cursor_pointer()).on_click(start)
+      .child(busy ? "Starting…" : shep == null ? "Checking…" : "Start Shepherd"));
 }
 
 const ssSpace = () => spaces().find((x) => x.id === props()?.space) ?? null;
@@ -265,8 +298,7 @@ export function renderSpaceSettings(m) {
             .child(x.label).child(div().font_family(MONO).text_size(10.5).child(x.cpu != null ? `cpu ${x.cpu}%` : ""))))))
       .child(field("Shepherd", "One per space. It talks to you for this repo only.",
         sh ? div().font_family(MONO).text_size(12).text_color(t.muted).child(`claude · ${d?.wf?.shepherd?.model ?? "opus"} · ${sh.address}`)
-          : div().id("ss-start").px(10).h(26).flex().items_center().rounded(5).cursor_pointer().text_size(12).font_semibold()
-            .bg(t.solid).text_color(t.solid_foreground).on_click(() => m.startShepherd(s)).child("Start Shepherd")))
+          : startButton(m, t, s)))
       .child(field("Issue tracker", "Where triage reads and to-tickets writes.",
         div().text_size(12).text_color(t.muted).child(trackerName(d?.wf?.tracker))))
       .child(limitsBlock(t, "ss", lim, setLim, mc ? [mc] : [],
