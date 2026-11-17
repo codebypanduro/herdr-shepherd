@@ -265,9 +265,8 @@ export function renderSpaceSettings(m) {
             .child(x.label).child(div().font_family(MONO).text_size(10.5).child(x.cpu != null ? `cpu ${x.cpu}%` : ""))))))
       .child(field("Shepherd", "One per space. It talks to you for this repo only.",
         sh ? div().font_family(MONO).text_size(12).text_color(t.muted).child(`claude · ${d?.wf?.shepherd?.model ?? "opus"} · ${sh.address}`)
-          : s.machine ? div().text_size(12).text_color(t.dim).child("Run shepherd/start.sh in a terminal there")
-            : div().id("ss-start").px(10).h(26).flex().items_center().rounded(5).cursor_pointer().text_size(12).font_semibold()
-              .bg(t.solid).text_color(t.solid_foreground).on_click(() => m.startShepherd(s)).child("Start Shepherd")))
+          : div().id("ss-start").px(10).h(26).flex().items_center().rounded(5).cursor_pointer().text_size(12).font_semibold()
+            .bg(t.solid).text_color(t.solid_foreground).on_click(() => m.startShepherd(s)).child("Start Shepherd")))
       .child(field("Issue tracker", "Where triage reads and to-tickets writes.",
         div().text_size(12).text_color(t.muted).child(trackerName(d?.wf?.tracker))))
       .child(limitsBlock(t, "ss", lim, setLim, mc ? [mc] : [],
