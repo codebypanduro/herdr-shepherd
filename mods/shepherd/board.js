@@ -3,14 +3,15 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { GROUPS, STAGES, MONO, groupColor, age } from "./common.js";
+import { GROUPS, STAGES, MONO, groupColor, age, palette } from "./common.js";
+import { tint } from "./detail.js";
 
 const COL_MIN = 172;
 const SELECTED = "shepherd.selected";
 const FILTERS = "shepherd.filters";
 
 export function renderBoard(m) {
-  const t = theme();
+  const t = palette();
   const all = m.cards();
   const filters = shared(FILTERS) ?? [];
   const shown = filters.length ? all.filter((c) => filters.includes(c.status)) : all;
@@ -55,7 +56,7 @@ export function renderBoard(m) {
     const border = isSel ? t.accent : blocked ? t.blocked : t.border;
     const inBuild = GROUPS[1].stages.includes(c.stage);
     return v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
-      .bg(blocked ? t.raised : t.surface).border(1).border_color(border)
+      .bg(blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isSel ? t.accent : blocked ? tint(t.blocked, 0.55) : t.border)
       .hover((s) => s.border_color(isSel ? t.accent : t.input))
       .on_click(() => {
         setShared(SELECTED, isSel ? null : c.key);

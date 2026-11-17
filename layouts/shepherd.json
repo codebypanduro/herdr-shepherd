@@ -1,6 +1,10 @@
 {
   "id": "root",
   "type": "row",
+  "theme": {
+    "light": "paper",
+    "dark": "graphite"
+  },
   "divider": {
     "width": 1,
     "color": "border"

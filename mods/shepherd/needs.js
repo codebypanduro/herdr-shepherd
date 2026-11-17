@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme } from "herdr";
-import { STAGES, KINDS, MONO, groupColor, age } from "./common.js";
+import { STAGES, KINDS, MONO, groupColor, age, palette } from "./common.js";
 
 export function answerButton(t, id, text, recommended, onClick) {
   return h_flex().id(id).h(28).px(11).gap(6).items_center().rounded(6).cursor_pointer()
@@ -55,7 +55,7 @@ function ticketList(q, t) {
 }
 
 export function renderNeeds(m) {
-  const t = theme();
+  const t = palette();
   const qs = m.questions();
   const now = Date.now();
 

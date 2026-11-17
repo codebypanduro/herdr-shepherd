@@ -10,7 +10,7 @@ import {
   props, terminals, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
   hc, notify, playSound,
 } from "herdr";
-import { TASKS, MAX_LOOPS, STAGES, localId, machineOf } from "./common.js";
+import { TASKS, MAX_LOOPS, STAGES, localId, machineOf, palette } from "./common.js";
 import { renderBoard } from "./board.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
@@ -320,7 +320,8 @@ export default class Shepherd extends View {
   // ---- task detail ---------------------------------------------------------------------
 
   selectedTask() {
-    const key = shared("shepherd.selected");
+    // props.task opens a task without a click (a layout or overlay can pin one).
+    const key = shared("shepherd.selected") ?? (props()?.task ? `task-${props().task}` : null);
     if (typeof key !== "string" || !key.startsWith("task-")) return null;
     return (this.state().tasks ?? []).find((x) => `task-${x.id}` === key) ?? null;
   }
@@ -375,7 +376,7 @@ export default class Shepherd extends View {
 
   /** The 32px pane header every view shares: title, subtitle, view switch; add filters after it. */
   header(title, sub) {
-    const t = theme();
+    const t = palette();
     const view = this.view();
     const n = this.questions().length;
     const tab = (key, label, count) => h_flex().id(`view-${key}`).h(22).px(8).gap(5).items_center().rounded(5)
@@ -409,7 +410,7 @@ export default class Shepherd extends View {
   }
 
   renderStatus() {
-    const t = theme();
+    const t = palette();
     return h_flex().id("shepherd-status").size_full().px(12).gap(14).items_center().bg(t.chrome)
       .border_t(1).border_color(t.border)
       .font_family("JetBrains Mono").text_size(11).text_color(t.dim)

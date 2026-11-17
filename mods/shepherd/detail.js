@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, groupColor, stageGroup, age } from "./common.js";
+import { STAGES, MONO, groupColor, stageGroup, age, palette } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 
 export const TAB = "shepherd.detailTab";
@@ -31,7 +31,7 @@ export function closeDetail() {
 }
 
 export function renderDetail(m) {
-  const t = theme();
+  const t = palette();
   const task = m.selectedTask();
   const root = v_flex().id("shepherd-detail").size_full().bg(t.surface).text_size(12).text_color(t.foreground);
   if (!task) {

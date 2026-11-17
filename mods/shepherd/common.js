@@ -1,5 +1,15 @@
 // Shared by every Shepherd view: stages, colors and small helpers.
 
+import { theme } from "herdr";
+
+/** The theme, with the board's status colors on the design's hues: working blue, needs-you amber,
+ *  done green. Herdr's own status colors differ by theme (graphite: working yellow, blocked red,
+ *  done blue); the ANSI colors keep these hues in every theme, light and dark. */
+export function palette() {
+  const t = theme();
+  return { ...t, working: t.ansi4, blocked: t.ansi3, done: t.ansi2 };
+}
+
 export const TASKS = ".herdr/shepherd/tasks.json";
 export const MAX_LOOPS = 3;
 export const MONO = "JetBrains Mono";

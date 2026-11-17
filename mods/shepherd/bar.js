@@ -3,13 +3,13 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, setShared } from "herdr";
-import { MONO } from "./common.js";
+import { MONO, palette } from "./common.js";
 import { answerButton } from "./needs.js";
 
 const WIDTH = 780;
 
 export function renderBar(m) {
-  const t = theme();
+  const t = palette();
   const qs = m.questions();
   const q = qs[0];
   const sh = m.shepherd();
