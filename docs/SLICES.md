@@ -7,9 +7,10 @@ A layout and a `shepherd` mod that groups `terminals()` with a `shepherd.stage` 
 **Done when:** `hc run --label shepherd.task=T1 --label shepherd.stage=review -- sleep 600` shows a card in Code review, and it moves when you relabel it.
 **Built:** `mods/shepherd` (board + a minimal status bar; `panel:"detail"` draws an empty surface). Until slices 3 and 8, the layout uses the shipped `spaces` sidebar and has no floating bar.
 
-## 2. Shepherd agent, one stage
+## 2. Shepherd agent, one stage ✅
 `shepherd/PROMPT.md` + `tasks.json`. Shepherd takes a request, writes a task, and runs Implement → Code review with up to 3 loops.
 **Done when:** a task with a review finding goes back to Implement as loop 2, and the card shows it.
+**Built:** `shepherd/PROMPT.md`, `shepherd/start.sh`, `shepherd/bin/shep.mjs`; the board reads tasks.json. Checked with a live Shepherd on a scratch repo: a review finding sent T-2 back to Implement as loop 2, and the finding went found → fixing → fixed. The card on screen is not checked yet.
 
 ## 3. Needs you + floating bar
 Questions in tasks.json show in Needs you and the bar, and are answered with `hc send`. Add toast, sound and phone push.

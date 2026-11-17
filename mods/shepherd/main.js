@@ -1,10 +1,15 @@
 // Shepherd: one mod, several views. props.view picks the main view (board), props.panel a side
-// role (detail, status). Slice 1: the board reads every terminal labelled `shepherd.stage` and
-// groups it into the nine stage columns. No tasks.json yet.
+// role (detail, status). The board shows the shown space's tasks from
+// <repo>/.herdr/shepherd/tasks.json (written by Shepherd through shepherd/bin/shep.mjs), plus any
+// terminal labelled `shepherd.stage` that no task claims. The repo is the `shepherd.dir` label on
+// the space's Shepherd terminal, else the space's folder.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, terminals, spaces, focused, theme, run, shared, setShared } from "herdr";
+import { props, terminals, spaces, focused, theme, run, shared, setShared, readTextFile, watchFolder } from "herdr";
+
+const TASKS = ".herdr/shepherd/tasks.json";
+const REFRESH_MS = 5000;
 
 const GROUPS = [
   { key: "plan", label: "PLAN", stages: ["triage", "spec", "tickets"] },
@@ -50,18 +55,101 @@ function age(ms) {
   return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d`;
 }
 
+/** Task status → board status. Queued, paused and parked read as idle (grey). */
+const TASK_STATUS = { working: "working", blocked: "blocked", done: "done" };
+
 export default class Shepherd extends View {
   init(_props, cx) {
     // address -> { stage, since }: when a terminal was first seen in its current stage.
     this.since = {};
-    // Time-in-stage text changes by the minute; nothing else here needs a timer.
+    this.data = {}; // repo key -> { tasks, questions } | { error }
+    this.watching = new Set();
+    // Time in stage changes by the minute; the 5 s tick also reloads remote repos and
+    // retries a watch that failed (no tasks.json yet).
     cx.timer.every(60000, (cx) => cx.notify());
+    cx.timer.every(REFRESH_MS, (cx) => this.sync(cx));
+    this.sync(cx);
+  }
+
+  /** Where the space's tasks live: { machine, dir, key }, or null. */
+  repo(space) {
+    if (!space) return null;
+    const machine = space.machine ?? null;
+    const sh = terminals().find((x) => x.state === "live" && x.labels?.["herdr.role"] === "shepherd"
+      && x.labels?.["herdr.space"] === localId(space) && machineOf(x) === machine);
+    const dir = sh?.labels?.["shepherd.dir"] ?? space.folder ?? null;
+    return dir ? { machine, dir, key: `${machine ?? ""}:${dir}` } : null;
+  }
+
+  sync(cx) {
+    const repo = this.repo(this.space());
+    if (!repo) return;
+    // Each load gets its own cx: a timer's cx is only good during its callback.
+    cx.spawn(async (cx) => { await this.load(repo); cx.notify(); });
+    if (repo.machine || this.watching.has(repo.key)) return;
+    this.watching.add(repo.key);
+    cx.spawn(async (cx) => {
+      try {
+        for (;;) {
+          await watchFolder(`${repo.dir}/.herdr`);
+          await this.load(repo);
+          cx.notify();
+        }
+      } catch {
+        this.watching.delete(repo.key); // no .herdr yet: the tick retries
+      }
+    });
+  }
+
+  async load(repo) {
+    const text = await readTextFile(`${repo.dir}/${TASKS}`, { on: repo.machine }).catch(() => null);
+    if (text == null) { this.data[repo.key] = { tasks: [], questions: [] }; return; }
+    try {
+      const s = JSON.parse(text);
+      this.data[repo.key] = { tasks: s.tasks ?? [], questions: s.questions ?? [] };
+    } catch (e) {
+      // Keep the last good tasks; shep writes atomically, so this is a hand edit gone wrong.
+      this.data[repo.key] = { ...(this.data[repo.key] ?? { tasks: [], questions: [] }), error: `tasks.json: ${e.message ?? e}` };
+    }
+  }
+
+  /** A card from a task in tasks.json. Its live agent's status wins over the file's. */
+  taskCard(task, byAddress) {
+    const term = task.terminal ? byAddress.get(task.terminal) : null;
+    const live = term && term.state === "live" ? term.status : null;
+    let status = TASK_STATUS[task.status] ?? "idle";
+    if (task.status === "working" && (live === "blocked" || live === "working")) status = live;
+    const runs = task.history ?? [];
+    const last = runs[runs.length - 1];
+    const cur = [...runs].reverse().find((r) => r.stage === task.stage);
+    const since = Date.parse(cur?.start ?? "") || Date.now();
+    const blockers = (task.blockedBy ?? []).filter(Boolean);
+    const note = task.status === "parked" ? "parked"
+      : task.status === "paused" ? "paused"
+      : task.status === "queued" && blockers.length ? `blocked by ${blockers.join(", ")}`
+      : (last?.note || (term?.report ?? "") || task.status);
+    return {
+      address: task.terminal ?? null,
+      key: `task-${task.id}`,
+      id: task.id,
+      title: task.title ?? task.id,
+      stage: STAGES[task.stage] ? task.stage : "spec",
+      loop: Math.max(1, task.loop ?? 1),
+      maxLoops: Math.max(1, task.maxLoops ?? MAX_LOOPS),
+      status,
+      note,
+      since,
+      after: blockers,
+    };
   }
 
   render(cx) {
     const p = props() ?? {};
     if (p.panel === "status") return this.renderStatus();
     if (p.panel === "detail") return div().id("shepherd-detail").size_full().bg(theme().surface);
+    // A space switch shows another repo: load it now rather than on the next tick.
+    const repo = this.repo(this.space());
+    if (repo && !(repo.key in this.data)) { this.data[repo.key] = { tasks: [], questions: [] }; this.sync(cx); }
     return this.renderBoard(cx);
   }
 
@@ -70,16 +158,23 @@ export default class Shepherd extends View {
     return spaces().find((s) => s.id === id) ?? spaces().find((s) => s.active) ?? null;
   }
 
-  /** Cards: terminals with a shepherd.stage label in the shown space (or with no space at all). */
+  /** Cards: the space's tasks, then terminals with a shepherd.stage label that no task claims,
+   *  in the shown space (or with no space at all). */
   cards() {
     const space = this.space();
+    const repo = this.repo(space);
+    const tasks = (repo && this.data[repo.key]?.tasks) ?? [];
+    const all = terminals();
+    const byAddress = new Map(all.map((x) => [x.address, x]));
+    const claimed = new Set(tasks.map((t) => t.id));
     const now = Date.now();
     const seen = new Set();
-    const out = [];
-    for (const x of terminals()) {
+    const out = tasks.map((t) => this.taskCard(t, byAddress));
+    for (const x of all) {
       const l = x.labels ?? {};
       const stage = l["shepherd.stage"];
       if (!STAGES[stage] || l["herdr.role"] === "shepherd") continue;
+      if (claimed.has(l["shepherd.task"])) continue;
       if (x.state === "finished" && stage !== "done") continue;
       const sp = l["herdr.space"];
       if (sp && (sp !== localId(space) || machineOf(x) !== (space?.machine ?? null))) continue;
@@ -91,17 +186,25 @@ export default class Shepherd extends View {
       const loop = Math.max(1, parseInt(l["shepherd.loop"] ?? "1", 10) || 1);
       out.push({
         address: x.address,
+        key: `term-${x.address}`,
         id: l["shepherd.task"] ?? x.name ?? x.address,
         title: l["shepherd.title"] ?? x.title ?? x.name ?? (x.argv ?? []).join(" "),
         stage,
         loop,
+        maxLoops: MAX_LOOPS,
         status: statusOf(x, stage),
         note: x.report ?? (x.argv ?? []).join(" "),
         since: this.since[x.address].since,
+        after: [],
       });
     }
     for (const a of Object.keys(this.since)) if (!seen.has(a)) delete this.since[a];
     return out.sort((a, b) => a.since - b.since);
+  }
+
+  error() {
+    const repo = this.repo(this.space());
+    return repo ? this.data[repo.key]?.error ?? null : null;
   }
 
   renderBoard() {
@@ -133,6 +236,7 @@ export default class Shepherd extends View {
       .border_b(1).border_color(t.border)
       .child(div().font_semibold().text_color(t.foreground).child("pipeline"))
       .child(div().text_color(t.dim).child(`${space?.name ?? "—"} · ${all.length} task${all.length === 1 ? "" : "s"}`))
+      .when(Boolean(this.error()), (el) => el.child(div().truncate().text_color(t.ansi1).child(this.error())))
       .child(div().flex_1())
       .child(filter("working", "working"))
       .child(filter("blocked", "need you"))
@@ -143,37 +247,39 @@ export default class Shepherd extends View {
           .on_click(() => setShared(FILTERS, []))
           .child("✕ clear")));
 
-    const loopDots = (c) => h_flex().gap(3).children(Array.from({ length: MAX_LOOPS }, (_, i) => {
+    const loopDots = (c) => h_flex().gap(3).children(Array.from({ length: c.maxLoops }, (_, i) => {
       const n = i + 1;
       const color = n < c.loop ? t.muted : n === c.loop ? statusColor(c.status) : t.raised;
       return div().size(6).rounded(1).bg(color);
     }));
 
     const card = (c) => {
-      const isSel = selected === c.address;
+      const isSel = selected === c.key;
       const blocked = c.status === "blocked";
       const border = isSel ? t.accent : blocked ? t.blocked : t.border;
       const inBuild = GROUPS[1].stages.includes(c.stage);
-      return v_flex().id(`card-${c.address}`).flex_none().gap(6).p(10).rounded(6)
+      return v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
         .bg(blocked ? t.raised : t.surface).border(1).border_color(border)
         .hover((s) => s.border_color(isSel ? t.accent : t.input))
-        .on_click(() => setShared(SELECTED, isSel ? null : c.address))
+        .on_click(() => setShared(SELECTED, isSel ? null : c.key))
         .child(h_flex().gap(6).items_center()
           .child(div().font_family("JetBrains Mono").text_size(11).text_color(t.muted).child(c.id))
           .child(div().flex_1().min_w(0).truncate().font_family("JetBrains Mono").text_size(10.5).text_color(t.dim)
             .child(STAGES[c.stage].skill))
           .when(inBuild, (el) => el.child(loopDots(c)))
-          .child(div().id(`peek-${c.address}`).px(3).rounded(4).text_color(t.dim)
+          .when(Boolean(c.address), (el) => el.child(div().id(`peek-${c.key}`).px(3).rounded(4).text_color(t.dim)
             .hover((s) => s.bg(t.hover).text_color(t.foreground))
             .on_click((_e, cx) => { cx.stop_propagation(); run("terminal.peek", { terminal: c.address }); })
-            .child("⋯")))
+            .child("⋯"))))
         .child(div().text_size(13).line_height(1.35).text_color(t.foreground).child(c.title))
         .child(h_flex().gap(6).items_center()
           .child(c.status === "working"
             ? div().size(6).rounded(3).bg(t.working).loop("opacity", { from: 0.35, to: 1, period: 1200 })
             : div().size(6).rounded(3).bg(statusColor(c.status)))
           .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(c.note))
-          .child(div().font_family("JetBrains Mono").text_size(10.5).text_color(t.dim).child(age(now - c.since))));
+          .child(div().font_family("JetBrains Mono").text_size(10.5).text_color(t.dim).child(age(now - c.since))))
+        .when(c.after.length > 0 && c.status !== "idle", (el) => el.child(
+          div().font_family("JetBrains Mono").text_size(10.5).text_color(t.dim).child(`after ${c.after.join(", ")}`)));
     };
 
     const column = (stage, group, first) => {

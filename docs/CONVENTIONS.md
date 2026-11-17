@@ -12,6 +12,8 @@ Every terminal Shepherd starts carries the Herdr labels (`herdr.space`, `herdr.t
 | `shepherd.task` | task id, e.g. `HRD-144` | sub-agents |
 | `shepherd.stage` | `triage` `spec` `tickets` `implement` `review` `ci` `proof` `merge` | sub-agents |
 | `shepherd.loop` | `1`…`n` | build-loop agents |
+| `shepherd.title` | the task's title | sub-agents (cards without a task use it) |
+| `shepherd.dir` | the repo's root | the Shepherd terminal (where the mods read tasks.json) |
 
 ```
 hc run --bg --keep \
@@ -23,7 +25,7 @@ hc run --bg --keep \
 
 ## Task state: `.herdr/shepherd/tasks.json`
 
-Shepherd owns this file and is the only writer. Mods read it with `watchFolder`.
+Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; `shep --help` lists its commands). Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
 
 ```json
 {
@@ -48,7 +50,8 @@ Shepherd owns this file and is the only writer. Mods read it with `watchFolder`.
     ],
     "findings": [
       { "id": "f1", "loop": 1, "file": "mods/tabs/main.js", "line": 42,
-        "text": "Uses setInterval…", "state": "open | fixing | resolved" }
+        "text": "Uses setInterval…", "state": "open | fixing | resolved",
+        "history": [{ "loop": 1, "state": "found" }, { "loop": 2, "state": "fixing" }, { "loop": 2, "state": "fixed" }] }
     ],
     "summary": "One paragraph Shepherd keeps current."
   }],

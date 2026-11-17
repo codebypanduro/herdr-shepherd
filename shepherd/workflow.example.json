@@ -1,38 +1,38 @@
 {
   "shepherd": {
     "agent": "claude",
-    "model": "opus-4.5"
+    "model": "opus"
   },
   "skills": "mattpocock/skills",
   "tracker": "github",
   "stages": {
     "triage": {
       "agent": "claude",
-      "model": "opus-4.5",
+      "model": "opus",
       "skill": "/triage",
       "only": "issues from other people"
     },
     "spec": {
       "agent": "claude",
-      "model": "opus-4.5",
+      "model": "opus",
       "skill": "/to-spec",
       "big": "/wayfinder",
       "grillQuestionsPerRound": 3
     },
     "tickets": {
       "agent": "claude",
-      "model": "opus-4.5",
+      "model": "opus",
       "skill": "/to-tickets",
       "approve": true
     },
     "implement": {
       "agent": "claude",
-      "model": "sonnet-4.5",
+      "model": "sonnet",
       "skill": "/implement"
     },
     "review": {
       "agent": "claude",
-      "model": "opus-4.5",
+      "model": "opus",
       "skill": "/code-review"
     },
     "ci": {
