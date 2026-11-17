@@ -77,7 +77,7 @@ export function renderHistory(m) {
       .when(open && Array.isArray(q.questions), (el) => el.child(oldRound(t, q)))
       .when(open && Boolean(q.why), (el) => el.child(whyLine(t, q)))
       .when(open && (q.options ?? []).length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(
-        q.options.map((o, j) => answerButton(t, `h-${i}-o${j}`, o, o === q.recommended, () => m.answer(q, o))))))
+        q.options.map((o, j) => answerButton(t, `h-${i}-o${j}`, o, o === q.recommended, () => m.answer(q, o), { fit: true })))))
       .when(!open, (el) => el.child(h_flex().gap(4).text_size(11.5).text_color(t.muted)
         .child("↳ you:").child(div().text_color(t.foreground).child(q.answer))));
   };

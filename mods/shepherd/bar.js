@@ -20,7 +20,10 @@ export function renderBar(m) {
   // Short options (Merge, Send back) sit on the question's line; longer ones (a grilling
   // question's) get a row of their own under it and shrink with … to fit the bar.
   const opts = (q?.options ?? []).slice(0, 3);
-  const inline = opts.join("").length <= 36;
+  // Characters of option text that still fit on the question's line beside the task id, the
+  // "recommended" mark, the "N waiting" chip and some of the question (Approve / Merge them / Split them = 28).
+  const INLINE_CHARS = 36;
+  const inline = opts.join("").length <= INLINE_CHARS;
   const buttons = opts.map((o, i) => answerButton(t, `bar-o${i}`, o, o === q.recommended, () => m.answer(q, o), { fit: !inline }));
   const line = q && h_flex().w_full().gap(8).items_center()
     .child(div().size(18).flex_none().rounded(9).bg(t.blocked).text_color(t.background)
