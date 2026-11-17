@@ -264,10 +264,8 @@ export default class Shepherd extends View {
 
   answer(q, text) {
     const answer = String(text ?? "").trim();
-    const sh = this.shepherd();
     const repo = this.repo();
-    if (!answer || !sh || !repo) return;
-    hc(["send", sh.address, `answer ${q.id}: ${answer}`]);
+    if (!answer || !repo || !this.tell(`answer ${q.id}: ${answer}`, q.task ?? null)) return;
     setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
   }
 
@@ -475,7 +473,7 @@ export default class Shepherd extends View {
     this.tell(`${task.status === "paused" ? "resume" : "pause"} ${task.id}`, task.id);
   }
 
-  /** Ask for status: Shepherd answers in its own output (and the History), so show History. */
+  /** Ask for status: Shepherd answers with `say --task`, in the History, so show it. */
   askStatus(task) {
     if (task && this.tell(`status ${task.id}?`, task.id)) this.toggleHistory(true);
   }
