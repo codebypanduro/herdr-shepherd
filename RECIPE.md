@@ -11,17 +11,17 @@ The window, left to right and top to bottom. All sizes at zoom 1. Colors are the
 **Title bar** (38px, `chrome` #131417, bottom border `border` #25272d). Window buttons, then centered "Herdr / layout **shepherd**", and on the right the `ctrl-shift-l` hint.
 
 **Sidebar** (240px, `chrome`, right border `border`).
-- A two-way toggle at the top: **This space** | **All spaces**. All spaces has an amber count badge of every open question.
-- **SPACES** header (11px, letter-spacing .04em, `dim` #6c6f77) with a **+** button. The + opens a menu: *New space from folder…* (N) and *New folder* (F).
-- Folders: ▶ chevron, folder icon, name, space count. A collapsed folder shows the amber question count of the spaces inside it.
-- Space rows (6px 8px padding, radius 6px; selected row `hover` #1e2025): a 24px org avatar (the GitHub org image, radius 6px). An amber badge with the open question count sits on the avatar's top-right corner. Next to it the name (13px), and under it the machine icon + machine name · branch · ⑂ worktree count (10.5px mono, `dim`). On the right a status dot with the open task count, and a ⚙ that opens Space settings.
-- Footer row: one icon per machine (MacBook, Mac mini, server, tower; a status dot in the corner) and a **+** to add a machine. On the right, the weekly Claude % and Codex %, each with its agent's icon. Clicking a machine or the usage opens a popover with the details.
+- **SPACES** header (11px, `dim` #6c6f77) with a **+** button. The + opens a 210px menu: *New space from folder…* (N) and *New folder* (F).
+- Folders: ▶/▼ chevron, folder icon (`accent` when open), name, space count. A collapsed folder shows the amber question count of the spaces inside it; an empty one shows "Drag spaces here" and a ✕ to remove it. *New folder* adds a row with a name field at the top (Enter makes it, Esc cancels).
+- Space rows (6px 8px padding, 26px left inside a folder, radius 6px; selected row `hover` #1e2025): a 24px org avatar (the GitHub org image, radius 6px; the space's first letter on `raised` without one). An amber badge with the open question count sits on the avatar's top-right corner. Next to it the name (13px), and under it the machine icon + machine name · branch · ⑂ worktree count (10.5px mono, `dim`; clicking the machine opens its popover). On the right a status dot (amber with open questions, blue pulsing with a working task) with the open task count, and a ⚙ that opens Space settings. Click selects the space.
+- Drag a space row onto a folder to put it in (the folder gets an accent border while you're over it); while a foldered space is dragged, a dashed "Drop here to take it out of the folder" area appears under the list.
+- Footer row: one icon per machine (this computer first, then `machines()`; MacBook, Mac mini, server, tower; a status dot in the corner: green, amber when cpu or disk ≥ 80%, grey when unreachable) and a **+** to add a machine. On the right, the weekly Claude % and Codex %, each with its agent's icon, only where a usage command is set (Watch out). Clicking a machine or the usage opens a 260px popover with the details.
 
 **Tab bar** (36px, `chrome`, bottom border `border`). A pill "shepherd · <space>" with a status dot, a pill per other tab ("shell", or its name), any sub-agents kept as tabs (address and task id, with ✕), and +. The layout has no terminal area, so clicking a pill opens that terminal in the terminal window; + makes a new shell tab. On the right:
 - view switch: **Board · Pipeline · Dependencies · Needs you** (Needs you has an amber count)
 - **Digest** (D)
 - **⌘K** (Herdr's command palette)
-- **⚙ Workflow** (opens workflow.json in the text editor until the Workflow settings overlay exists)
+- **⚙ Workflow** (opens Workflow settings)
 
 **Main area** (6px padding; 108px bottom padding so the floating bar never covers cards). The board pane takes the free width. When a task is open, a detail pane sits on its right (min(620px, 54%), min 380px). Both panes have radius 6px and a 1px `border`.
 
@@ -83,9 +83,12 @@ Each group's label sits above its first column, and the column header has a 2px 
 - **Peek**: hover a card for 380 ms to see its terminal's last lines.
 - **Digest** (D, a 720×480 dialog): "Today · <space> · Tue 17 Nov"; shipped, in flight, waiting on you (with the oldest wait), today's spend and tokens; then Shipped, Stuck, Most expensive (with a bar) and "Needed more than one loop". Today counts tasks with a stage run since local midnight; rows open the task.
 - **Command palette** (⌘K).
-- **Workflow settings**: rows 00–07, Max build loops, Alerts, Machine load limits.
-- **Space settings**: editable name, path and remote, CI command, Folder, Machine, Shepherd, Issue tracker.
-- **New space** (folder picker), **Add machine** (SSH host, name, kind, temporary; shows the `hc machine add` command and its connection steps).
+- **Workflow settings** (⚙ Workflow or W; a 680px dialog, 85% high): "Workflow · Matt Pocock's flow", the `npx skills add` line with the tracker, then one row each (mark, title with its skill in mono, a one-line description, controls on the right): ✳ Shepherd model, 01 Triage model, 02 Spec questions per grilling round (1/3/5 q), 03 To tickets ("Asks you to approve"), 04 Implement model, 05 Code review model, 06 CI ("Set per space: ⚙ on each space"), 07 Proof (Screenshots, Screen recording), ↻ Max build loops (1–5), ! When an agent needs you (Toast, Sound, Phone), ∥ Machine load limits: Max CPU 60/70/80/90% and Max memory 70/80/85/95% as chips (selected chip `foreground` on `background`; a value set by hand shows as an extra chip), then a box with one row per machine: icon and name, a cpu and a mem bar (4px, `muted`, amber within 10 of the limit, red at it, a 1px tick at the limit) and "N running", "N running · near" or "at limit". A note in amber when the shown space overrides the limits. Footer: the file it writes and **Done**. Every click writes at once.
+- **Space settings** (⚙ on a space row; a 600px dialog, 85% high): the name as a field (Enter or leaving it renames the space; empty goes back to Herdr's name), the machine icon with `machine:path`, the remote · branch. Rows: CI checks (a mono field, saved on Enter or leaving it), Folder (chips: No folder and each folder), Machine (chips with each machine's cpu, the space's own selected; read-only: a space lives on one machine), Shepherd (`claude · <model> · <address>`, or **Start Shepherd** when none runs), Issue tracker, then Machine load limits for this space (as in Workflow settings, plus **Same as workflow**, and only this space's machine's row). Footer: `.herdr/orchestra.json` and **Done**.
+- **New space** (+ → New space from folder…, or N; a 560px dialog): a `~/` filter field, the git repos found under ~/code, ~/src, ~/Projects and the like and beside this computer's spaces (each with its path, remote or "no remote · local only", and branch; repos that already are spaces are left out), "Put in" folder chips, a **Start Shepherd** check (off by default), **Choose in Finder…** (the system picker; adds at once), Cancel and **Add space**. Enter in the filter adds the first match.
+- **Add machine** (footer +; a 540px dialog): SSH host (with hints: Host names from ~/.ssh/config that aren't machines yet), Name in Herdr (default: the host's first part), Kind (Server, MacBook, Mac mini, Desktop), Temporary sandbox, the `hc machine add --name <name> [--temp] <host>` line with Copy, then **Add machine**, which runs it: "Connecting over SSH, checking herdr-core", and on failure hc's message and hint and "run the command above in a terminal".
+- **Machine popover**: icon, name, model, "N agents", cpu / mem / disk bars, INSTALLED (Claude Code, Codex, with their weekly %).
+- **Usage popover**: "Usage this week · resets Mon", one row per tool with its detail, % and a bar.
 - **Toasts**: top right, max 3, 9 s.
 
 ## How it behaves
@@ -108,9 +111,9 @@ Each group's label sits above its first column, and the column header has a 2px 
 - as a toast with a sound and a phone push, each of which can be turned off in Workflow → When an agent needs you
 
 **Spaces.**
-- One Shepherd per space. Choosing a space filters the board, Needs you, the chat and the digest to it. All spaces shows everything, with a space tag on each chat line.
-- Spaces live on one machine. Changing a space's machine starts a new space there.
-- Folders are only for the sidebar. Drag a space onto a folder to put it in. While you drag a foldered space, a "Drop here to take it out of the folder" area appears. The folder can also be set in Space settings.
+- One Shepherd per space. Choosing a space filters the board, Needs you, the chat and the digest to it.
+- Spaces live on one machine. To run on another, make a new space there (Space settings shows the machine read-only).
+- Folders are only for the sidebar (shared state, this screen). Drag a space onto a folder to put it in. While you drag a foldered space, a "Drop here to take it out of the folder" area appears. The folder can also be set in Space settings or picked in New space.
 
 **Keys** (only in this layout, never global):
 - ⌘K palette
@@ -121,11 +124,11 @@ Each group's label sits above its first column, and the column header has a 2px 
 - S steer, P pause, T terminal
 - C new task (the bar takes the keyboard with "add " typed)
 - D digest (again: closes it)
-- N new space, F new folder (slice 8)
+- N new space, F new folder (shows the sidebar if hidden), W workflow settings, U weekly usage
 - 1–5 task tabs
 - Esc closes the top overlay
 - ⌘⇧D digest, ⌘⌥1–4 the four views, ↓ / ↑ like J / K: not in the design, added for this build
-- Not built: R (reply to the next question), W (workflow settings), U (weekly usage)
+- Not built: R (reply to the next question)
 - Esc closes, in order: the steer popup, digest or History (Herdr closes the top dialog or popup), the terminal window (only while its title bar has the keyboard), then the open task, then the keyboard focus on the board
 
 **Stuck.** A working task goes stuck past its stage's limit: triage 40m, spec 2h, tickets 1h, implement 50m, review 25m, CI 20m, proof 20m (`stuckMinutes` in workflow.json; the space's orchestra.json wins). Time in stage counts from the stage run's start in tasks.json.
@@ -135,18 +138,20 @@ Each group's label sits above its first column, and the column header has a 2px 
 ## Built from
 
 - **Layout** `layouts/shepherd.json`, a root row:
-  - `sidebar` (px 240): `shepherd-spaces`
+  - `sidebar` (px 240): a block `spaces` (mod `shepherd`, props `{panel:"spaces"}`)
   - `work` (column), containing:
     - `tabs` (px 36, mod `shepherd`, props `{panel:"tabs"}`)
     - `main` row of `board` (mod `shepherd`, props `{view}`) and `detail` (mod `shepherd`, props `{panel:"detail"}`, hidden until a task is open)
   - a floating block `bar` (mod `shepherd`, props `{panel:"bar"}`, edge bottom, align center)
   - the status bar (px 24)
 - **Shepherd agent**: one per space, started by `shepherd/start.sh [--space <id>] [repo]`: `hc run --bg --keep --outlive-parent --label herdr.space=<id> --label herdr.tab=shepherd-<id> --label herdr.role=shepherd --label shepherd.dir=<repo> -- claude --model <workflow shepherd.model> --append-system-prompt-file <PROMPT.md with paths filled in>`. It changes tasks.json only through `shepherd/bin/shep.mjs`. It starts sub-agents with `hc run --bg` and labels them (see CONVENTIONS), reads their reports from its input (`<hc from=…>`), and writes task state to `.herdr/shepherd/tasks.json` in the repo.
-- **Overlays** are the same mod with other props: the steer menu (`openOverlay` popup, `{panel:"steer", task}`), the digest (dialog, `{panel:"digest"}`), and the terminal window (`kind:"window"`, key `shepherd-terminal`, a column layout: `{panel:"term", terminal, task}` 40px, `{terminal}`, `{panel:"termfoot", …}` 30px).
+- **Overlays** are the same mod with other props: the + menu (popup, `{panel:"plus"}`), the machine and usage popovers (popup, `{panel:"machine", machine}`, `{panel:"usage"}`), New space, Add machine, Workflow settings and Space settings (dialogs, `{panel:"newspace"}`, `{panel:"addmachine"}`, `{panel:"workflow"}`, `{panel:"spacesettings", space}`), the steer menu (`openOverlay` popup, `{panel:"steer", task}`), the digest (dialog, `{panel:"digest"}`), and the terminal window (`kind:"window"`, key `shepherd-terminal`, a column layout: `{panel:"term", terminal, task}` 40px, `{terminal}`, `{panel:"termfoot", …}` 30px).
 - **Keys**: `keys.json` in this repo has the `layout:shepherd` section (⌘K palette, ⌘J History, ⌘⇧D digest, ⌘⌥1–4 views as `shepherd.<command>`); merge it into `~/.config/herdr-app/keys.json`. Plain letters (J K G S P T A C D 1–5 ↵ Esc) are the board's own `on_key_down`, only while the board (not Needs you) holds the keyboard. `mod.json` has `"focusable": true`, so `pane.go` and a closing popup hand the board the keyboard back (`"focus"` from `nextCommand()`).
 - **History** reads `.herdr/shepherd/chat.jsonl` (`shep say`, appended): the board records every line it sends Shepherd (bar, History input, steer, pause, status), and Shepherd records what it tells the person. Events and questions come from tasks.json.
-- **Mods** read `agents()`, `terminals()` (parent, labels), `spaces()`, `machines()` and `watchFolder()` on the tasks file. They answer questions with `hc send <shepherd> …`. Commands used: `terminal.peek`, `terminal.keep`, `terminal.park`, `tab.new`, `app.palette`, `space.new {machine, folder}`, `layout.show/hide`, `notify`, `playSound("blocked")`, `openOverlay`.
-- **Programs run**: `git worktree`, `gh pr` (PR, checks, merge), `shepherd/bin/load.sh` (CPU from `ps` and memory from `vm_stat` on macOS, `/proc/stat` and `/proc/meminfo` on Linux) through `exec … {on: machine}` for the status bar and through `shep room` for Shepherd, the space's CI command, and Claude or Codex for usage.
+- **Sidebar data**: the sidebar copy runs `mods/shepherd/machine.sh` on every machine every 15 s (its text through `exec("sh", ["-c", …], {on})`: cpu, mem, disk, and once kind and model) and `knownAgents({on})` once for Claude Code / Codex; the results go in shared `shepherd.machineInfo` for the popovers and settings. Each space's org and worktree count come from git every 60 s; org images are downloaded once to `data/shepherd-avatars/<org>.png` with curl. Folders are shared `shepherd.folders` and `shepherd.spaceFolders`, kinds picked in Add machine `shepherd.machineKinds`. It reads tasks.json of every space with a Shepherd every 5 s for the badges.
+- **Settings files**: Workflow settings writes `shepherd/workflow.json` beside the `workflow.example.json` Shepherd's label names (copied from the example the first time; git-ignored); the mods and `shep room` read it in place of the example when it exists. Space settings writes `<repo>/.herdr/orchestra.json` (here with `writeTextFile`, on another machine with node there).
+- **Mods** read `agents()`, `terminals()` (parent, labels), `spaces()`, `machines()` and `watchFolder()` on the tasks file. They answer questions with `hc send <shepherd> …`. Commands used: `terminal.peek`, `terminal.keep`, `terminal.park`, `tab.new`, `app.palette`, `space.new {folder, machine: ""}`, `space.select`, `space.rename`, `layout.show/hide`, `notify`, `playSound("blocked")`, `openOverlay`, `pickFolder`. Key commands added: `shepherd.workflow`, `shepherd.usage`, `shepherd.new-space`, `shepherd.new-folder`, `shepherd.add-machine`, `shepherd.machine:<name>`, `shepherd.space-settings[:<space id>]`.
+- **Programs run**: `hc machine add` (Add machine), `shepherd/start.sh` (Start Shepherd), `find` (New space), `curl` (org images), `git worktree`, `gh pr` (PR, checks, merge), `shepherd/bin/load.sh` (CPU from `ps` and memory from `vm_stat` on macOS, `/proc/stat` and `/proc/meminfo` on Linux) through `exec … {on: machine}` for the status bar and through `shep room` for Shepherd, the space's CI command, and Claude or Codex for usage.
 
 ## Watch out
 
@@ -154,7 +159,14 @@ Each group's label sits above its first column, and the column header has a 2px 
 - Hover peek needs `.on_hover` plus a short `cx.timer` delay; cancel it on leave.
 - Dragging spaces between folders has no built-in drop target in mods; use press, move and release on the rows, or offer the Folder picker only at first.
 - Keys must go in `keys.json` under `"layout:shepherd"`, never global, and must not take plain letters while a terminal has focus.
-- Weekly Claude and Codex usage isn't in Herdr; read it from each CLI's usage command, and hide the row when a tool isn't installed on any machine.
+- Weekly Claude and Codex usage isn't in Herdr, and neither CLI has a usage command a script can read. The person sets one per tool in workflow.json, `"usage": {"claude": "<command>", "codex": "<command>"}`, printing a percent (and optionally a detail line); it runs every 5 minutes in a login shell. Without a command, or when no machine has the tool, that tool's usage is hidden (and with neither, the footer shows none).
+- The design's **This space | All spaces** toggle isn't built: the board, Needs you and History read one space's tasks.json, and task ids repeat across repos. Each space row's badge shows its open questions instead.
+- Render the sidebar from one `terminals()` and one machine list per render: calling them per row (40 spaces) made the render slow enough that Herdr kept the last version with "This view could not be re-rendered … interrupted".
+- Dragging is press, move (4 px) and release on the rows: a folder row or the drop area takes the release; anywhere else ends the drag. A drag released on its own row doesn't select it.
+- Add machine runs `hc machine add` without a terminal, so ssh can't ask for a password or a new host key; it shows hc's message and hint, and the command to run in a terminal.
+- Changing a space's machine isn't offered: a space lives on one machine (make a new space there). New space makes spaces on this computer only, and Start Shepherd only works for them.
+- Popovers opened by a key or `shepherd.<command>` open at a fixed spot near the sidebar's foot (the pointer may be anywhere).
+- `run()` returns nothing, so New space can't name the space it made: it leaves `shepherd.newSpace` {folder, group, start} in shared state, and the sidebar finds the new space by its folder within a minute, then files it and starts Shepherd if asked.
 - Don't run `/triage` on tickets made by `/to-tickets`; they are agent-ready.
 - The timeline and digest need real start and end times per stage: Shepherd must record them in tasks.json.
 - Plan purple is `theme().ansi5`: there is no purple theme color, and deriving one from `accent` needs color math the mods don't have.
