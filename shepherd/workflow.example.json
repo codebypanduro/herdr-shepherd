@@ -68,5 +68,9 @@
     "sound": true,
     "phone": false,
     "ntfy": ""
+  },
+  "usage": {
+    "claude": "node usage/claude.mjs",
+    "codex": "node usage/codex.mjs"
   }
 }

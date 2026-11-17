@@ -65,7 +65,8 @@ mods/shepherd/                 one mod, every panel (props.view / props.panel): 
                                needs you, task detail, bar, History, digest, steer, terminal window, the spaces
                                sidebar with machines and usage, New space, Add machine, Workflow and Space settings
 keys.json                      the layout:shepherd keys to merge into ~/.config/herdr-app/keys.json
-shepherd/                      the Shepherd agent: PROMPT.md, start.sh, workflow.example.json, bin/shep.mjs, bin/load.sh
+shepherd/                      the Shepherd agent: PROMPT.md, start.sh, workflow.example.json, bin/shep.mjs, bin/load.sh,
+                               usage/ (weekly Claude and Codex % for the sidebar)
 agents/                        hc templates for building slices (slice-builder, code-review)
 docs/                          recipe support: conventions, slices, design prototypes
 preview.png                    the layout with demo spaces and a real Shepherd run's tasks on the board
