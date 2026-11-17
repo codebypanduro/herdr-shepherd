@@ -9,24 +9,25 @@ Every terminal Shepherd starts carries `herdr.space` and these. Shepherd's own t
 | label | values | on |
 |---|---|---|
 | `herdr.role` | `shepherd`, `triager`, `planner`, `implementer`, `reviewer`, `ci`, `qa` | every agent |
-| `shepherd.task` | task id, e.g. `HRD-144` | sub-agents |
-| `shepherd.stage` | `triage` `spec` `tickets` `implement` `review` `ci` `proof` `merge` | sub-agents |
+| `shepherd.task` | task id, e.g. `HRD-144` | build-loop agents (implementer, reviewer, ci, qa) |
+| `shepherd.stage` | `triage` `spec` `tickets` `implement` `review` `ci` `proof` `merge` | every sub-agent |
 | `shepherd.loop` | `1`…`n` | build-loop agents |
-| `shepherd.title` | the task's title | sub-agents (cards without a task use it) |
+| `shepherd.title` | the task's title | implementer and reviewer (cards without a task use it) |
 | `shepherd.dir` | the repo's root | the Shepherd terminal (where the mods read tasks.json) |
 | `shepherd.workflow` | the workflow file start.sh gave Shepherd (`workflow.json`, else `workflow.example.json`) | the Shepherd terminal (the status bar finds `bin/load.sh` and the board `bin/shep.mjs` beside it; on another machine, the mods read the settings from it) |
 
 ```
-hc run --bg --keep \
+hc run --bg --keep --name hrd-144-impl-2 \
   --label herdr.space=<id> --label herdr.role=implementer \
   --label shepherd.task=HRD-144 --label shepherd.stage=implement --label shepherd.loop=2 \
+  --label shepherd.title="Timer on each tab" \
   --cwd ~/.herdr/worktrees/herdr-app/hrd-144-timer-on-each-tab \
   -- claude --model sonnet "/implement HRD-144. Fix these findings: … Done: hc send <shepherd> 'done HRD-144'"
 ```
 
 ## Task state: `.herdr/shepherd/tasks.json`
 
-Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; the top of shep.mjs lists its commands, and `shep` with none names them). Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
+Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; the top of shep.mjs lists its commands, and `shep` with none names them). The schema below is what the board reads; shep also writes `answered` (time) on an answered question, and an open stage run's history `result` is `"running"`. Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
 
 ```json
 {
@@ -73,7 +74,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
 
 ## The chat: `.herdr/shepherd/chat.jsonl`
 
-The History window's lines, one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd, Shepherd for everything it tells the person.
+The History window's lines, one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd except grilling rounds, Shepherd for everything it tells the person.
 
 ## Talking to Shepherd
 
@@ -86,10 +87,10 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 | `steer HRD-144 redirect: fix the failing test first` | redirect the agent on a task |
 | `steer HRD-144 context: use the core's start time` | add context |
 | `pause HRD-144` / `resume HRD-144` | pause or resume |
-| `status HRD-144?` | Shepherd replies in its own output |
+| `status HRD-144?` | Shepherd replies with `shep say --task HRD-144`, so the reply shows in the History |
 | anything else | a normal message to Shepherd |
 
-Every line the board sends is also kept in chat.jsonl with `shep say --from you`.
+Every line the board sends, except `round …`, is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause and status with their task).
 
 Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). Planners report with `grill <id> round <n>: <path>`, `spec <id>: <path>` and `tickets <id>: <path>`; plan files live in `.herdr/shepherd/plans/<id>/`. They never talk to the person.
 

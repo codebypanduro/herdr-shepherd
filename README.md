@@ -36,7 +36,7 @@ The files in `docs/design/` are **design references made in HTML**, not code to 
 
 ## Install
 
-Link, don't copy: the mod finds the Shepherd agent (`shepherd/start.sh`, `bin/shep.mjs`, `workflow.json`) through its `mods/shepherd` link (`cd -P`), so a copied mod can't start or talk to Shepherd.
+Link, don't copy: the mod finds the Shepherd agent (`shepherd/start.sh`, `workflow.json`) through its `mods/shepherd` link (`cd -P`), and `bin/shep.mjs` beside the workflow file start.sh labels Shepherd with, so a copied mod can't start or talk to Shepherd.
 
 ```sh
 git clone https://github.com/codebypanduro/herdr-shepherd ~/code/herdr-shepherd

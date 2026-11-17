@@ -11,6 +11,7 @@
 //   shep end <id> pass|fail|ask [--note "…"] [--tokens N] [--cost N]      closes the open stage run
 //   shep loop <id>                    next build loop; exits 2 when maxLoops is used up (ask the person)
 //   shep set <id> key=value …         stage status terminal branch worktree pr prUrl proof summary title brief blockedBy
+//                                     loop maxLoops
 //                                     wait ("waiting for room on <machine>": the card's note until start clears it)
 //   shep finding <id> add --text "…" [--file f] [--line n]                prints the finding id
 //   shep finding <id> <fid> open|fixing|resolved
