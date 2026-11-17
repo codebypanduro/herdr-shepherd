@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { GROUPS, STAGES, MONO, groupColor, age, palette } from "./common.js";
+import { GROUPS, STAGES, MONO, groupColor, age, palette, stuckColor } from "./common.js";
 import { tint } from "./detail.js";
 
 const COL_MIN = 172;
@@ -52,13 +52,20 @@ export function renderBoard(m) {
 
   const card = (c) => {
     const isSel = selected === c.key;
+    const isKf = m.kf === c.key && !isSel;
     const blocked = c.status === "blocked";
-    const border = isSel ? t.accent : blocked ? t.blocked : t.border;
     const inBuild = GROUPS[1].stages.includes(c.stage);
+    const border = isSel ? t.accent : c.stuck ? tint(stuckColor(t), 0.6) : blocked ? tint(t.blocked, 0.55) : t.border;
+    const minutes = (now - c.since) / 60000;
+    const timeColor = c.stuck ? stuckColor(t) : blocked && minutes > 30 ? t.blocked : t.dim;
+    // ⋯, S or right-click: the steer menu for a task; a label-only card just peeks at its terminal.
+    const steer = () => (c.task ? m.openSteer(c.id) : c.address && run("terminal.peek", { terminal: c.address }));
     return v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
-      .bg(blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isSel ? t.accent : blocked ? tint(t.blocked, 0.55) : t.border)
-      .hover((s) => s.border_color(isSel ? t.accent : t.input))
+      .bg(blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isKf ? t.accent : border)
+      .hover((s) => s.border_color(isSel || isKf ? t.accent : t.input))
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); steer(); })
       .on_click(() => {
+        m.kf = c.key;
         setShared(SELECTED, isSel ? null : c.key);
         // Task cards open the detail pane; a label-only card has no task to show.
         if (!isSel && c.key.startsWith("task-")) run("layout.show", { id: "detail" });
@@ -69,9 +76,9 @@ export function renderBoard(m) {
         .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
           .child(STAGES[c.stage].skill))
         .when(inBuild, (el) => el.child(loopDots(c)))
-        .when(Boolean(c.address), (el) => el.child(div().id(`peek-${c.key}`).px(3).rounded(4).text_color(t.dim)
+        .when(Boolean(c.task || c.address), (el) => el.child(div().id(`steer-${c.key}`).px(3).rounded(4).text_color(t.dim)
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
-          .on_click((_e, cx) => { cx.stop_propagation(); run("terminal.peek", { terminal: c.address }); })
+          .on_click((_e, cx) => { cx.stop_propagation(); steer(); })
           .child("⋯"))))
       .child(div().text_size(13).line_height(1.35).text_color(t.foreground).child(c.title))
       .child(h_flex().gap(6).items_center()
@@ -79,7 +86,10 @@ export function renderBoard(m) {
           ? div().size(6).rounded(3).bg(t.working).loop("opacity", { from: 0.35, to: 1, period: 1200 })
           : div().size(6).rounded(3).bg(statusColor(c.status)))
         .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(c.note))
-        .child(div().font_family(MONO).text_size(10.5).text_color(t.dim).child(age(now - c.since))))
+        .child(div().font_family(MONO).text_size(10.5).text_color(timeColor).child(age(now - c.since))))
+      .when(Boolean(c.stuckText), (el) => el.child(h_flex().gap(6).items_center()
+        .child(div().size(5).bg(stuckColor(t)))
+        .child(div().text_size(11).text_color(stuckColor(t)).child(c.stuckText))))
       .when(c.after.length > 0 && c.status !== "idle", (el) => el.child(
         div().font_family(MONO).text_size(10.5).text_color(t.dim).child(`after ${c.after.join(", ")}`)))
       .when(c.asked, (el) => el.child(

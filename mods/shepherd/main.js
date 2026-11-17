@@ -1,5 +1,6 @@
-// Shepherd: one mod, several roles. props.view picks the main view (board, needs; the person's
-// switch in shared "shepherd.view" wins), props.panel a side role (detail, status, bar).
+// Shepherd: one mod, several roles. props.view picks the main view (board, pipeline, deps, needs;
+// the person's switch in shared "shepherd.view" wins), props.panel a side role (tabs, detail,
+// status, bar) or an overlay (steer, term, termfoot, digest).
 // Everything reads the shown space's <repo>/.herdr/shepherd/tasks.json, written by Shepherd
 // through shepherd/bin/shep.mjs. The repo is the `shepherd.dir` label on the space's Shepherd
 // terminal, else the space's folder. Answers and messages go to Shepherd with `hc send`.
@@ -8,15 +9,19 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState } from "gpui-base";
 import {
   props, terminals, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
-  hc, notify, playSound,
+  hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
-import { TASKS, MAX_LOOPS, STAGES, localId, machineOf, palette } from "./common.js";
+import { TASKS, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, localId, machineOf, palette } from "./common.js";
 import { renderBoard } from "./board.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
 import { renderDetail, tint, TAB, TABS } from "./detail.js";
 import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
 import { loadPr, loadProof } from "./ship.js";
+import { renderTabBar } from "./tabbar.js";
+import { renderPipeline, renderDeps } from "./views.js";
+import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
+import { renderDigest } from "./digest.js";
 
 const REFRESH_MS = 5000;
 const VIEW = "shepherd.view";
@@ -27,6 +32,10 @@ const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for
 const GIT_STALE_MS = 10000; // Changes and Files reload this often while shown
 const PR_STALE_MS = 30000; // gh pr view, for the PR card's checks
 const PROOF_STALE_MS = 15000;
+const LOAD_MS = 15000; // the status bar's machine load
+const SELECTED = "shepherd.selected";
+const FOCUS_BAR = "shepherd.focusBar"; // C: the board asks the bar to take the keyboard
+export const VIEWS = ["board", "pipeline", "deps", "needs"];
 
 /** Task status → board status. Queued, paused and parked read as idle (grey). */
 const TASK_STATUS = { working: "working", blocked: "blocked", done: "done" };
@@ -46,9 +55,36 @@ export default class Shepherd extends View {
     this.gitCache = {}; // "<repo key>#<task id>" -> { git, diffs: {path: text}, files: {path: {text, added}}, ui, loading }
     this.slots = Array.from({ length: REPLY_SLOTS }, () => ({ q: null, input: InputState.new({ placeholder: "Or write your own answer…" }) }));
     for (const s of this.slots) s.input.on("submit", () => { const q = this.questionById(s.q); if (q) this.answer(q, s.input.value()); });
-    if (props()?.panel === "bar") {
+    const p = props() ?? {};
+    if (p.panel === "bar") {
       this.barInput = InputState.new({ placeholder: "Tell Shepherd what to build, or ask about any task…" });
       this.barInput.on("submit", () => this.say(this.barInput.value()));
+      this.barFocusSeen = shared(FOCUS_BAR) ?? 0;
+    }
+    if (p.panel === "steer") {
+      this.steerMode = null; // null: the menu; "redirect" | "context": the text field
+      this.steerInput = InputState.new({ placeholder: "" });
+      this.steerInput.on("submit", () => this.sendSteer());
+    }
+    // The board and the steer menu take keys (J/K, S, P, T, …): only while they hold the keyboard,
+    // so typing in the bar or a terminal never triggers them.
+    if (!p.panel || p.panel === "steer" || p.panel === "detail") {
+      this.keys = cx.focus_handle();
+      if (!p.panel || p.panel === "steer") cx.spawn(async () => { this.keys.focus(); });
+    }
+    // Key commands from keys.json ("shepherd.digest", "shepherd.view:pipeline", …): the board copy acts.
+    if (!p.panel) {
+      cx.spawn(async (cx) => {
+        for (;;) {
+          const c = await nextCommand();
+          this.command(c);
+          cx.notify();
+        }
+      });
+    }
+    if (p.panel === "status") {
+      cx.timer.every(LOAD_MS, (cx) => this.readLoad(cx));
+      this.readLoad(cx);
     }
     // Time in stage changes by the minute; the 5 s tick also reloads remote repos and
     // retries a watch that failed (no tasks.json yet).
@@ -89,6 +125,11 @@ export default class Shepherd extends View {
 
   error() { return this.state().error ?? null; }
 
+  /** The workflow settings in force for the shown space (defaults until loaded). */
+  settings() {
+    return this.state().settings ?? { maxLoops: MAX_LOOPS, limits: LIMITS, stuckMinutes: STUCK_MIN, stages: {} };
+  }
+
   // ---- loading ---------------------------------------------------------------------------
 
   sync(cx) {
@@ -128,13 +169,20 @@ export default class Shepherd extends View {
       // Keep the last good state; shep writes atomically, so this is a hand edit gone wrong.
       next = { ...prev, error: `tasks.json: ${e.message ?? e}` };
     }
-    // Alerts: the person's workflow (Shepherd's label), then the space's orchestra.json on top.
-    let alerts = { toast: true, sound: true, phone: false, ntfy: "" };
-    try {
-      if (repo.workflow) alerts = { ...alerts, ...((await this.readJson(repo.workflow, repo.machine))?.alerts ?? {}) };
-      alerts = { ...alerts, ...((await this.readJson(`${repo.dir}/.herdr/orchestra.json`, repo.machine))?.alerts ?? {}) };
-    } catch { /* a broken settings file keeps the defaults */ }
-    this.data[repo.key] = { ...next, alerts };
+    // Settings: the person's workflow (Shepherd's label), then the space's orchestra.json on top.
+    let wf = {}, orch = {};
+    try { if (repo.workflow) wf = (await this.readJson(repo.workflow, repo.machine)) ?? {}; } catch { /* defaults */ }
+    try { orch = (await this.readJson(`${repo.dir}/.herdr/orchestra.json`, repo.machine)) ?? {}; } catch { /* defaults */ }
+    const alerts = { toast: true, sound: true, phone: false, ntfy: "", ...wf.alerts, ...orch.alerts };
+    const settings = {
+      maxLoops: orch.maxLoops ?? wf.maxLoops ?? MAX_LOOPS,
+      limits: { ...LIMITS, ...wf.limits, ...orch.limits },
+      stuckMinutes: { ...STUCK_MIN, ...wf.stuckMinutes, ...orch.stuckMinutes },
+      // Per stage, the space's keys win over the person's (a space may set only its CI command).
+      stages: Object.fromEntries([...new Set([...Object.keys(wf.stages ?? {}), ...Object.keys(orch.stages ?? {})])]
+        .map((k) => [k, { ...wf.stages?.[k], ...orch.stages?.[k] }])),
+    };
+    this.data[repo.key] = { ...next, alerts, settings };
     // Answers tasks.json has recorded are no longer pending.
     const pending = shared(PENDING) ?? [];
     const open = new Set(next.questions.filter((q) => q.answer == null).map((q) => `${repo.key}#${q.id}`));
@@ -245,8 +293,12 @@ export default class Shepherd extends View {
     // Blockers still to finish; done ones no longer hold the task.
     const doneIds = new Set((this.state().tasks ?? []).filter((x) => x.stage === "done").map((x) => x.id));
     const blockers = (task.blockedBy ?? []).filter((b) => b && !doneIds.has(b));
+    const minutes = (Date.now() - since) / 60000;
+    const limit = this.settings().stuckMinutes[task.stage];
+    const stuck = task.status === "working" && !asked && limit != null && minutes > limit;
     const note = task.status === "parked" ? "parked"
-      : task.status === "paused" ? "paused"
+      : task.status === "paused" ? "paused by you"
+      : task.wait && task.status === "queued" ? task.wait
       : task.status === "queued" && blockers.length ? `blocked by ${blockers.join(", ")}`
       : task.status === "queued" && task.stage === "tickets" ? "ready-for-agent"
       : (last?.note || (term?.report ?? "") || task.status);
@@ -263,6 +315,10 @@ export default class Shepherd extends View {
       since,
       after: blockers,
       asked,
+      stuck,
+      stuckText: stuck ? `stuck · over ${limit}m in ${STAGES[task.stage]?.title ?? task.stage}` : null,
+      paused: task.status === "paused",
+      task,
     };
   }
 
@@ -302,6 +358,7 @@ export default class Shepherd extends View {
         since: this.since[x.address].since,
         after: [],
         asked: false,
+        stuck: false,
       });
     }
     for (const a of Object.keys(this.since)) if (!seen.has(a)) delete this.since[a];
@@ -318,6 +375,179 @@ export default class Shepherd extends View {
       }
     }
     return best?.text ?? null;
+  }
+
+  // ---- steering and overlays --------------------------------------------------------------
+
+  /** A line to this space's Shepherd (CONVENTIONS.md "Talking to Shepherd"). */
+  tell(line) {
+    const sh = this.shepherd();
+    if (!sh) { notify({ title: "No Shepherd in this space", body: "Start one with shepherd/start.sh.", level: "warning" }); return false; }
+    hc(["send", sh.address, line]);
+    return true;
+  }
+
+  togglePause(task) {
+    if (!task || !["working", "paused"].includes(task.status)) return;
+    this.tell(`${task.status === "paused" ? "resume" : "pause"} ${task.id}`);
+  }
+
+  /** Ask for status: Shepherd answers in its own output, so show its terminal. */
+  askStatus(task) {
+    if (!task || !this.tell(`status ${task.id}?`)) return;
+    const sh = this.shepherd();
+    if (sh) this.openTerminal(sh.address, null);
+  }
+
+  openTask(id) {
+    setShared(SELECTED, `task-${id}`);
+    run("layout.show", { id: "detail" });
+  }
+
+  /** The steer menu (⋯ or right-click: at the pointer; S or a key command: near the board's top
+   *  left, since the pointer may be anywhere). */
+  openSteer(id, atPointer = true) {
+    openOverlay({ mod: "shepherd", kind: "popup", width: 290, height: 244, props: { panel: "steer", task: id },
+      ...(atPointer ? {} : { at: { x: 420, y: 120 } }) });
+  }
+
+  /** An agent's real terminal in a window: a title bar to drag it by, the terminal, a footer. */
+  openTerminal(address, taskId) {
+    if (!address) return;
+    const bar = (panel, px) => ({ type: "block", size: { px }, content: { mod: "shepherd", props: { panel, terminal: address, task: taskId } } });
+    openOverlay({
+      kind: "window", key: "shepherd-terminal", width: 900, height: 640,
+      layout: { type: "column", children: [bar("term", 40), { type: "block", content: { terminal: address } }, bar("termfoot", 30)] },
+    });
+  }
+
+  openDigest() {
+    openOverlay({ mod: "shepherd", kind: "dialog", width: 720, height: 480, props: { panel: "digest" } });
+  }
+
+  sendSteer() {
+    const text = this.steerInput.value().trim();
+    const id = props()?.task;
+    if (!text || !id || !this.steerMode) return;
+    if (this.tell(`steer ${id} ${this.steerMode}: ${text}`)) closeOverlay(props().overlay);
+  }
+
+  /** The machine's CPU and memory, for the status bar: shepherd/bin/load.sh where the space lives. */
+  readLoad(cx) {
+    const repo = this.repo();
+    if (!repo?.workflow) { this.load = null; return; }
+    const script = `${repo.workflow.replace(/\/[^/]*$/, "")}/bin/load.sh`;
+    cx.spawn(async (cx) => {
+      const r = await exec("sh", [script], { on: repo.machine, timeout: 10000 }).catch(() => null);
+      const m = r?.code === 0 ? r.stdout.match(/cpu (\d+) mem (\d+)/) : null;
+      this.load = m ? { cpu: Number(m[1]), mem: Number(m[2]) } : null;
+      cx.notify();
+    });
+  }
+
+  // ---- keys ------------------------------------------------------------------------------
+
+  /** Cards in keyboard order: the board's column order, or the pipeline's rows. */
+  keyOrder() {
+    const cards = this.cards().filter((c) => c.task);
+    if (this.view() === "pipeline") return this.pipelineOrder(cards).map((c) => c.key);
+    return ORDER.flatMap((s) => cards.filter((c) => c.stage === s)).map((c) => c.key);
+  }
+
+  pipelineOrder(cards) {
+    const rank = (c) => (c.status === "blocked" ? 0 : c.status === "working" ? 1 : c.status === "done" ? 3 : 2);
+    return [...cards].sort((a, b) => rank(a) - rank(b) || ORDER.indexOf(b.stage) - ORDER.indexOf(a.stage));
+  }
+
+  /** The task keys act on: the keyboard focus, else the open one. */
+  keyTask() {
+    const key = this.kf ?? shared(SELECTED);
+    return typeof key === "string" ? (this.state().tasks ?? []).find((x) => `task-${x.id}` === key) ?? null : null;
+  }
+
+  /** A key command: digest, steer, terminal, pause, open, view:<board|pipeline|deps|needs>,
+   *  tab:<1-5>, next, prev. Task commands act on the keyboard focus, else the open task. */
+  command(c) {
+    const [name, arg] = String(c).split(":");
+    const task = this.keyTask();
+    if (name === "digest") this.openDigest();
+    else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
+    else if (name === "tab" && TABS[Number(arg) - 1]) setShared(TAB, TABS[Number(arg) - 1]);
+    else if (name === "next" || name === "prev") {
+      const ord = this.keyOrder();
+      if (!ord.length) return;
+      let i = ord.indexOf(this.kf ?? shared(SELECTED));
+      i = i < 0 ? 0 : Math.max(0, Math.min(ord.length - 1, i + (name === "next" ? 1 : -1)));
+      this.kf = ord[i];
+      if (typeof shared(SELECTED) === "string") setShared(SELECTED, ord[i]);
+    } else if (name === "open" && (arg || this.kf)) this.openTask(arg ?? this.kf.slice(5));
+    else if (!task && !arg) return;
+    else if (name === "steer") this.openSteer(arg ?? task.id, false);
+    else if (name === "terminal") { const x = arg ? (this.state().tasks ?? []).find((y) => y.id === arg) : task; if (x) this.openTerminal(x.terminal, x.id); }
+    else if (name === "pause") this.togglePause(arg ? (this.state().tasks ?? []).find((y) => y.id === arg) : task);
+  }
+
+  /** Board keys (RECIPE "Keys"). Plain letters, only while the board holds the keyboard. */
+  boardKey(e, cx) {
+    if (e.modifiers?.control || e.modifiers?.alt || e.modifiers?.platform) return;
+    const k = e.key.toLowerCase();
+    const stop = () => cx.stop_propagation();
+    if (this.gAt && Date.now() - this.gAt < 1200) {
+      this.gAt = 0;
+      const v = { b: "board", p: "pipeline", d: "deps", n: "needs" }[k];
+      if (v) { setShared(VIEW, v); stop(); }
+      return;
+    }
+    const sel = shared(SELECTED);
+    const task = this.keyTask();
+    if (["1", "2", "3", "4", "5"].includes(k) && typeof sel === "string") { setShared(TAB, TABS[Number(k) - 1]); stop(); return; }
+    if (k === "j" || k === "k" || k === "down" || k === "up") {
+      const ord = this.keyOrder();
+      if (!ord.length) return;
+      const down = k === "j" || k === "down";
+      let i = ord.indexOf(this.kf ?? sel);
+      i = i < 0 ? 0 : down ? Math.min(ord.length - 1, i + 1) : Math.max(0, i - 1);
+      this.kf = ord[i];
+      if (typeof sel === "string") setShared(SELECTED, ord[i]); // the open task follows
+      stop(); cx.notify();
+      return;
+    }
+    if (k === "enter" && this.kf) { this.openTask(this.kf.slice(5)); stop(); return; }
+    if (k === "escape") {
+      if (typeof sel === "string") { setShared(SELECTED, null); run("layout.hide", { id: "detail" }); } else this.kf = null;
+      stop(); cx.notify();
+      return;
+    }
+    if (k === "g") { this.gAt = Date.now(); stop(); return; }
+    if (k === "d") { this.openDigest(); stop(); return; }
+    if (k === "c") { setShared(FOCUS_BAR, Date.now()); stop(); return; }
+    if (!task) return;
+    if (k === "s") { this.openSteer(task.id, false); stop(); }
+    else if (k === "p") { this.togglePause(task); stop(); }
+    else if (k === "t") { this.openTerminal(task.terminal, task.id); stop(); }
+    else if (k === "a") {
+      // Accept: the recommended answer (Merge, Approve) of the task's open question.
+      const q = this.questions().find((x) => x.task === task.id && x.kind !== "grill");
+      const pick = q?.recommended ?? q?.options?.[0];
+      if (q && pick) this.answer(q, pick);
+      stop();
+    }
+  }
+
+  /** Steer menu keys: P R C S T ↵. */
+  steerKey(e, cx) {
+    if (this.steerMode) return; // typing in the field
+    const task = (this.state().tasks ?? []).find((x) => x.id === props()?.task);
+    if (!task) return;
+    const k = e.key.toLowerCase();
+    const close = () => closeOverlay(props().overlay);
+    if (k === "p") { this.togglePause(task); close(); }
+    else if (k === "r" || k === "c") { this.steerMode = k === "r" ? "redirect" : "context"; this.steerInput.focus(); cx.notify(); }
+    else if (k === "s") { close(); this.askStatus(task); }
+    else if (k === "t") { close(); this.openTerminal(task.terminal, task.id); }
+    else if (k === "enter") { close(); this.openTask(task.id); }
+    else return;
+    cx.stop_propagation();
   }
 
   // ---- task detail ---------------------------------------------------------------------
@@ -384,25 +614,19 @@ export default class Shepherd extends View {
 
   // ---- views -----------------------------------------------------------------------------
 
-  view() { return shared(VIEW) ?? props()?.view ?? "board"; }
+  view() {
+    const v = shared(VIEW) ?? props()?.view ?? "board";
+    return VIEWS.includes(v) ? v : "board";
+  }
 
-  /** The 32px pane header every view shares: title, subtitle, view switch; add filters after it. */
+  /** The 32px pane header every view shares: title and subtitle; add filters after it.
+   *  The view switch lives in the tab bar (panel "tabs"). */
   header(title, sub) {
     const t = palette();
-    const view = this.view();
-    const n = this.questions().length;
-    const tab = (key, label, count) => h_flex().id(`view-${key}`).h(22).px(8).gap(5).items_center().rounded(5)
-      .bg(view === key ? t.selected : t.surface).text_color(view === key ? t.foreground : t.muted)
-      .hover((s) => s.bg(t.hover))
-      .on_click(() => setShared(VIEW, key))
-      .child(label)
-      .when(count > 0, (el) => el.child(div().px(5).rounded(4).bg(t.blocked).text_color(t.background)
-        .text_size(10.5).font_semibold().child(String(count))));
     return h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
       .child(div().font_semibold().text_color(t.foreground).child(title))
       .child(div().text_color(t.dim).child(sub))
       .when(Boolean(this.error()), (el) => el.child(div().truncate().text_color(t.ansi1).child(this.error())))
-      .child(h_flex().gap(2).child(tab("board", "Board", 0)).child(tab("needs", "Needs you", n)))
       .child(div().flex_1());
   }
 
@@ -412,22 +636,54 @@ export default class Shepherd extends View {
     const repo = this.repo();
     if (repo && !(repo.key in this.data)) { this.data[repo.key] = { tasks: [], questions: [], alerts: {} }; this.sync(cx); }
     if (p.panel === "status") return this.renderStatus();
-    if (p.panel === "bar") return renderBar(this);
+    if (p.panel === "tabs") return renderTabBar(this);
+    if (p.panel === "steer") return renderSteer(this).track_focus(this.keys).on_key_down((e, cx) => this.steerKey(e, cx));
+    if (p.panel === "term") return renderTermBar(this);
+    if (p.panel === "termfoot") return renderTermFoot(this);
+    if (p.panel === "digest") return renderDigest(this);
+    if (p.panel === "bar") {
+      const ask = shared(FOCUS_BAR) ?? 0;
+      if (ask > this.barFocusSeen) { this.barFocusSeen = ask; cx.spawn(async () => { this.barInput.focus(); }); }
+      return renderBar(this);
+    }
     if (p.panel === "detail") {
       const task = this.selectedTask();
       if (task) this.ensureGit(task, cx);
-      return renderDetail(this);
+      // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too).
+      return renderDetail(this).track_focus(this.keys)
+        .on_mouse_down("left", () => this.keys.focus())
+        .on_key_down((e, cx) => {
+          const k = e.key;
+          if (["1", "2", "3", "4", "5"].includes(k) && !e.modifiers?.platform && !e.modifiers?.control) { setShared(TAB, TABS[Number(k) - 1]); cx.stop_propagation(); }
+        });
     }
-    return this.view() === "needs" ? renderNeeds(this) : renderBoard(this);
+    const view = this.view();
+    const body = view === "needs" ? renderNeeds(this) : view === "pipeline" ? renderPipeline(this)
+      : view === "deps" ? renderDeps(this) : renderBoard(this);
+    // Clicking anywhere on the board gives it the keyboard.
+    return body.track_focus(this.keys)
+      .on_mouse_down("left", () => this.keys.focus())
+      .on_key_down((e, cx) => this.boardKey(e, cx));
   }
 
   renderStatus() {
     const t = palette();
+    const s = this.settings();
+    const space = this.space();
+    const model = (stage) => s.stages?.[stage]?.model ?? null;
+    const lim = s.limits;
+    const l = this.load;
+    const gauge = (name, now, max) => div().text_color(now != null && now >= max ? t.ansi1 : t.dim)
+      .child(now != null ? `${name} ${now}% ≤ ${max}%` : `${name} ≤ ${max}%`);
     return h_flex().id("shepherd-status").size_full().px(12).gap(14).items_center().bg(t.chrome)
       .border_t(1).border_color(t.border)
       .font_family("JetBrains Mono").text_size(11).text_color(t.dim)
-      .child("herdr-core · local")
-      .child(`max loops ${MAX_LOOPS}`)
+      .child(`herdr-core · ${space?.machine ?? "local"}`)
+      .when(Boolean(model("implement")), (el) => el.child(`implement ${model("implement")}`))
+      .when(Boolean(model("review")), (el) => el.child(`review ${model("review")}`))
+      .child(`max loops ${s.maxLoops}`)
+      .child(gauge("cpu", l?.cpu, lim.maxCpu))
+      .child(gauge("mem", l?.mem, lim.maxMem))
       .child(div().flex_1())
       .child("mods/shepherd");
   }

@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, groupColor, stageGroup, age, palette } from "./common.js";
+import { STAGES, MONO, ROLE, groupColor, stageGroup, age, palette } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 
@@ -90,7 +90,6 @@ export function renderDetail(m) {
 // ---- Overview ------------------------------------------------------------------------------
 
 const RESULT_COLOR = (t, r) => (r === "pass" ? t.done : r === "fail" ? t.ansi1 : r === "ask" ? t.blocked : t.working);
-const ROLE = { triage: "triager", spec: "planner", tickets: "planner", implement: "implementer", review: "reviewer", ci: "ci", proof: "qa", merge: "shepherd" };
 
 function overview(m, task, t) {
   const now = Date.now();

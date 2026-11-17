@@ -39,7 +39,10 @@
             "px": 36
           },
           "content": {
-            "mod": "tabs"
+            "mod": "shepherd",
+            "props": {
+              "panel": "tabs"
+            }
           }
         },
         {

@@ -31,6 +31,20 @@ export const STAGES = {
   done: { title: "Done", skill: "" },
 };
 
+export const ORDER = GROUPS.flatMap((g) => g.stages);
+
+/** Who works each stage, for the steer menu and comments. */
+export const ROLE = { triage: "triager", spec: "planner", tickets: "planner", implement: "implementer", review: "reviewer", ci: "ci", proof: "qa", merge: "shepherd" };
+
+/** A working task goes stuck past its stage's limit (minutes); workflow.json's stuckMinutes wins. */
+export const STUCK_MIN = { triage: 40, spec: 120, tickets: 60, implement: 50, review: 25, ci: 20, proof: 20 };
+
+/** Machine load limits (percent) when the workflow sets none. */
+export const LIMITS = { maxCpu: 80, maxMem: 85 };
+
+/** Stuck uses ansi red (CONVENTIONS.md). */
+export const stuckColor = (t) => t.ansi1;
+
 /** Question kinds: chip label, glyph and group (for its color). */
 export const KINDS = {
   triage: { label: "triage", icon: "⏷", group: "plan" },

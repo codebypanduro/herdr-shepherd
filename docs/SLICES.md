@@ -32,8 +32,9 @@ The CI command per space, a headless browser with screenshots and a recording, a
 **Done when:** Merge squashes the PR and removes the worktree.
 **Built:** CI, Proof and Ship in PROMPT.md; `ship.js` (PR card with Squash and merge / Send back, Proof tab); `start.sh` keeps `.herdr/` out of git via `.git/info/exclude`. Checked live: T-4 went CI → Proof (4/4) → local squash merge with worktree and branch removed; T-6 went through to PR #1 on a private test repo, and Merge squashed it and removed the worktree. The remote branch was left behind on that run (fixed in the prompt since: remove the worktree before `gh pr merge --delete-branch`). No screenshots or recording yet: the demo has no UI.
 
-## 7. Factory controls
+## 7. Factory controls ✅
 Machine load limits, time in stage and stuck, steering, the terminal overlay, the digest, the dependencies view, keys.
+**Built:** the design's tab bar (`tabbar.js`: tab pills, view switch Board · Pipeline · Dependencies · Needs you, Digest, ⌘K, ⚙ Workflow), Pipeline and Dependencies views (`views.js`), the steer menu and terminal window (`steer.js`), the digest (`digest.js`), stuck cards from `stuckMinutes`, the status bar's machine load against `limits`, `shepherd/bin/load.sh` + `shep room [--wait]` + `shep set wait=…` and the room rule in PROMPT.md, board keys (J/K, G B/P/D/N, ↵, Esc, S, P, T, A, C, D, 1–5) and `keys.json` (`layout:shepherd`). Checked live on the demo: every view, the digest, the steer menu, the terminal window and the load gauge on screen; a stuck card and a "waiting for room on this mac" card from test tasks; Pause → Resume and a `steer … redirect:` line went through the live Shepherd and reached a stand-in terminal. Not checked: plain-letter keys and ⌘ keys pressed by a person (no way to press keys from here; the same actions were run as `shepherd.<command>`), typing in the steer field, Shepherd actually holding a ticket for room (only `shep room` exit codes), the paper theme.
 
 ## 8. Spaces sidebar
 Folders, org avatars, machines and usage, Space settings, New space, Add machine.

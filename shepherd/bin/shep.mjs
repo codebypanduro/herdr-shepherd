@@ -11,6 +11,7 @@
 //   shep end <id> pass|fail|ask [--note "…"] [--tokens N] [--cost N]      closes the open stage run
 //   shep loop <id>                    next build loop; exits 2 when maxLoops is used up (ask the person)
 //   shep set <id> key=value …         stage status terminal branch worktree pr prUrl proof summary title brief blockedBy
+//                                     wait ("waiting for room on <machine>": the card's note until start clears it)
 //   shep finding <id> add --text "…" [--file f] [--line n]                prints the finding id
 //   shep finding <id> <fid> open|fixing|resolved
 //   shep ask <id> --text "…" [--kind ask|escalate|merge|triage|grill|approve] [--from "t5 implementer"]
@@ -18,11 +19,14 @@
 //            grilling: --kind grill --round 2 --questions <file.json>   [{q, options:[…], recommended, why}]
 //            approval: --kind approve --tickets <file.json>             [{key, title, brief, blockedBy:[keys]}]
 //   shep answer <qid> "<answer>"      records the person's answer; the question leaves Needs you
+//   shep room [--wait]                is this machine under the workflow's CPU and memory limits? exit 0 yes, 3 no;
+//                                     --wait: check every 15 s until there is room (run it in an hc terminal)
 //   shep get <id> | shep ls
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const STAGES = ["triage", "spec", "tickets", "implement", "review", "ci", "proof", "merge", "done"];
 const STATUSES = ["working", "blocked", "queued", "paused", "parked", "done"];
@@ -130,6 +134,7 @@ switch (cmd) {
     const open = openRun(t);
     if (open) { open.end = now(); open.result = open.result ?? "pass"; }
     t.stage = stage;
+    delete t.wait;
     // Ready to merge waits on the person.
     t.status = stage === "done" ? "done" : stage === "merge" ? "blocked" : "working";
     if (opt.terminal) t.terminal = opt.terminal;
@@ -181,7 +186,7 @@ switch (cmd) {
       if (k === "status" && !STATUSES.includes(v)) die(`status one of ${STATUSES.join(" ")}`);
       if (k === "blockedBy") t.blockedBy = v ? v.split(",") : [];
       else if (["loop", "maxLoops", "pr"].includes(k)) t[k] = v === "" ? null : Number(v);
-      else if (["stage", "status", "terminal", "branch", "worktree", "summary", "title", "prUrl", "proof", "brief"].includes(k)) t[k] = v === "" ? null : v;
+      else if (["stage", "status", "terminal", "branch", "worktree", "summary", "title", "prUrl", "proof", "brief", "wait"].includes(k)) t[k] = v === "" ? null : v;
       else die(`unknown key ${k}`);
     }
     save(file, state);
@@ -265,10 +270,32 @@ switch (cmd) {
     }
     break;
   }
+  case "room": {
+    // Limits: the person's workflow ($SHEP_WORKFLOW or --workflow), the space's orchestra.json on top.
+    const read = (f) => { try { return f && existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {}; } catch { return {}; } };
+    const wf = typeof opt.workflow === "string" ? opt.workflow : process.env.SHEP_WORKFLOW;
+    const limits = { maxCpu: 80, maxMem: 85, ...read(wf).limits, ...read(join(dirname(dirname(file)), "orchestra.json")).limits };
+    const loadSh = join(dirname(fileURLToPath(import.meta.url)), "load.sh");
+    const sample = () => {
+      const out = execFileSync("sh", [loadSh], { encoding: "utf8" });
+      const [, cpu, mem] = out.match(/cpu (\d+) mem (\d+)/) ?? [];
+      return { cpu: Number(cpu), mem: Number(mem) };
+    };
+    const check = () => {
+      const l = sample();
+      const room = l.cpu < limits.maxCpu && l.mem < limits.maxMem;
+      console.log(`cpu ${l.cpu}% (max ${limits.maxCpu}) mem ${l.mem}% (max ${limits.maxMem}): ${room ? "room" : "no room"}`);
+      return room;
+    };
+    if (check()) break;
+    if (!opt.wait) process.exit(3);
+    const timer = setInterval(() => { if (check()) { clearInterval(timer); process.exit(0); } }, 15000);
+    break;
+  }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;
   case "ls":
     for (const t of need().tasks) console.log(`${t.id}\t${t.stage}\t${t.status}\tloop ${t.loop}/${t.maxLoops}\t${t.title}`);
     break;
   default:
-    die("commands: init add ready start end loop set finding ask answer get ls (see the top of shep.mjs)");
+    die("commands: init add ready start end loop set finding ask answer room get ls (see the top of shep.mjs)");
 }

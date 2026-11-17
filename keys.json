@@ -1,0 +1,10 @@
+{
+  "layout:shepherd": {
+    "cmd-k": "app.palette",
+    "cmd-shift-d": "shepherd.digest",
+    "cmd-alt-1": "shepherd.view:board",
+    "cmd-alt-2": "shepherd.view:pipeline",
+    "cmd-alt-3": "shepherd.view:deps",
+    "cmd-alt-4": "shepherd.view:needs"
+  }
+}

@@ -38,5 +38,5 @@ hc run --bg --keep --outlive-parent --no-parent --name "shepherd-$(echo "$SPACE"
   --cwd "$REPO" \
   --label herdr.space="$SPACE" --label herdr.tab="shepherd-$SPACE" \
   --label herdr.role=shepherd --label shepherd.dir="$REPO" --label shepherd.workflow="$CONFIG" \
-  -- env SHEP_FILE="$FILE" claude --model "$MODEL" --append-system-prompt-file "$PROMPT" \
+  -- env SHEP_FILE="$FILE" SHEP_WORKFLOW="$CONFIG" claude --model "$MODEL" --append-system-prompt-file "$PROMPT" \
   "You are Shepherd for $REPO. Read $CONFIG, run: node $HERE/bin/shep.mjs ls, then wait for the person."

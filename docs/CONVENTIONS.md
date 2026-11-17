@@ -43,6 +43,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
     "worktree": "~/.herdr/worktrees/herdr-app/hrd-144-timer-on-each-tab",
     "branch": "hrd-144-timer-on-each-tab",
     "pr": 204,
+    "wait": "waiting for room on vps   (optional: why a queued ticket hasn't started; shep start clears it)",
     "history": [
       { "loop": 1, "stage": "implement", "result": "pass", "note": "timer in tabs mod",
         "start": "2026-11-17T09:02:11Z", "end": "2026-11-17T09:31:40Z",
