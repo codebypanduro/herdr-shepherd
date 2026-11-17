@@ -276,7 +276,10 @@ switch (cmd) {
   case "room": {
     // Limits: the person's workflow ($SHEP_WORKFLOW or --workflow), the space's orchestra.json on top.
     const read = (f) => { try { return f && existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {}; } catch { return {}; } };
-    const wf = typeof opt.workflow === "string" ? opt.workflow : process.env.SHEP_WORKFLOW;
+    // workflow.json beside workflow.example.json wins: Workflow settings writes it (mods/shepherd/settings.js).
+    const named = typeof opt.workflow === "string" ? opt.workflow : process.env.SHEP_WORKFLOW;
+    const mine = named?.replace(/workflow\.example\.json$/, "workflow.json");
+    const wf = mine && existsSync(mine) ? mine : named;
     // Defaults match LIMITS in mods/shepherd/common.js: change both together.
     const limits = { maxCpu: 80, maxMem: 85, ...read(wf).limits, ...read(join(dirname(dirname(file)), "orchestra.json")).limits };
     const loadSh = join(dirname(fileURLToPath(import.meta.url)), "load.sh");

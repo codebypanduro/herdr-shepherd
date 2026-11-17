@@ -23,7 +23,10 @@
           "id": "spaces",
           "type": "block",
           "content": {
-            "mod": "spaces"
+            "mod": "shepherd",
+            "props": {
+              "panel": "spaces"
+            }
           }
         }
       ]

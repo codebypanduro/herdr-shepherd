@@ -3,7 +3,8 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { terminals, run, shared, setShared, exec } from "herdr";
+import { terminals, run, setShared } from "herdr";
+import { openWorkflow } from "./sidebar.js";
 import { MONO, VIEW, VIEW_LIST, localId, machineOf, palette } from "./common.js";
 
 export function renderTabBar(m) {
@@ -71,7 +72,6 @@ export function renderTabBar(m) {
     .hover((s) => s.bg(t.hover))
     .on_click(onClick)
     .children(children);
-  const workflow = m.repo()?.workflow;
 
   return h_flex().id("shepherd-tabs").size_full().px(10).gap(6).items_center().bg(t.chrome)
     .border_b(1).border_color(t.border)
@@ -85,6 +85,5 @@ export function renderTabBar(m) {
     .child(button("open-digest", [div().child("Digest"), div().font_family(MONO).text_size(10.5).text_color(t.dim).child("D")], () => m.toggleDigest()))
     .child(button("open-palette", [div().font_family(MONO).text_size(11).text_color(t.muted).child("⌘K")], () => run("app.palette")))
     .child(button("open-workflow", [div().font_family(MONO).text_color(t.dim).child("⚙"), div().child("Workflow")],
-      // Until the Workflow settings overlay exists, the file itself (this computer's spaces only).
-      () => workflow && !space?.machine && exec("open", ["-t", workflow]).catch(() => null)));
+      () => openWorkflow()));
 }

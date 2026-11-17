@@ -1,6 +1,7 @@
 // Shepherd: one mod, several roles. props.view picks the main view (board, pipeline, deps, needs;
-// the person's switch in shared "shepherd.view" wins), props.panel a side role (tabs, detail,
-// status, bar) or an overlay (steer, term, termfoot, digest, history).
+// the person's switch in shared "shepherd.view" wins), props.panel a side role (spaces, tabs,
+// detail, status, bar) or an overlay (steer, term, termfoot, digest, history, plus, machine, usage,
+// newspace, addmachine, workflow, spacesettings).
 // Everything reads the shown space's <repo>/.herdr/shepherd/tasks.json, written by Shepherd
 // through shepherd/bin/shep.mjs. The repo is the `shepherd.dir` label on the space's Shepherd
 // terminal, else the space's folder. Answers and messages go to Shepherd with `hc send`.
@@ -9,7 +10,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, ScrollHandle } from "gpui-base";
 import {
   props, terminals, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
-  hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
+  hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand, appHome,
 } from "herdr";
 import {
   TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN,
@@ -26,6 +27,12 @@ import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
 import { renderDigest } from "./digest.js";
 import { renderHistory } from "./history.js";
+import {
+  initSidebar, renderSidebar, renderPlus, startNewFolder, openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow,
+} from "./sidebar.js";
+import { renderMachinePop, renderUsagePop, initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./machines.js";
+import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings, personalWorkflow } from "./settings.js";
+import { folders } from "./sidebar.js";
 
 const REFRESH_MS = 5000;
 const PENDING = "shepherd.pending"; // question ids answered here that tasks.json hasn't caught up with
@@ -72,6 +79,11 @@ export default class Shepherd extends View {
       this.historyScroll = ScrollHandle.new();
       this.historyCount = 0;
     }
+    if (p.panel === "spaces") initSidebar(this, cx, InputState);
+    if (p.panel === "addmachine") initAddMachine(this, cx, InputState);
+    if (p.panel === "newspace") initNewSpace(this, cx, InputState);
+    if (p.panel === "workflow") initWorkflow(this, cx);
+    if (p.panel === "spacesettings") initSpaceSettings(this, cx, InputState);
     // D and ⌘J toggle these: the open copy's overlay id, cleared in close().
     if (p.panel === "digest") setShared(DIGEST_OPEN, p.overlay ?? null);
     if (p.panel === "history") setShared(HISTORY_OPEN, p.overlay ?? null);
@@ -85,7 +97,7 @@ export default class Shepherd extends View {
       if (p.panel === "history") cx.spawn(async () => { this.historyInput.focus(); });
     }
     // Key commands from keys.json ("shepherd.digest", "shepherd.view:pipeline", …).
-    if (!p.panel || p.panel === "bar") {
+    if (!p.panel || p.panel === "bar" || p.panel === "spaces") {
       cx.spawn(async (cx) => {
         for (;;) {
           const c = await nextCommand();
@@ -121,16 +133,16 @@ export default class Shepherd extends View {
     return spaces().find((s) => s.id === id) ?? spaces().find((s) => s.active) ?? null;
   }
 
-  shepherd(space = this.space()) {
+  shepherd(space = this.space(), all = terminals()) {
     if (!space) return null;
-    return terminals().find((x) => x.state === "live" && x.labels?.["herdr.role"] === "shepherd"
+    return all.find((x) => x.state === "live" && x.labels?.["herdr.role"] === "shepherd"
       && x.labels?.["herdr.space"] === localId(space) && machineOf(x) === (space.machine ?? null)) ?? null;
   }
 
   /** Where the space's tasks live: { machine, dir, key, workflow }, or null. */
-  repo(space = this.space()) {
+  repo(space = this.space(), all = undefined) {
     if (!space) return null;
-    const sh = this.shepherd(space);
+    const sh = this.shepherd(space, all);
     const dir = sh?.labels?.["shepherd.dir"] ?? space.folder ?? null;
     const machine = space.machine ?? null;
     return dir ? { machine, dir, key: `${machine ?? ""}:${dir}`, workflow: sh?.labels?.["shepherd.workflow"] ?? null } : null;
@@ -190,9 +202,12 @@ export default class Shepherd extends View {
       // Keep the last good state; shep writes atomically, so this is a hand edit gone wrong.
       next = { ...prev, error: `tasks.json: ${e.message ?? e}` };
     }
-    // Settings: the person's workflow (Shepherd's label), then the space's orchestra.json on top.
+    // Settings: the person's workflow (Shepherd's label, or workflow.json beside the example it
+    // names), then the space's orchestra.json on top.
     let wf = {}, orch = {};
-    try { if (repo.workflow) wf = (await this.readJson(repo.workflow, repo.machine)) ?? {}; } catch { /* defaults */ }
+    try {
+      if (repo.workflow) wf = (await this.readJson(personalWorkflow(repo.workflow), repo.machine)) ?? (await this.readJson(repo.workflow, repo.machine)) ?? {};
+    } catch { /* defaults */ }
     try { orch = (await this.readJson(`${repo.dir}/.herdr/orchestra.json`, repo.machine)) ?? {}; } catch { /* defaults */ }
     const alerts = { toast: true, sound: true, phone: false, ntfy: "", ...wf.alerts, ...orch.alerts };
     const settings = {
@@ -203,7 +218,8 @@ export default class Shepherd extends View {
       stages: Object.fromEntries([...new Set([...Object.keys(wf.stages ?? {}), ...Object.keys(orch.stages ?? {})])]
         .map((k) => [k, { ...wf.stages?.[k], ...orch.stages?.[k] }])),
     };
-    this.data[repo.key] = { ...next, alerts, settings };
+    settings.usage = { ...wf.usage }; // weekly usage commands (machines.js)
+    this.data[repo.key] = { ...next, alerts, settings, wf, orch };
     // Answers tasks.json has recorded are no longer pending.
     const pending = shared(PENDING) ?? [];
     const open = new Set(next.questions.filter((q) => q.answer == null).map((q) => `${repo.key}#${q.id}`));
@@ -395,6 +411,26 @@ export default class Shepherd extends View {
     return best?.text ?? null;
   }
 
+  // ---- spaces ----------------------------------------------------------------------------
+
+  allSpaces() { return spaces(); }
+
+  /** shepherd/start.sh for a space on this computer, in the background (it starts Shepherd in its
+   *  own tab). The script is found beside any running Shepherd's workflow file, else through the
+   *  mods/shepherd link back into this repo. */
+  startShepherd(space) {
+    if (!space || space.machine) return;
+    const known = terminals().find((x) => x.labels?.["shepherd.workflow"])?.labels["shepherd.workflow"];
+    const dir = space.folder || this.repo(space)?.dir;
+    if (!dir) return;
+    const script = known ? `${known.replace(/\/[^/]*$/, "")}/start.sh` : null;
+    const line = script ? 'sh "$1" --space "$2" "$3"'
+      : 'd=$(cd "$(dirname "$(readlink "$4" || echo "$4")")/../shepherd" 2>/dev/null && pwd) && sh "$d/start.sh" --space "$2" "$3"';
+    exec("sh", ["-c", line, "start", script ?? "", localId(space), dir, `${appHome()}/mods/shepherd`], { timeout: 60000 })
+      .then((r) => { if (r.code !== 0) notify({ title: "Shepherd didn't start", body: (r.stderr || r.stdout).trim().split("\n").pop(), level: "error" }); })
+      .catch(() => null);
+  }
+
   // ---- steering and overlays --------------------------------------------------------------
 
   taskById(id) { return id ? (this.state().tasks ?? []).find((x) => x.id === id) ?? null : null; }
@@ -549,6 +585,10 @@ export default class Shepherd extends View {
   command(c) {
     const [name, arg] = String(c).split(":");
     const panel = props()?.panel;
+    if (panel === "spaces") {
+      if (name === "new-folder") startNewFolder(this);
+      return;
+    }
     if (panel === "bar") {
       if (name === "focus-bar") { this.barInput.set_value("add "); this.barInput.focus(); }
       return;
@@ -556,6 +596,12 @@ export default class Shepherd extends View {
     if (panel) return;
     const task = arg ? this.taskById(arg) : this.keyTask();
     if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
+    else if (name === "new-space") openNewSpace();
+    else if (name === "workflow") openWorkflow();
+    else if (name === "usage") openUsage();
+    else if (name === "add-machine") openAddMachine();
+    else if (name === "machine") openMachine(arg || null);
+    else if (name === "space-settings") { const s = arg ? spaces().find((x) => x.id === arg || localId(x) === arg) : this.space(); if (s) openSpaceSettings(s.id); }
     else if (name === "digest") this.toggleDigest();
     else if (name === "history") this.toggleHistory();
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
@@ -591,6 +637,10 @@ export default class Shepherd extends View {
     if (k === "g") { this.gAt = Date.now(); done(); return; }
     if (k === "d") { this.toggleDigest(); done(); return; }
     if (k === "c") { this.focusBar(); done(); return; }
+    if (k === "n") { openNewSpace(); done(); return; }
+    if (k === "w") { openWorkflow(); done(); return; }
+    if (k === "u") { openUsage(); done(); return; }
+    if (k === "f") { run("layout.show", { id: "sidebar" }); run("shepherd.new-folder"); done(); return; }
     const task = this.keyTask();
     if (!task) return;
     if (k === "s") this.openSteer(task.id, false);
@@ -714,6 +764,14 @@ export default class Shepherd extends View {
     const repo = this.repo();
     if (repo && !(repo.key in this.data)) { this.data[repo.key] = { tasks: [], questions: [], alerts: {} }; this.sync(cx); }
     if (p.panel === "status") return this.renderStatus();
+    if (p.panel === "spaces") return renderSidebar(this);
+    if (p.panel === "plus") return renderPlus();
+    if (p.panel === "machine") return renderMachinePop(this);
+    if (p.panel === "usage") return renderUsagePop();
+    if (p.panel === "addmachine") return renderAddMachine(this);
+    if (p.panel === "newspace") return renderNewSpace(this, folders());
+    if (p.panel === "workflow") return renderWorkflow(this);
+    if (p.panel === "spacesettings") return renderSpaceSettings(this);
     if (p.panel === "tabs") return renderTabBar(this);
     if (p.panel === "steer") return renderSteer(this).track_focus(this.keys).on_key_down((e, cx) => this.steerKey(e, cx));
     if (p.panel === "term") return renderTermBar(this).track_focus(this.keys).on_key_down((e, cx) => this.termKey(e, cx));
