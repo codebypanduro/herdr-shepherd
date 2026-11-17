@@ -8,19 +8,21 @@ Build loop   Implement → Code review → CI → Proof      (max 3 loops, then 
 Ship         Ready to merge → Done
 ```
 
+![Shepherd](preview.png)
+
 ## Status
 
-Design is done. Implementation starts at **Slice 1** in [docs/SLICES.md](docs/SLICES.md).
+Built: slices 1–9 in [docs/SLICES.md](docs/SLICES.md). Each slice's **Built:** line says what was checked live and what wasn't. [RECIPE.md](RECIPE.md) describes the build as it is, including what isn't built (*Watch out*).
 
-## Start here (for the agent building it)
+## Start here (for an agent working on it)
 
 1. Read `~/.config/herdr-app/AGENTS.md` (`herdr-app --skill`) and `hc --skill`. They are the truth for this Herdr version.
 2. Read [RECIPE.md](RECIPE.md): what the person sees and how it behaves.
 3. Read [docs/CONVENTIONS.md](docs/CONVENTIONS.md): labels, stages, files and messages that tie the pieces together.
 4. Open `docs/design/Shepherd.dc.html` in a browser to see the target. It is an HTML prototype with simulated data.
-5. Build one slice from [docs/SLICES.md](docs/SLICES.md) at a time. Run `herdr-app check mods/<name>` after every change.
+5. Work one slice from [docs/SLICES.md](docs/SLICES.md) at a time. Run `herdr-app check mods/shepherd` after every change. `agents/` has the `hc` templates used to build the slices.
 
-## Screenshots
+## Design screenshots
 
 From the prototype at 1440px wide, in `docs/design/screenshots/`: board, task overview, review grid, needs you, dependencies, history (⌘J), digest, steer menu, terminal, and the light (paper) theme. GitHub org avatars show blank in the captures.
 
@@ -32,13 +34,24 @@ The files in `docs/design/` are **design references made in HTML**, not code to 
 
 **Fidelity: high.** Spacing, type sizes, colors and copy are final. Where the prototype does something Herdr can't (hover peek with a timer, drag and drop of spaces), see *Watch out* in RECIPE.md.
 
-## Install (once built)
+## Install
+
+Link, don't copy: the mod finds the Shepherd agent (`shepherd/start.sh`, `bin/shep.mjs`, `workflow.json`) through its `mods/shepherd` link (`cd -P`), so a copied mod can't start or talk to Shepherd.
+
+```sh
+git clone https://github.com/codebypanduro/herdr-shepherd ~/code/herdr-shepherd
+ln -s ~/code/herdr-shepherd/mods/shepherd ~/.config/herdr-app/mods/shepherd
+ln -s ~/code/herdr-shepherd/layouts/shepherd.json ~/.config/herdr-app/layouts/shepherd.json
+herdr-app check ~/.config/herdr-app/mods/shepherd
+```
+
+Merge the `layout:shepherd` section of `keys.json` into `~/.config/herdr-app/keys.json`, then switch to the layout with `ctrl-shift-l`. Or ask your agent:
 
 ```
-❯ Read ~/.config/herdr-app/AGENTS.md, then add this layout: <this repo URL>
+❯ Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/codebypanduro/herdr-shepherd. Clone it and link mods/shepherd and layouts/shepherd.json instead of copying them.
 ```
 
-Switch to it with `ctrl-shift-l`.
+To start a space's Shepherd, run `~/code/herdr-shepherd/shepherd/start.sh` in a terminal of that space (or **Start Shepherd** in Space settings). It needs `node`, `hc`, `claude` and `git`, and `gh` for PRs. Your settings go to `shepherd/workflow.json` (made from `workflow.example.json`, git-ignored).
 
 ## Sharing
 
@@ -47,9 +60,13 @@ Add the GitHub topic `herdr-layout`, keep `RECIPE.md` and `preview.png` current,
 ## Repo
 
 ```
-layouts/shepherd.json          the window: sidebar · board + detail · floating bar
-mods/shepherd/                 board, needs you, floating bar, task detail, digest, deps (one mod, several views)
-mods/shepherd-spaces/          sidebar: spaces with folders, machines, usage
-shepherd/                      the Shepherd agent: prompt, workflow.json, helper scripts
+layouts/shepherd.json          the window: sidebar · tab bar · board + detail · status bar · floating bar
+mods/shepherd/                 one mod, every panel (props.view / props.panel): board, pipeline, dependencies,
+                               needs you, task detail, bar, History, digest, steer, terminal window, the spaces
+                               sidebar with machines and usage, New space, Add machine, Workflow and Space settings
+keys.json                      the layout:shepherd keys to merge into ~/.config/herdr-app/keys.json
+shepherd/                      the Shepherd agent: PROMPT.md, start.sh, workflow.example.json, bin/shep.mjs, bin/load.sh
+agents/                        hc templates for building slices (slice-builder, code-review)
 docs/                          recipe support: conventions, slices, design prototypes
+preview.png                    the layout with a live Shepherd's tasks on the board
 ```

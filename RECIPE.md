@@ -6,9 +6,9 @@ A board for a software factory. Each space has one Shepherd agent that you talk 
 
 ## What you see
 
-The window, left to right and top to bottom. All sizes at zoom 1. Colors are theme names, with the graphite hex the prototype uses in brackets.
+The window, left to right and top to bottom. All sizes at zoom 1. Colors are theme names, with the graphite hex the prototype uses in brackets. The board's status colors are the design's hues from the ANSI colors, not Herdr's own status colors (which differ by theme): working blue `ansi4`, needs you amber `ansi3`, done green `ansi2`, idle `idle`.
 
-**Title bar** (38px, `chrome` #131417, bottom border `border` #25272d). Window buttons, then centered "Herdr / layout **shepherd**", and on the right the `ctrl-shift-l` hint.
+**Title bar**: Herdr's own, with the window buttons. The layout puts nothing in it.
 
 **Sidebar** (240px, `chrome`, right border `border`).
 - **SPACES** header (11px, `dim` #6c6f77) with a **+** button. The + opens a 210px menu: *New space from folder…* (N) and *New folder* (F).
@@ -23,20 +23,20 @@ The window, left to right and top to bottom. All sizes at zoom 1. Colors are the
 - **⌘K** (Herdr's command palette)
 - **⚙ Workflow** (opens Workflow settings)
 
-**Main area** (6px padding; 108px bottom padding so the floating bar never covers cards). The board pane takes the free width. When a task is open, a detail pane sits on its right (min(620px, 54%), min 380px). Both panes have radius 6px and a 1px `border`.
+**Main area** (6px padding, 6px gap). The board pane takes the free width. When a task is open, a detail pane sits on its right (620px, min 380px). Both panes have radius 6px and a 1px `border`. The floating bar sits over the bottom of both panes.
 
 **Board pane header** (32px): "pipeline", "<space> · N tasks", then three status filters: ● N working, ● N need you, ● N done. Click one to show only that status; several can be on at once; ✕ clear resets.
 
 **Board.** Nine columns, min 172px each, scrolling sideways:
-- PLAN (purple oklch(0.74 0.11 290)): Triage, Spec, Tickets.
-- BUILD LOOP · MAX 3 (blue oklch(0.74 0.11 245)): Implement, Code review, CI, Proof.
-- SHIP (green oklch(0.75 0.12 155)): Ready to merge, Done.
+- PLAN (purple `ansi5`; the prototype's oklch(0.74 0.11 290)): Triage, Spec, Tickets.
+- BUILD LOOP · MAX 3 (blue `ansi4`; oklch(0.74 0.11 245)): Implement, Code review, CI, Proof.
+- SHIP (green `ansi2`; oklch(0.75 0.12 155)): Ready to merge, Done.
 
-Each group's label sits above its first column, and the column header has a 2px underline in the group color. **Card** (10px padding, radius 6px, `surface` #17181c, 1px `border`):
-- Top row: id (11px mono, `muted` #9b9ea6), the current skill (`/implement`, `/code-review`… 10.5px mono `dim`), loop dots (one 6px square per allowed loop: done loops grey, current loop in the status color, unused loops dark), then ⋯ (steer).
+Each group's label sits above its first column, and the column header (title and card count) has a 2px underline in the group color. An empty column shows a dashed "empty" box. **Card** (10px padding, radius 6px, `surface` #17181c, 1px `border`):
+- Top row: id (11px mono, `muted` #9b9ea6), the current skill (`/implement`, `/code-review`… 10.5px mono `dim`), loop dots in build-loop stages (one 6px square per allowed loop: done loops grey, current loop in the status color, unused loops dark), then ⋯ (steer).
 - The title (13px, line-height 1.35).
 - A status dot plus the last note, and on the right the time in this stage (10.5px mono).
-- Optional lines: "stuck · over 50m in Implement" (red, with a small red square), "after HRD-143" (mono, `dim`), and "↳ asked you via shepherd" (amber). The time turns red when stuck and amber when it has waited on you over 30m.
+- Optional lines: "stuck · over 50m in Implement" (red, with a small red square), "after HRD-143" (mono, `dim`; a queued ticket says "blocked by HRD-143" as its note instead), and "↳ asked you via shepherd" (amber). The time turns red when stuck and amber when it has waited on you over 30m.
 - Card background and border by state: blocked has an amber tint and border, stuck a red border, selected an accent border, keyboard focus a 1px accent ring.
 
 **Pipeline view**: one row per task (needs you first, then working, queued, done), with a cell per stage: ✓ for passed stages, the agent's terminal id (or "needs you", "ready", "paused", "parked") in the current stage, tinted in its status color (red when stuck), blank ahead. Loop dots sit on the right. Click opens the task, right-click steers it.
@@ -53,34 +53,32 @@ Each group's label sits above its first column, and the column header has a 2px 
 - Approve-tickets cards list the proposed tickets and what each one waits on.
 
 **Task detail pane.**
-- Header: id, title, a stage chip in its group color (merge icon for Ready to merge, ✓ for Done), "loop 2/3", cost, a terminal chip (▭ t6) and ✕.
+- Header: id, title and ✕; under them a stage chip in its group color (merge icon for Ready to merge, ✓ for Done), "loop 2/3" (build-loop stages), cost, and a terminal chip (▭ t6; click peeks at it).
 - Worktree line: ⑂ branch · machine:~/.herdr/worktrees/<repo>/<branch>.
 - Tabs (switch with 1–5): **Overview · Review · Changes · Files · Proof**.
   - **Overview**:
-    - Ready-to-merge tasks start with a PR card: PR number, branch → main, diff size, every CI check with time, then **Squash and merge** and **Send back**.
+    - Ready-to-merge tasks start with a PR card: PR number (or "Local merge · no remote"), branch → main, diff size, every GitHub check with its time, Shepherd's CI and Proof results, then **Squash and merge** and **Send back** (once Shepherd has asked) and "Open on GitHub ↗".
     - Shepherd's summary (14px).
-    - A timeline bar: one segment per stage per loop, width ∝ time, colored by result (pass green, fail red, running blue and pulsing, asking amber). Loop labels sit above it, and totals (time, tokens, $) below. Hovering a segment shows its time, tokens, cost and model.
-    - Comments from Shepherd, the reviewer, the planner and the implementer. Each has its agent's icon (Claude or Codex, picked from the model), a role color mark, the file:line it refers to, and a state chip (open, fixing, resolved, approved).
-    - An "Ask Shepherd about <id>…" field.
+    - A timeline bar: one segment per stage per loop, width ∝ time, colored by result (pass green, fail red, running blue and pulsing, asking amber). Loop labels sit above it, each loop's stage names under it, and totals (time, tokens, $) below.
+    - Comments: each stage run's note ("<role> · <model>", the stage and loop) and each finding (reviewer, file:line). Each has a 3px color mark (the run's result color, purple for findings) and a state chip (open for a failed run; a finding's open, fixing or resolved).
   - **Review**:
     - A grid with one row per finding and one column per loop. Cells read found / still open / fixing / ✓ fixed, and the current loop's column is shaded.
     - Then a loop-by-loop list: what the implementer did, what review said, and counts of new, fixed and carried findings.
   - **Changes**: the list of changed files (+/−) on the left, a unified diff on the right.
-  - **Files**: the worktree's file tree, with folder and file icons colored by extension. Changed files are marked A/M. Clicking a file shows it with its added lines highlighted.
-  - **Proof**: the headless-browser checks, a grid of screenshots, and the recording.
+  - **Files**: the worktree's file tree (folders first, ▸/▾), with a small mark per row colored by extension (grey for folders). Changed files are marked A/M. Clicking a file shows it with line numbers and its added lines highlighted.
+  - **Proof**: the headless-browser checks (✓/✕ with a note), a grid of 260px screenshots, and an "Open <recording>" button.
 
 **Floating Shepherd bar.** Centered 36px above the bottom edge, width min(780px, 100% − 40px), radius 14px, a large shadow.
-- When something is open, its top strip shows the newest question with up to 3 answer buttons and "N waiting".
-- The main row (56px): the Shepherd avatar (a Claude or Codex tile with a pulsing status dot), a 15px input "Tell Shepherd what to build, or ask about any task…", and under it "shepherd · <space> · <last event>". A **History ⌘J** button sits on the right.
-- The border is amber while questions wait and turns the accent color with a 4px glow while you type.
+- When questions are open, a top strip with an amber line under it shows the oldest one: its task id, the question, and up to 3 answer buttons (the recommended one marked), or **Answer…** (opens Needs you) when it has no options, and an amber "N waiting" chip (opens Needs you) when there are more.
+- The main row (56px): the Shepherd avatar (a 32px `accent` tile with ✻ and Shepherd's status dot, pulsing while it works), a 15px input "Tell Shepherd what to build, or ask about any task…", and under it "shepherd · <space> · <last event>" (click: History), or "no Shepherd in this space · run shepherd/start.sh in a terminal here". A **History ⌘J** button sits on the right.
 
-**Status bar** (24px, mono 11px `dim`): herdr-core · <machine or local>, implement model, review model, max loops, then "cpu 34% ≤ 80%" and "mem 61% ≤ 85%": the space's machine now against the workflow's limits, red when over (read every 15 s).
+**Status bar** (24px, mono 11px `dim`): herdr-core · <machine or local>, implement model, review model, max loops, then "cpu 34% ≤ 80%" and "mem 61% ≤ 85%": the space's machine now against the workflow's limits, red when over (read every 15 s). "mods/shepherd" on the right.
 
 **Overlays.**
 - **History window** (⌘J, the bar's **History ⌘J** button, or clicking the bar's last-event line; a 760px dialog, 85% of the window high): a 44px header (Shepherd's status dot, "Shepherd · <space>", its address and the message count, an amber "N waiting on you" chip that opens Needs you, esc), the full chat oldest first, scrolled to the newest, and a ❯ input at the bottom that talks to Shepherd. Your messages are in a tinted box with ❯. Shepherd's start with ⏺, and events with ⎿ and the task id in its tone color (each stage run's start, then its result and note). Questions appear inline with answer buttons (the recommended one marked); grilling rounds list their questions with "Answer round N in Needs you →"; answered ones show "↳ you: <answer>".
 - **Terminal** (T, or a tab-bar pill; a 900×640 window; the title bar holds the keyboard when it opens: S steers, Esc closes; clicking the title bar or footer takes the keyboard back from the terminal): a 40px title bar (status dot, address, role · model · task, where it runs, **Keep as tab** for a sub-agent without a pane, **Steer**, ✕), the real terminal, and a 30px footer that names what it shows: a task's agent ("You talk to the agent through Shepherd…" with time in stage, tokens and cost), "Shepherd's own terminal.", or another one ("The shell tab in <space>: what you type goes straight to it."). Drag it by the title bar. ✕ and Esc close it by its key, `shepherd-terminal`.
-- **Steer menu** (⋯, S or right-click; 290px popup): Pause/Resume (P), Redirect… (R), Add context… (C), Ask for status (S), Open terminal (T), Open task (↵). Redirect and context open a text field: "Send to t6" (Enter sends). Ask for status sends `status <id>?` and opens Shepherd's terminal, where the reply appears.
-- **Peek**: hover a card for 380 ms to see its terminal's last lines.
+- **Steer menu** (⋯, S or right-click; 290px popup headed by the id, terminal and role): Pause/Resume (P; greyed unless working or paused), Redirect… (R), Add context… (C), Ask for status (S), Open terminal (T; greyed without one), Open task (↵). Redirect and context open a text field: "Send to t6" (Enter sends). Ask for status sends `status <id>?` and opens the History, where Shepherd's reply appears.
+- **Peek** (the design's hover peek) is not built; ⋯ on a card without a task opens Herdr's `terminal.peek`, as does the detail header's terminal chip.
 - **Digest** (D, a 720×480 dialog): "Today · <space> · Tue 17 Nov"; shipped, in flight, waiting on you (with the oldest wait), today's spend and tokens; then Shipped, Stuck, Most expensive (with a bar) and "Needed more than one loop". Today counts tasks with a stage run since local midnight; rows open the task.
 - **Command palette** (⌘K).
 - **Workflow settings** (⚙ Workflow or W; a 680px dialog, 85% high): "Workflow · Matt Pocock's flow", the `npx skills add` line with the tracker, then one row each (mark, title with its skill in mono, a one-line description, controls on the right): ✳ Shepherd model, 01 Triage model, 02 Spec questions per grilling round (1/3/5 q), 03 To tickets ("Asks you to approve"), 04 Implement model, 05 Code review model, 06 CI ("Set per space: ⚙ on each space"), 07 Proof (Screenshots, Screen recording), ↻ Max build loops (1–5), ! When an agent needs you (Toast, Sound, Phone), ∥ Machine load limits: Max CPU 60/70/80/90% and Max memory 70/80/85/95% as chips (selected chip `foreground` on `background`; a value set by hand shows as an extra chip), then a box with one row per machine: icon and name, a cpu and a mem bar (4px, `muted`, amber within 10 of the limit, red at it, a 1px tick at the limit) and "N running", "N running · near" or "at limit". A note in amber when the shown space overrides the limits. Footer: the file it writes (`shepherd/workflow.json`) and **Done**. Every click writes at once and sends each Shepherd on this computer `workflow changed: read <file>`; the Shepherd row's description says a new model applies after a restart.
@@ -137,20 +135,20 @@ Each group's label sits above its first column, and the column header has a 2px 
 
 ## Built from
 
-- **Layout** `layouts/shepherd.json`, a root row:
-  - `sidebar` (px 240): a block `spaces` (mod `shepherd`, props `{panel:"spaces"}`)
+- **Layout** `layouts/shepherd.json`, a root row (theme `paper` light, `graphite` dark; 1px `border` dividers):
+  - `sidebar` (column, px 240, min 40, max 360): a block `spaces` (mod `shepherd`, props `{panel:"spaces"}`)
   - `work` (column), containing:
     - `tabs` (px 36, mod `shepherd`, props `{panel:"tabs"}`)
-    - `main` row of `board` (mod `shepherd`, props `{view}`) and `detail` (mod `shepherd`, props `{panel:"detail"}`, hidden until a task is open)
-  - a floating block `bar` (mod `shepherd`, props `{panel:"bar"}`, edge bottom, align center)
-  - the status bar (px 24)
-- **Shepherd agent**: one per space, started by `shepherd/start.sh [--space <id>] [repo]`: `hc run --bg --keep --outlive-parent --label herdr.space=<id> --label herdr.tab=shepherd-<id> --label herdr.role=shepherd --label shepherd.dir=<repo> -- claude --model <workflow shepherd.model> --append-system-prompt-file <PROMPT.md with paths filled in>`. It changes tasks.json only through `shepherd/bin/shep.mjs`. It starts sub-agents with `hc run --bg` and labels them (see CONVENTIONS), reads their reports from its input (`<hc from=…>`), and writes task state to `.herdr/shepherd/tasks.json` in the repo.
+    - `main` row (gap 6, padding 6) of `board` (mod `shepherd`, props `{view:"board"}`) and `detail` (px 620, min 380, mod `shepherd`, props `{panel:"detail"}`, hidden until a task is open); both radius 6 with a 1px `border`
+    - `status` (px 24, mod `shepherd`, props `{panel:"status"}`)
+    - floating on `work`: `bar` (mod `shepherd`, props `{panel:"bar"}`, edge bottom, align center)
+- **Shepherd agent**: one per space, started by `shepherd/start.sh [--space <id>] [repo]`: `hc run --bg --keep --outlive-parent --no-parent --name shepherd-<id> --cwd <repo> --label herdr.space=<id> --label herdr.tab=shepherd-<id> --label herdr.role=shepherd --label shepherd.dir=<repo> --label shepherd.workflow=<workflow file> -- env SHEP_FILE=<tasks.json> SHEP_WORKFLOW=<workflow file> claude --model <workflow shepherd.model, default opus> --disallowedTools AskUserQuestion --append-system-prompt-file <PROMPT.md with paths filled in> "<first message>"`. Before that it exits if the space already has a live Shepherd, adds `.herdr/` to the repo's git exclude and runs `shep init`. It changes tasks.json only through `shepherd/bin/shep.mjs`. It starts sub-agents with `hc run --bg` and labels them (see CONVENTIONS), reads their reports from its input (`<hc from=…>`), and writes task state to `.herdr/shepherd/tasks.json` in the repo.
 - **Overlays** are the same mod with other props: the + menu (popup, `{panel:"plus"}`), the machine and usage popovers (popup, `{panel:"machine", machine}`, `{panel:"usage"}`), New space, Add machine, Workflow settings and Space settings (dialogs, `{panel:"newspace"}`, `{panel:"addmachine"}`, `{panel:"workflow"}`, `{panel:"spacesettings", space}`), the steer menu (`openOverlay` popup, `{panel:"steer", task}`), the digest (dialog, `{panel:"digest"}`), and the terminal window (`kind:"window"`, key `shepherd-terminal`, a column layout: `{panel:"term", terminal, task}` 40px, `{terminal}`, `{panel:"termfoot", …}` 30px).
 - **Keys**: `keys.json` in this repo has the `layout:shepherd` section (⌘K palette, ⌘J History, ⌘⇧D digest, ⌘⌥1–4 views as `shepherd.<command>`); merge it into `~/.config/herdr-app/keys.json`. Plain letters (J K G S P T A C D N F W U 1–5 ↵ Esc) are the board's own `on_key_down`, only while the board (not Needs you) holds the keyboard. `mod.json` has `"focusable": true`, so `pane.go` and a closing popup hand the board the keyboard back (`"focus"` from `nextCommand()`).
 - **History** reads `.herdr/shepherd/chat.jsonl` (`shep say`, appended): the board records every line it sends Shepherd (bar, History input, steer, pause, status), and Shepherd records what it tells the person. Events and questions come from tasks.json.
 - **Sidebar data**: the sidebar copy runs `mods/shepherd/machine.sh` on every machine every 15 s (its text through `exec("sh", ["-c", …], {on})`: cpu, mem, disk, and once kind and model) and `knownAgents({on})` once for Claude Code / Codex (8 s timeouts; a machine still busy from the last round is skipped); the results are merged into shared `shepherd.machineInfo` for the popovers and settings. Each space's org, branch and worktree count come from git every 60 s, six spaces at a time; org images are downloaded once to `data/shepherd-avatars/<org>.png` with curl. Folders are shared `shepherd.folders` and `shepherd.spaceFolders`, kinds picked in Add machine `shepherd.machineKinds`, New space's pending space `shepherd.newSpace`. It reads tasks.json of every space with a Shepherd for the badges: every 5 s here, every 30 s on other machines.
 - **Settings files**: there is one person's workflow file, `shepherd/workflow.json` in the checkout `~/.config/herdr-app/mods/shepherd` links to (found with `cd -P`; copied from `workflow.example.json` the first time; git-ignored). Workflow settings writes it, and the mods read it for every space on this computer. `start.sh` gives it to new Shepherds; running ones get `workflow changed: read <file>` (PROMPT.md); `shep room` reads workflow.json beside the example it was given. Spaces on another machine read workflow.json, else the file, that Shepherd's `shepherd.workflow` label names there. Space settings writes `<repo>/.herdr/orchestra.json` and adds `.herdr/` to the repo's git exclude. All writes go one at a time per file and only if the file hasn't changed since it was read: here with `writeTextFile(…, before)`, on another machine with node there (same check, a temp file of its own).
-- **Mods** read `agents()`, `terminals()` (parent, labels), `spaces()`, `machines()` and `watchFolder()` on the tasks file. They answer questions with `hc send <shepherd> …`. Commands used: `terminal.peek`, `terminal.keep`, `terminal.park`, `tab.new`, `app.palette`, `space.new {folder, machine}` (`""` for this computer), `space.select`, `space.rename`, `layout.show/hide`, `notify`, `playSound("blocked")`, `openOverlay`, `pickFolder`. Key commands added: `shepherd.workflow`, `shepherd.usage`, `shepherd.new-space`, `shepherd.new-folder`, `shepherd.add-machine`, `shepherd.machine:<name>`, `shepherd.space-settings[:<space id>]`.
+- **Mods** read `terminals()` (labels, status, address), `spaces()`, `focused()`, `machines()`, `knownAgents()`, `shared()`, `readTextFile` (also `{on: machine}`) and `watchFolder()` on the repo's `.herdr` (this computer; other machines are read every 5 s). They answer questions with `hc send <shepherd> …`, show art with `svg()` (`mods/shepherd/icons/`) and `image()`, and post phone pushes with `fetch` to ntfy.sh. Commands used: `terminal.peek`, `terminal.keep`, `terminal.park`, `tab.new`, `app.palette`, `space.new {folder, machine}` (`""` for this computer), `space.select`, `space.rename`, `layout.show/hide`, `layout.switch` (a toast's action), `notify`, `playSound("blocked")`, `openOverlay`/`closeOverlay`, `pickFolder`, `writeTextFile`. Key commands added: `shepherd.workflow`, `shepherd.usage`, `shepherd.new-space`, `shepherd.new-folder`, `shepherd.add-machine`, `shepherd.machine:<name>`, `shepherd.space-settings[:<space id>]`.
 - **Programs run**: `hc machine add` (Add machine), `shepherd/start.sh` (Start Shepherd, on the space's machine), `find` and `git config` (New space, on the picked machine), a login shell on another machine (`$SHELL -lc`, `-lic` only when that lacks node, hc, claude or git; to read its PATH for Start Shepherd), `curl` (org images), `pbcopy` (Copy), `node` (writes on another machine), the person's usage commands, `git worktree`, `gh pr` (PR, checks, merge), `shepherd/bin/load.sh` (CPU from `ps` and memory from `vm_stat` on macOS, `/proc/stat` and `/proc/meminfo` on Linux) through `exec … {on: machine}` for the status bar and through `shep room` for Shepherd, the space's CI command, and Claude or Codex for usage.
 
 ## Watch out
@@ -171,6 +169,7 @@ Each group's label sits above its first column, and the column header has a 2px 
 - `herdr-app check` renders only the board (no props). To check the other panels, check a scratch copy of the mod with `props()` replaced by a fixed `{panel: …}` for each one.
 - `run()` returns nothing, so New space can't name the space it made: it leaves `shepherd.newSpace` {machine, folder, real path, ids before, group, start} in shared state, and the sidebar takes the first space id that wasn't there before and sits in that folder on that machine, then files it and starts Shepherd if asked. After a minute without one it gives up with a toast.
 - `cd` into the `mods/shepherd` link and then `..` goes back up the link's own path: use `cd -P` to find the checkout.
+- Install by linking `mods/shepherd` and `layouts/shepherd.json` from a checkout, not by copying them: the mod finds `shepherd/` (start.sh, shep.mjs, load.sh, workflow.json) through that link. A copied mod draws, but can't find start.sh (Start Shepherd) or the workflow.json Workflow settings writes and every local space reads.
 - Don't run `/triage` on tickets made by `/to-tickets`; they are agent-ready.
 - The timeline and digest need real start and end times per stage: Shepherd must record them in tasks.json.
 - Plan purple is `theme().ansi5`: there is no purple theme color, and deriving one from `accent` needs color math the mods don't have.
@@ -205,6 +204,7 @@ Each group's label sits above its first column, and the column header has a 2px 
 - `load.sh` reads `ps` %CPU on macOS, a decaying average, not an instant sample; memory counts active + wired + compressed pages.
 - The status bar finds `load.sh` next to Shepherd's workflow file (its `shepherd.workflow` label), so a space without a Shepherd shows the limits without numbers.
 - Hover peek is not built: ⋯ on a label-only card (no task) still opens `terminal.peek`.
+- Not built from the design: the Overview's "Ask Shepherd about <id>…" field, the Claude/Codex icon on comments and a Claude/Codex Shepherd avatar (the bar shows ✻), the bar's amber border and focus glow (Herdr draws the floating frame), the 108px bottom padding (the bar can cover the lowest cards), the R key, timeline hover and hover peek.
 - Herdr writes `jsconfig.json` and `gpui-kit.d.ts` into each mod folder; they are git-ignored.
 
 ## Done when
@@ -213,7 +213,7 @@ Each group's label sits above its first column, and the column header has a 2px 
 - An approved ticket gets its own worktree and goes Implement → Code review. A review finding sends it back with loop 2/3 on the card, and the Review tab shows the finding as found then fixed.
 - A ticket that fails review three times asks you One more loop / Park it / I'll take it.
 - A passing ticket shows Ready to merge with its PR checks, and Merge squashes it and removes the worktree.
-- When a sub-agent asks something, you get a toast, a sound and a phone push, plus an amber badge on its space.
+- When a sub-agent asks something, you get a toast and a sound (and a phone push with `alerts.ntfy` set), plus an amber badge on its space.
 - With the machine over the CPU limit, ready tickets wait with "waiting for room on <machine>" and start once it drops.
 - A working task past its stage limit shows "stuck · over 50m in Implement" in red on its card, in Pipeline and in the digest.
 - T opens a working agent's real terminal, and S → Redirect sends it new instructions through Shepherd.

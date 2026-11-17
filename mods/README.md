@@ -1,8 +1,5 @@
 # Mods
 
-Empty until slice 1. Planned:
+- `shepherd/`: the whole layout in one mod. `props.view` picks the main view (board, pipeline, deps, needs) and `props.panel` a side role (spaces, tabs, detail, status, bar) or an overlay (steer, term, termfoot, digest, history, plus, machine, usage, newspace, addmachine, workflow, spacesettings). See `main.js` and RECIPE.md *Built from*.
 
-- `shepherd/`: board, pipeline, dependencies, needs you, task detail, digest, status bar, the floating bar and its history window (one mod; `props.view` / `props.panel` pick what it draws)
-- `shepherd-spaces/`: the sidebar (spaces, folders, machines, usage), space settings, new space, add machine
-
-Each needs `main.js` and `mod.json` (`{"place":"none"}`), and a passing `herdr-app check`.
+`herdr-app check mods/shepherd` checks the board only (no props); RECIPE.md *Watch out* says how to check the other panels.
