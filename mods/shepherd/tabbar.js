@@ -99,7 +99,7 @@ export function renderTabBar(m, cx) {
     pills.push(pill("tab-shepherd", [shepherdMark(t, 16), div().child("Shepherd"), dot(sh.status)],
       { selected: true, onClick: () => m.openTerminal(sh.address, null) }));
   } else if (space) {
-    pills.push(h_flex().id("tab-shepherd").h(24).pl(4).pr(10).gap(7).min_w(0).flex_shrink(1).items_center().rounded(12)
+    pills.push(h_flex().id("tab-shepherd").h(24).pl(4).pr(10).gap(7).flex_none().items_center().rounded(12)
       .border(1).border_color(t.border).text_size(12)
       .child(div().opacity(0.6).child(shepherdMark(t, 16)))
       .child(div().flex_none().text_color(t.dim).child("Shepherd"))
@@ -120,7 +120,7 @@ export function renderTabBar(m, cx) {
         closeTip: "Put away: the agent keeps running" }));
     } else {
       // Named by the tab's name, else what it runs (Claude Code, Codex, shell).
-      const name = tab.named ? tab.name : first?.program && !first.program.shell && first.program.key !== "program" ? first.program.name : "shell";
+      const name = tab.named ? tab.name : first?.program && !first.program.shell && first.program.name ? first.program.name : "shell";
       pills.push(pill(`tab-${tab.id}`, [programIcon(t, first?.program), dot(tab.status), div().text_color(t.muted).child(name)],
         { onClick: () => first && m.openTerminal(first.address, null, `The ${name} tab`), onClose: () => closeTab(tab, ts, name) }));
     }

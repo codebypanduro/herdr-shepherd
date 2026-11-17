@@ -53,6 +53,23 @@ export function startAction(m, cx, t, space, idp, { size = 12 } = {}) {
 /** Setup's state, made in init: confirm → cloning → checking → done | error. */
 export const initSetup = (m) => { m.setup = { phase: "confirm", error: null, reason: null }; };
 
+/** Clones, then asks shepherdOn again (shared, so every Start Shepherd sees the answer). */
+export function runSetup(m, cx, machine) {
+  const st = m.setup;
+  if (st.phase === "cloning" || st.phase === "checking") return;
+  Object.assign(st, { phase: "cloning", error: null, reason: null });
+  cx.notify();
+  cx.spawn(async (cx) => {
+    const r = await setupShepherd(machine);
+    if (r.error) { Object.assign(st, { phase: "error", error: r.error }); cx.notify(); return; }
+    st.phase = "checking";
+    cx.notify();
+    const s = await checkStartable(m, machine, true);
+    Object.assign(st, s.dir ? { phase: "done", known: s } : { phase: "error", error: `Cloned, but Shepherd can't start there yet: ${s.reason}` });
+    cx.notify();
+  });
+}
+
 export function renderSetup(m) {
   const t = palette();
   const p = props() ?? {};
@@ -61,20 +78,7 @@ export function renderSetup(m) {
   const st = m.setup;
   const close = () => closeOverlay(p.overlay);
 
-  const go = (cx) => {
-    if (st.phase === "cloning" || st.phase === "checking") return;
-    Object.assign(st, { phase: "cloning", error: null, reason: null });
-    cx.notify();
-    cx.spawn(async (cx) => {
-      const r = await setupShepherd(machine);
-      if (r.error) { Object.assign(st, { phase: "error", error: r.error }); cx.notify(); return; }
-      st.phase = "checking";
-      cx.notify();
-      const s = await checkStartable(m, machine, true);
-      Object.assign(st, s.dir ? { phase: "done", known: s } : { phase: "error", error: `Cloned, but Shepherd can't start there yet: ${s.reason}` });
-      cx.notify();
-    });
-  };
+  const go = (cx) => runSetup(m, cx, machine);
 
   const button = (id, label, primary, onClick) => div().id(id).px(12).h(28).flex().items_center().rounded(5).cursor_pointer()
     .text_size(12).font_semibold()
