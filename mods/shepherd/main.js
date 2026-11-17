@@ -563,8 +563,8 @@ export default class Shepherd extends View {
   }
 
   /** Sends queued lines (oldest first) to each space's Shepherd once it's up and has finished its
-   *  first turn (idle or done; a Shepherd asking for something in its tab, like Claude's folder trust,
-   *  is blocked and waits), or after QUEUE_FALLBACK_MS if it reports no status. Each line is recorded
+   *  first turn (idle or done, seen for 5 s; a Shepherd asking for something in its tab, like Claude's
+   *  folder trust, is blocked and waits), or after QUEUE_FALLBACK_MS if it reports no status. Each line is recorded
    *  in that space's chat once sent. A space that's gone drops its lines with a toast. The bar runs it. */
   flushQueue(cx) {
     const q = shared(QUEUED) ?? [];
@@ -584,7 +584,10 @@ export default class Shepherd extends View {
           }
           const sh = this.shepherd(space, all);
           if (!sh) continue;
-          const ready = ["idle", "done"].includes(sh.status) || (sh.status == null && Date.now() - (sh.created_ms ?? Date.now()) > QUEUE_FALLBACK_MS);
+          // How long this copy has seen it (not its start time, which terminals() may not carry).
+          const seen = ((this.shepSeen ??= {})[sh.address] ??= Date.now());
+          const age = Date.now() - seen;
+          const ready = (["idle", "done"].includes(sh.status) && age > 5000) || (sh.status == null && age > QUEUE_FALLBACK_MS);
           if (!ready) continue;
           for (const x of lines) {
             const r = await hc(["send", sh.address, x.line]).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));

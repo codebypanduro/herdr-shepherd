@@ -8,7 +8,7 @@ import {
 } from "herdr";
 import { MONO, palette } from "./common.js";
 import { KINDS } from "./machines.js";
-import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, shepherdOn, execSafe, failLine, onMachine, openSetup } from "./ui.js";
+import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, execSafe, failLine, onMachine, openSetup, checkStartable, startable } from "./ui.js";
 
 const stop = (_e, cx) => cx.stop_propagation();
 
@@ -140,6 +140,9 @@ export function renderAddMachine(m) {
 const norm = (p) => (p ?? "").replace(/\/+$/, "");
 const LOCAL = ""; // this computer's key in m.ns.scans / m.ns.shep
 const keyOf = (machine) => machine ?? LOCAL;
+/** Whether Shepherd can start on the picked machine: this dialog's check, unless a later shared
+ *  answer says yes (Set up Shepherd on <machine> finished meanwhile). */
+const nsShep = (m, machine) => (startable(machine)?.dir ? startable(machine) : m.ns.shep[keyOf(machine)]);
 const onOf = (machine) => (machine ? { on: machine } : {});
 const SCAN_MS = { local: 15000, remote: 20000 }; // a remote scan also pays for ssh
 
@@ -232,7 +235,7 @@ function pickMachine(m, cx, machine) {
   if (!(key in m.ns.shep)) {
     m.ns.shep[key] = null; // checking
     cx.spawn(async (cx) => {
-      m.ns.shep[key] = await shepherdOn(m, machine).catch((e) => ({ reason: String(e) }));
+      m.ns.shep[key] = await checkStartable(m, machine, true);
       cx.notify();
     });
   }
@@ -284,7 +287,7 @@ function addSpace(m, cx) {
       run("space.select", { id: old.id });
       notify({ title: `${old.name} is already a space`, body: "Selected it instead of making another.", level: "info" });
     } else {
-      const start = m.ns.start && Boolean(m.ns.shep[keyOf(machine)]?.dir);
+      const start = m.ns.start && Boolean(nsShep(m, machine)?.dir);
       setShared(NEW_SPACE, { machine, folder: dir, real, before: spaces().map((s) => s.id), group: m.ns.folder || null, start, at: Date.now() });
       run("space.new", { folder: real, machine: machine ?? "" });
     }
@@ -305,7 +308,7 @@ export function renderNewSpace(m, folders) {
   const where = machine ?? "this mac";
   const scan = m.ns.scans[keyOf(machine)];
   const rows = nsRows(m);
-  const shep = m.ns.shep[keyOf(machine)];
+  const shep = nsShep(m, machine);
   const canStart = Boolean(shep?.dir);
   // A ticked Start Shepherd waits for the check on this machine, so it's never dropped unseen.
   const pending = m.ns.start && shep == null;
@@ -356,7 +359,7 @@ export function renderNewSpace(m, folders) {
         .child(shep == null ? `Checking whether Shepherd can start on ${where}…` : `Can't start Shepherd on ${where}: ${shep.reason}.`))
       .when(Boolean(shep?.unreachable) && !scan?.error, (el) => el.child(retryLink))
       .when(Boolean(shep?.missing && machine), (el) => el.child(div().id("ns-setup").flex_none().text_size(12).text_color(t.accent).cursor_pointer()
-        .on_click((_e, cx) => { delete m.ns.shep[machine]; openSetup(machine); cx.notify(); }).child(`Set up Shepherd on ${machine}…`)))))
+        .on_click(() => openSetup(machine)).child(`Set up Shepherd on ${machine}…`)))))
     .child(h_flex().px(18).py(12).gap(8).items_center().border_t(1).border_color(t.border)
       .when(!machine, (el) => el.child(div().id("ns-finder").px(10).h(28).flex().items_center().rounded(5).border(1).border_color(t.input).cursor_pointer()
         .text_size(12).hover((s) => s.bg(t.hover))
