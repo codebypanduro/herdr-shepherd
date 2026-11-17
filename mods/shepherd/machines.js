@@ -234,8 +234,8 @@ function addMachine(m, cx) {
       return;
     }
     let msg = (r.stderr || r.stdout || "").trim();
-    try { msg = JSON.parse(msg).error?.message ?? msg; } catch { /* plain text */ }
-    m.am = { ...m.am, phase: 2, error: msg.split("\n")[0] || `hc machine add failed (${r.code})` };
+    try { const e = JSON.parse(msg).error; msg = [e?.message, e?.hint].filter(Boolean).join(". ") || msg; } catch { /* plain text */ }
+    m.am = { ...m.am, phase: 2, error: msg.split("\n").slice(0, 2).join(" ") || `hc machine add failed (${r.code})` };
     cx.notify();
   });
 }
@@ -307,11 +307,14 @@ export function initNewSpace(m, cx, InputState) {
   cx.spawn(async (cx) => {
     m.nsFilter.focus();
     const h = home();
-    const roots = SCAN_ROOTS.map((r) => `${h}/${r}`);
-    const r = await exec("sh", ["-c", `for d in "$@"; do [ -d "$d" ] && find "$d" -maxdepth 4 -name .git -not -path '*/node_modules/*' -prune 2>/dev/null; done; true`, "scan", ...roots], { timeout: 15000 }).catch(() => null);
+    // The usual code folders, and the folders this computer's spaces sit in (their siblings).
+    const parents = m.allSpaces().filter((s) => !s.machine && s.folder?.startsWith(`${h}/`))
+      .map((s) => s.folder.replace(/\/[^/]+\/?$/, "")).filter((d) => d !== h);
+    const roots = [...new Set([...SCAN_ROOTS.map((r) => `${h}/${r}`), ...parents])];
+    const r = await exec("sh", ["-c", `for d in "$@"; do [ -d "$d" ] && find "$d" -maxdepth 3 -name .git -not -path '*/node_modules/*' -prune 2>/dev/null; done; true`, "scan", ...roots], { timeout: 15000 }).catch(() => null);
     const have = new Set(m.allSpaces().map((s) => !s.machine && s.folder).filter(Boolean));
     const dirs = [...new Set((r?.stdout ?? "").split("\n").filter(Boolean).map((p) => p.replace(/\/\.git$/, "")))]
-      .filter((d) => !d.includes("/.herdr/") && !have.has(d)).sort();
+      .filter((d) => !d.includes("/.herdr/") && !d.includes("/worktrees/") && !have.has(d)).sort();
     m.ns.repos = await Promise.all(dirs.slice(0, 400).map(async (dir) => {
       const conf = await readTextFile(`${dir}/.git/config`).catch(() => null);
       const head = await readTextFile(`${dir}/.git/HEAD`).catch(() => null);

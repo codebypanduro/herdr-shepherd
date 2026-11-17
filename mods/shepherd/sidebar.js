@@ -115,7 +115,7 @@ export function startNewFolder(m) {
 
 export const openNewSpace = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 560, height: 540, props: { panel: "newspace" } });
 export const openAddMachine = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 540, height: 560, props: { panel: "addmachine" } });
-export const openSpaceSettings = (id) => openOverlay({ mod: "shepherd", kind: "dialog", width: 580, height: 640, props: { panel: "spacesettings", space: id } });
+export const openSpaceSettings = (id) => openOverlay({ mod: "shepherd", kind: "dialog", width: 600, height: 0.85, props: { panel: "spacesettings", space: id } });
 
 /** Open questions and open tasks of a space, from its tasks.json. */
 export function spaceCounts(m, s, all = terminals()) {

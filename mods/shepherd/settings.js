@@ -177,13 +177,15 @@ function limitsBlock(t, id, lim, pick, ms, sub, note, extra = null) {
         .child(div().text_size(13).child("Machine load limits"))
         .child(div().text_size(11.5).text_color(t.dim).child(sub))
         .when(Boolean(note), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(note)))))
-    .child(h_flex().pl(30).gap(8).items_center().flex_wrap()
-      .child(div().w(64).text_size(12).text_color(t.muted).child("Max CPU"))
-      .child(h_flex().gap(4).children(withValue(CPU_OPTS, lim.maxCpu).map((n) => seg(t, `${id}-cpu-${n}`, `${n}%`, n === lim.maxCpu, pick("maxCpu", n)))))
-      .child(div().w(12))
-      .child(div().w(78).text_size(12).text_color(t.muted).child("Max memory"))
-      .child(h_flex().gap(4).children(withValue(MEM_OPTS, lim.maxMem).map((n) => seg(t, `${id}-mem-${n}`, `${n}%`, n === lim.maxMem, pick("maxMem", n)))))
-      .when(Boolean(extra), (el) => el.child(extra)))
+    .child(v_flex().pl(30).gap(8)
+      .child(h_flex().gap(8).items_center()
+        .child(div().w(84).text_size(12).text_color(t.muted).child("Max CPU"))
+        .child(h_flex().gap(4).children(withValue(CPU_OPTS, lim.maxCpu).map((n) => seg(t, `${id}-cpu-${n}`, `${n}%`, n === lim.maxCpu, pick("maxCpu", n)))))
+        .child(div().flex_1())
+        .when(Boolean(extra), (el) => el.child(extra)))
+      .child(h_flex().gap(8).items_center()
+        .child(div().w(84).text_size(12).text_color(t.muted).child("Max memory"))
+        .child(h_flex().gap(4).children(withValue(MEM_OPTS, lim.maxMem).map((n) => seg(t, `${id}-mem-${n}`, `${n}%`, n === lim.maxMem, pick("maxMem", n)))))))
     .child(v_flex().ml(30).p(10).gap(10).rounded(6).bg(t.background).border(1).border_color(t.border)
       .children(ms.map((mc) => loadRow(t, mc, lim))));
 }
@@ -295,7 +297,7 @@ export function renderSpaceSettings(m) {
         div().text_size(12).text_color(t.muted).child(trackerName(d?.wf?.tracker))))
       .child(limitsBlock(t, "ss", lim, setLim, mc ? [mc] : [],
         "Only for this space, over the workflow's. Shepherd starts a ticket while this machine is under both.",
-        null, chip("ss-lim-wf", "workflow's", !own, clearLim))))
+        null, chip("ss-lim-wf", "Same as workflow", !own, clearLim))))
     .child(h_flex().px(16).py(10).gap(8).items_center().border_t(1).border_color(t.border)
       .child(div().flex_1().truncate().font_family(MONO).text_size(10.5).text_color(m.ss.error ? t.ansi1 : t.dim)
         .child(m.ss.error ?? ".herdr/orchestra.json"))
