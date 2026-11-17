@@ -1,0 +1,53 @@
+// The floating Shepherd bar: the newest open question on top, then a line to talk to Shepherd.
+
+import { div } from "gpui-kit";
+import { v_flex, h_flex, Input } from "gpui-base";
+import { theme, setShared } from "herdr";
+import { MONO } from "./common.js";
+import { answerButton } from "./needs.js";
+
+const WIDTH = 780;
+
+export function renderBar(m) {
+  const t = theme();
+  const qs = m.questions();
+  const q = qs[0];
+  const sh = m.shepherd();
+  const status = sh?.status ?? null;
+  const space = m.space();
+  const openNeeds = () => setShared("shepherd.view", "needs");
+
+  const strip = q && h_flex().id("bar-q").w_full().px(14).py(9).gap(8).items_center()
+    .bg(t.raised).border_b(1).border_color(t.blocked)
+    .child(div().size(18).flex_none().rounded(9).bg(t.blocked).text_color(t.background)
+      .text_size(11).font_semibold().flex().items_center().justify_center().child("?"))
+    .child(div().font_family(MONO).text_size(11).text_color(t.blocked).child(q.task))
+    .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(q.text))
+    .children((q.options ?? []).slice(0, 3).map((o, i) =>
+      answerButton(t, `bar-o${i}`, o, o === q.recommended, () => m.answer(q, o))))
+    .when((q.options ?? []).length === 0, (el) => el.child(answerButton(t, "bar-answer", "Answer…", false, openNeeds)))
+    .when(qs.length > 1, (el) => el.child(
+      div().id("bar-waiting").px(7).h(22).flex().items_center().rounded(5).cursor_pointer()
+        .bg(t.blocked).text_color(t.background).text_size(11).font_semibold()
+        .on_click(openNeeds).child(`${qs.length} waiting`)));
+
+  const dot = div().absolute().right(-2).bottom(-2).size(9).rounded(5).border(2).border_color(t.popover)
+    .bg(!sh ? t.idle : t[status] ?? t.idle)
+    .when(status === "working", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }));
+  const avatar = div().relative().size(32).flex_none().rounded(8).bg(t.accent).text_color(t.accent_foreground)
+    .flex().items_center().justify_center().text_size(16).child("✻").child(dot);
+
+  const sub = sh
+    ? `shepherd · ${space?.name ?? "—"} · ${m.lastEvent() ?? "ready"}`
+    : "no Shepherd in this space · run shepherd/start.sh in a terminal here";
+
+  const main = h_flex().w_full().h(56).px(12).gap(12).items_center()
+    .child(avatar)
+    .child(v_flex().flex_1().min_w(0).gap(2)
+      .child(Input.new(m.barInput).w_full().h(24).text_size(15).text_color(t.foreground))
+      .child(div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(sub)));
+
+  return v_flex().id("shepherd-bar").w(WIDTH).text_color(t.foreground)
+    .when(Boolean(strip), (el) => el.child(strip))
+    .child(main);
+}

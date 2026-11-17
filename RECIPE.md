@@ -134,7 +134,7 @@ Each group's label sits above its first column, and the column header has a 2px 
   - `work` (column), containing:
     - `tabs` (px 36, shipped `tabs` mod)
     - `main` row of `board` (mod `shepherd`, props `{view}`) and `detail` (mod `shepherd`, props `{panel:"detail"}`, hidden until a task is open)
-  - a floating block `bar` (mod `shepherd-bar`, edge bottom, align center)
+  - a floating block `bar` (mod `shepherd`, props `{panel:"bar"}`, edge bottom, align center)
   - the status bar (px 24)
 - **Shepherd agent**: one per space, started by `shepherd/start.sh [--space <id>] [repo]`: `hc run --bg --keep --outlive-parent --label herdr.space=<id> --label herdr.tab=shepherd-<id> --label herdr.role=shepherd --label shepherd.dir=<repo> -- claude --model <workflow shepherd.model> --append-system-prompt-file <PROMPT.md with paths filled in>`. It changes tasks.json only through `shepherd/bin/shep.mjs`. It starts sub-agents with `hc run --bg` and labels them (see CONVENTIONS), reads their reports from its input (`<hc from=…>`), and writes task state to `.herdr/shepherd/tasks.json` in the repo.
 - **Mods** read `agents()`, `terminals()` (parent, labels), `spaces()`, `machines()` and `watchFolder()` on the tasks file. They answer questions with `hc send <shepherd> …`. Commands used: `terminal.peek`, `terminal.keep`, `space.new {machine, folder}`, `layout.show/hide`, `notify`, `playSound("blocked")`, `openOverlay`.
@@ -152,6 +152,10 @@ Each group's label sits above its first column, and the column header has a 2px 
 - Plan purple is `theme().ansi5`: there is no purple theme color, and deriving one from `accent` needs color math the mods don't have.
 - Until Shepherd writes tasks.json (slice 2), the board reads only labels: `shepherd.task` (id), `shepherd.stage`, `shepherd.loop`, optional `shepherd.title`. Time in stage is counted by the mod from when it first sees a terminal in a stage (its `created_ms` on first sight), so it resets when the mod reloads.
 - The first Shepherd in a new repo stops at Claude's folder-trust dialog; accept it in its tab (or `hc keys <t> down enter`). Worktrees under `~/.herdr/worktrees` haven't asked.
+- The floating frame is Herdr's: the bar can't turn its border amber or glow. It shows waiting questions with an amber line under the question strip instead.
+- Questions alert only while the Shepherd layout is shown (the bar copy does it, once per question, remembered in shared `shepherd.alerted`). Questions older than 15 minutes on first sight don't alert.
+- Phone push goes through ntfy.sh: set `alerts.phone: true` and `alerts.ntfy: "<topic>"` in workflow.json or the space's `.herdr/orchestra.json`. Off by default, since the question text goes to that server.
+- `InputState.new` can't run in `render`: Needs you uses a pool of 12 reply fields made in `init`; a 13th open question gets buttons only.
 - `shep`'s own path option is `--tasks`; `--file` belongs to `finding add` (the finding's file).
 - Herdr writes `jsconfig.json` and `gpui-kit.d.ts` into each mod folder; they are git-ignored.
 

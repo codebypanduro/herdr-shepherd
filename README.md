@@ -48,8 +48,7 @@ Add the GitHub topic `herdr-layout`, keep `RECIPE.md` and `preview.png` current,
 
 ```
 layouts/shepherd.json          the window: sidebar · board + detail · floating bar
-mods/shepherd/                 board, needs-you, task detail, digest, deps (one mod, several views)
-mods/shepherd-bar/             floating Shepherd bar + history window
+mods/shepherd/                 board, needs you, floating bar, task detail, digest, deps (one mod, several views)
 mods/shepherd-spaces/          sidebar: spaces with folders, machines, usage
 shepherd/                      the Shepherd agent: prompt, workflow.json, helper scripts
 docs/                          recipe support: conventions, slices, design prototypes

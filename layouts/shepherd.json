@@ -97,6 +97,19 @@
             }
           }
         }
+      ],
+      "floating": [
+        {
+          "id": "bar",
+          "content": {
+            "mod": "shepherd",
+            "props": {
+              "panel": "bar"
+            }
+          },
+          "edge": "bottom",
+          "align": "center"
+        }
       ]
     }
   ]

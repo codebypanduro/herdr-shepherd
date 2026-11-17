@@ -61,6 +61,7 @@
   "alerts": {
     "toast": true,
     "sound": true,
-    "phone": true
+    "phone": false,
+    "ntfy": ""
   }
 }

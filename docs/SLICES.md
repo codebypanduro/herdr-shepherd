@@ -12,9 +12,10 @@ A layout and a `shepherd` mod that groups `terminals()` with a `shepherd.stage` 
 **Done when:** a task with a review finding goes back to Implement as loop 2, and the card shows it.
 **Built:** `shepherd/PROMPT.md`, `shepherd/start.sh`, `shepherd/bin/shep.mjs`; the board reads tasks.json. Checked with a live Shepherd on a scratch repo: a review finding sent T-2 back to Implement as loop 2, and the finding went found → fixing → fixed. The card on screen is not checked yet.
 
-## 3. Needs you + floating bar
+## 3. Needs you + floating bar ✅
 Questions in tasks.json show in Needs you and the bar, and are answered with `hc send`. Add toast, sound and phone push.
 **Done when:** a sub-agent question reaches you as a toast and is answered from the bar.
+**Built:** `shep ask` / `shep answer`; Needs you view (Board · Needs you switch in the pane header); the bar is `shepherd` with `panel:"bar"`. Checked live: an implementer's question reached tasks.json, and `answer q1: 1.0.0` (what the bar sends) reached the implementer. A planted question opened a toast. The bar on screen is not checked yet. History (⌘J) is not built.
 
 ## 4. Task detail
 Overview (summary, timeline, comments), Review grid, Changes (git diff in the worktree), Files, Proof.

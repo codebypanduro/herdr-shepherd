@@ -30,6 +30,6 @@ sed -e "s#{{SHEP}}#node $HERE/bin/shep.mjs#g" -e "s#{{WORKFLOW}}#$CONFIG#g" -e "
 hc run --bg --keep --outlive-parent --no-parent --name "shepherd-$(echo "$SPACE" | tr -cd 'a-z0-9' | cut -c1-20)" \
   --cwd "$REPO" \
   --label herdr.space="$SPACE" --label herdr.tab="shepherd-$SPACE" \
-  --label herdr.role=shepherd --label shepherd.dir="$REPO" \
+  --label herdr.role=shepherd --label shepherd.dir="$REPO" --label shepherd.workflow="$CONFIG" \
   -- env SHEP_FILE="$FILE" claude --model "$MODEL" --append-system-prompt-file "$PROMPT" \
   "You are Shepherd for $REPO. Read $CONFIG, run: node $HERE/bin/shep.mjs ls, then wait for the person."

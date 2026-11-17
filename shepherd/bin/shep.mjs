@@ -11,6 +11,9 @@
 //   shep set <id> key=value …         stage status terminal branch worktree pr summary title blockedBy
 //   shep finding <id> add --text "…" [--file f] [--line n]                prints the finding id
 //   shep finding <id> <fid> open|fixing|resolved
+//   shep ask <id> --text "…" [--kind ask|escalate|merge|triage|grill|approve] [--from "t5 implementer"]
+//            [--options "One more loop|Park it|I'll take it"] [--recommended "One more loop"]   prints q1, q2, …
+//   shep answer <qid> "<answer>"      records the person's answer; the question leaves Needs you
 //   shep get <id> | shep ls
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
@@ -20,6 +23,7 @@ import { execFileSync } from "node:child_process";
 const STAGES = ["triage", "spec", "tickets", "implement", "review", "ci", "proof", "merge", "done"];
 const STATUSES = ["working", "blocked", "queued", "paused", "parked", "done"];
 const RESULTS = ["pass", "fail", "ask"];
+const KINDS = ["triage", "grill", "approve", "ask", "escalate", "merge"];
 
 const die = (msg, code = 1) => { process.stderr.write(`shep: ${msg}\n`); process.exit(code); };
 
@@ -195,10 +199,43 @@ switch (cmd) {
     }
     break;
   }
+  case "ask": {
+    need();
+    const t = task(state, args[0]);
+    if (!opt.text || opt.text === true) die("ask <id> --text \"…\"");
+    const kind = opt.kind ?? "ask";
+    if (!KINDS.includes(kind)) die(`kind one of ${KINDS.join(" ")}`);
+    state.questions = state.questions ?? [];
+    const n = state.questions.reduce((m, q) => Math.max(m, parseInt(String(q.id).slice(1), 10) || 0), 0) + 1;
+    const options = typeof opt.options === "string" ? opt.options.split("|").map((x) => x.trim()).filter(Boolean) : [];
+    const recommended = typeof opt.recommended === "string" ? opt.recommended : null;
+    if (recommended && options.length && !options.includes(recommended)) die("--recommended must be one of --options");
+    state.questions.push({ id: `q${n}`, task: t.id, kind, from: typeof opt.from === "string" ? opt.from : "shepherd",
+      text: opt.text, options, recommended, asked: now(), answer: null, answered: null });
+    t.status = "blocked";
+    save(file, state);
+    console.log(`q${n}`);
+    break;
+  }
+  case "answer": {
+    need();
+    const [qid, ...words] = args;
+    const q = (state.questions ?? []).find((x) => x.id === qid);
+    if (!q) die(`no question ${qid}`);
+    if (!words.length) die("answer <qid> \"<answer>\"");
+    q.answer = words.join(" ");
+    q.answered = now();
+    // The task goes back to work unless another question of it is still open.
+    const t = state.tasks.find((x) => x.id === q.task);
+    if (t && t.status === "blocked" && t.stage !== "merge"
+      && !state.questions.some((x) => x.task === t.id && x.answer == null)) t.status = "working";
+    save(file, state);
+    break;
+  }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;
   case "ls":
     for (const t of need().tasks) console.log(`${t.id}\t${t.stage}\t${t.status}\tloop ${t.loop}/${t.maxLoops}\t${t.title}`);
     break;
   default:
-    die("commands: init add start end loop set finding get ls (see the top of shep.mjs)");
+    die("commands: init add start end loop set finding ask answer get ls (see the top of shep.mjs)");
 }

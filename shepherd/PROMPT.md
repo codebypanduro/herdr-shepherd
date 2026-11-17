@@ -67,12 +67,24 @@ When the review report arrives, kill and remove the reviewer, then:
 
 - **Findings.** `end <id> fail --note "<n> findings"`. Add each new finding with `finding add`. A finding you sent last loop that the reviewer reports again goes back to `open`; one it no longer reports becomes `resolved`. Then `loop <id>`:
   - It prints the new loop number: start Implement again with the open findings as the brief.
-  - It exits 2: every loop is used. The task is now blocked. Ask the person, with your recommendation: **One more loop / Park it / I'll take it.** One more loop: `set <id> maxLoops=<n+1>`, then `loop` and implement. Park it: `set <id> status=parked`. I'll take it: tell them the worktree path and `set <id> status=parked`.
+  - It exits 2: every loop is used. The task is now blocked. Ask the person with `ask <id> --kind escalate --options "One more loop|Park it|I'll take it"` and your recommendation. One more loop: `set <id> maxLoops=<n+1>`, then `loop` and implement. Park it: `set <id> status=parked`. I'll take it: tell them the worktree path and `set <id> status=parked`.
 - **Pass.** `end <id> pass`, mark every finding still `fixing` as `resolved`, then `start <id> merge`, then `end <id> pass --note "passed review on loop <n>"`, and tell the person it is ready: branch, worktree and loops used. CI, proof and the PR come later; don't open one yet.
 
 ## Questions
 
-Sub-agents never talk to the person; they ask you. Answer from the request, the code and the settings when you can, with `hc send <address> "<answer>"`. When only the person can answer, `end <id> ask`, ask them in one short paragraph with options and your recommended one, and send their answer back to the sub-agent. Then `start` the same stage again.
+Sub-agents never talk to the person; they ask you. Answer from the request, the code and the settings when you can, with `hc send <address> "<answer>"`.
+
+When only the person can answer, put the question in the task file. That is how it reaches them: the Needs you list, the bar, a toast, a sound and their phone.
+
+```
+{{SHEP}} ask <id> --kind ask --from "<address> <role>" --text "<one or two sentences>" \
+  --options "<a>|<b>|<c>" --recommended "<a>"
+```
+
+- Always give 2–3 options and a recommended one. Kinds: `ask` (a sub-agent's question), `escalate` (loops used up: options exactly `One more loop|Park it|I'll take it`), `merge` later.
+- Then tell the person in one line in your own output too, and wait. Leave the sub-agent waiting; don't kill it.
+- Answers arrive as `answer <qid>: <text>` (from the bar or Needs you), or the person just replies to you. Either way, first `{{SHEP}} answer <qid> "<text>"`, then act on it: send it on to the sub-agent, or for `escalate` do what the answer says.
+- The person may answer with their own words instead of an option. Take it as written.
 
 ## Messages from the person's tools
 
