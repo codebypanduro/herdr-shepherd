@@ -14,8 +14,9 @@ import { TASKS, MAX_LOOPS, STAGES, localId, machineOf, palette } from "./common.
 import { renderBoard } from "./board.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
-import { renderDetail, tint, TAB } from "./detail.js";
+import { renderDetail, tint, TAB, TABS } from "./detail.js";
 import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
+import { loadPr, loadProof } from "./ship.js";
 
 const REFRESH_MS = 5000;
 const VIEW = "shepherd.view";
@@ -24,6 +25,8 @@ const ALERTED = "shepherd.alerted"; // "<repo key>#<question id>" already alerte
 const ALERT_WINDOW_MS = 15 * 60000; // older questions found on first sight are not news
 const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for Needs you cards
 const GIT_STALE_MS = 10000; // Changes and Files reload this often while shown
+const PR_STALE_MS = 30000; // gh pr view, for the PR card's checks
+const PROOF_STALE_MS = 15000;
 
 /** Task status → board status. Queued, paused and parked read as idle (grey). */
 const TASK_STATUS = { working: "working", blocked: "blocked", done: "done" };
@@ -334,22 +337,31 @@ export default class Shepherd extends View {
   }
 
   git(task) { return this.entry(task).git; }
+  pr(task) { return this.entry(task).pr ?? null; }
+  proof(task) { return this.entry(task).proof ?? null; }
   diff(task, f) { return this.entry(task).diffs[f.path] ?? null; }
   file(task, path) { return this.entry(task).files[path] ?? null; }
   ui(task) { return this.entry(task).ui; }
 
-  /** Starts whatever git reads the shown tab needs and doesn't have yet. */
+  /** Starts whatever reads the shown tab needs and doesn't have yet: git for Changes and Files
+   *  (and a local merge's diff size), gh for the PR card, proof.json for Proof. */
   ensureGit(task, cx) {
     const dir = worktreeOf(task);
-    const tab = shared(TAB);
-    if (!dir || (tab !== "changes" && tab !== "files")) return;
+    const tab = TABS.includes(shared(TAB)) ? shared(TAB) : "overview";
+    const repo = this.repo();
     const e = this.entry(task);
-    const on = this.repo()?.machine ?? null;
+    const on = repo?.machine ?? null;
     const once = (key, work) => {
       if (e.loading.has(key)) return;
       e.loading.add(key);
       cx.spawn(async (cx) => { try { await work(); } finally { e.loading.delete(key); } cx.notify(); });
     };
+    const stale = (x, ms) => !x || Date.now() - (x.at ?? 0) > ms;
+    if (repo && tab === "proof" && stale(e.proof, PROOF_STALE_MS)) once("proof", async () => { e.proof = await loadProof(repo, task); });
+    const prCard = tab === "overview" && task.stage === "merge";
+    if (repo && prCard && task.pr && stale(e.pr, PR_STALE_MS)) once("pr", async () => { e.pr = await loadPr(repo, task); });
+    const wantGit = tab === "changes" || tab === "files" || (prCard && !task.pr);
+    if (!dir || !wantGit) return;
     if (!e.git || Date.now() - (e.git.at ?? 0) > GIT_STALE_MS) {
       once("git", async () => {
         const g = await loadGit(dir, on);

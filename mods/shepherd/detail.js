@@ -6,6 +6,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
 import { STAGES, MONO, groupColor, stageGroup, age, palette } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
+import { renderPrCard, renderProof } from "./ship.js";
 
 export const TAB = "shepherd.detailTab";
 export const TABS = ["overview", "review", "changes", "files", "proof"];
@@ -81,7 +82,7 @@ export function renderDetail(m) {
     : tab === "review" ? review(task, t)
     : tab === "changes" ? renderChanges(m, task, t)
     : tab === "files" ? renderFiles(m, task, t)
-    : proof(t);
+    : renderProof(m, task, t);
 
   return root.child(header).child(tabs).child(body);
 }
@@ -140,6 +141,7 @@ function overview(m, task, t) {
   ].sort((a, b) => a.at - b.at).map((c) => c.el);
 
   return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).gap(16)
+    .when(task.stage === "merge", (el) => el.child(renderPrCard(m, task, t)))
     .child(div().text_size(14).line_height(1.45).text_color(task.summary ? t.foreground : t.dim)
       .child(task.summary || "Shepherd hasn't written a summary yet."))
     .when(runs.length > 0, (el) => el.child(v_flex().gap(6)
@@ -215,14 +217,6 @@ function review(task, t) {
       ? div().text_color(t.dim).child("No findings. Review hasn't flagged anything on this task.")
       : v_flex().child(headerRow).children(findings.map(row)))
     .child(v_flex().gap(8).children(perLoop));
-}
-
-// ---- Proof ---------------------------------------------------------------------------------
-
-function proof(t) {
-  return v_flex().flex_1().items_center().justify_center().gap(6)
-    .child(div().text_color(t.dim).child("No proof yet."))
-    .child(div().text_size(11).text_color(t.dim).child("Screenshots and a recording appear here once the Proof stage runs."));
 }
 
 export { age };

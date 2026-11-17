@@ -163,6 +163,11 @@ Each group's label sits above its first column, and the column header has a 2px 
 - The planning skills (/to-spec, /to-tickets, /triage) publish to an issue tracker and talk to the user. Planners are told to follow their method but write files and ask through Shepherd instead.
 - Every request goes through Spec, however small, unless the person says to skip planning; without that rule Shepherd skips planning for anything that looks easy.
 - A blocker counts as finished only when its task is in `done` (merged), so tickets behind a task in Ready to merge wait until the merge.
+- `gh pr merge --delete-branch` can't delete a branch a worktree still has checked out: remove the worktree first, then check the remote branch is gone.
+- `hc` names allow only lowercase letters, digits, - and _: name agents `<id lowercased>-impl-<loop>`.
+- No remote: Ship merges locally (`git merge --squash` + commit), only when the repo is on main with a clean tree.
+- Proof screenshots are copied to `~/.config/herdr-app/data/shepherd-proof/` because `image()` only reads under the app's home; remote spaces show checks but not screenshots.
+- The PR card shows GitHub's checks from `gh pr view --json statusCheckRollup`, plus Shepherd's own CI and Proof results.
 - `shep`'s own path option is `--tasks`; `--file` belongs to `finding add` (the finding's file).
 - Herdr writes `jsconfig.json` and `gpui-kit.d.ts` into each mod folder; they are git-ignored.
 

@@ -21,6 +21,13 @@ if [ -n "$EXISTING" ]; then echo "Shepherd already runs in this space: $EXISTING
 CONFIG="$HERE/workflow.json"; [ -f "$CONFIG" ] || CONFIG="$HERE/workflow.example.json"
 MODEL=$(node -e 'process.stdout.write(require(process.argv[1]).shepherd?.model??"opus")' "$CONFIG")
 FILE="$REPO/.herdr/shepherd/tasks.json"
+# Shepherd's files stay out of git without touching the repo's .gitignore.
+EXCLUDE="$(git -C "$REPO" rev-parse --git-path info/exclude 2>/dev/null || true)"
+if [ -n "$EXCLUDE" ]; then
+  case "$EXCLUDE" in /*) ;; *) EXCLUDE="$REPO/$EXCLUDE" ;; esac
+  mkdir -p "$(dirname "$EXCLUDE")"
+  grep -qx '.herdr/' "$EXCLUDE" 2>/dev/null || echo '.herdr/' >> "$EXCLUDE"
+fi
 node "$HERE/bin/shep.mjs" --tasks "$FILE" init "$SPACE" >/dev/null
 
 PROMPT=$(mktemp -t shepherd-prompt)

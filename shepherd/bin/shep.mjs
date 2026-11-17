@@ -10,7 +10,7 @@
 //   shep start <id> <stage> [--terminal t6] [--model M] [--note "…"]      opens a stage run (status working)
 //   shep end <id> pass|fail|ask [--note "…"] [--tokens N] [--cost N]      closes the open stage run
 //   shep loop <id>                    next build loop; exits 2 when maxLoops is used up (ask the person)
-//   shep set <id> key=value …         stage status terminal branch worktree pr summary title blockedBy
+//   shep set <id> key=value …         stage status terminal branch worktree pr prUrl proof summary title brief blockedBy
 //   shep finding <id> add --text "…" [--file f] [--line n]                prints the finding id
 //   shep finding <id> <fid> open|fixing|resolved
 //   shep ask <id> --text "…" [--kind ask|escalate|merge|triage|grill|approve] [--from "t5 implementer"]
@@ -181,7 +181,7 @@ switch (cmd) {
       if (k === "status" && !STATUSES.includes(v)) die(`status one of ${STATUSES.join(" ")}`);
       if (k === "blockedBy") t.blockedBy = v ? v.split(",") : [];
       else if (["loop", "maxLoops", "pr"].includes(k)) t[k] = v === "" ? null : Number(v);
-      else if (["stage", "status", "terminal", "branch", "worktree", "summary", "title"].includes(k)) t[k] = v === "" ? null : v;
+      else if (["stage", "status", "terminal", "branch", "worktree", "summary", "title", "prUrl", "proof", "brief"].includes(k)) t[k] = v === "" ? null : v;
       else die(`unknown key ${k}`);
     }
     save(file, state);

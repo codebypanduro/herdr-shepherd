@@ -27,9 +27,10 @@ Overview (summary, timeline, comments), Review grid, Changes (git diff in the wo
 **Done when:** a request becomes approved tickets that wait on each other.
 **Built:** `shep add --blocked-by/--parent/--brief`, `shep ask --kind grill --questions` and `--kind approve --tickets`, `shep ready`; the Plan section of PROMPT.md; grilling-round and ticket cards in Needs you. Checked live: a request went Spec → two grilling rounds → 3 tickets approved (C after A and B), and Shepherd also made them wait on the unmerged T-1 and T-4 as answered in round 1. Triage is written but not run live.
 
-## 6. CI, proof, merge
+## 6. CI, proof, merge ✅
 The CI command per space, a headless browser with screenshots and a recording, a PR via `gh`, and Ready to merge.
 **Done when:** Merge squashes the PR and removes the worktree.
+**Built:** CI, Proof and Ship in PROMPT.md; `ship.js` (PR card with Squash and merge / Send back, Proof tab); `start.sh` keeps `.herdr/` out of git via `.git/info/exclude`. Checked live: T-4 went CI → Proof (4/4) → local squash merge with worktree and branch removed; T-6 went through to PR #1 on a private test repo, and Merge squashed it and removed the worktree. The remote branch was left behind on that run (fixed in the prompt since: remove the worktree before `gh pr merge --delete-branch`). No screenshots or recording yet: the demo has no UI.
 
 ## 7. Factory controls
 Machine load limits, time in stage and stuck, steering, the terminal overlay, the digest, the dependencies view, keys.
