@@ -57,7 +57,12 @@ export function renderBoard(m) {
     return v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
       .bg(blocked ? t.raised : t.surface).border(1).border_color(border)
       .hover((s) => s.border_color(isSel ? t.accent : t.input))
-      .on_click(() => setShared(SELECTED, isSel ? null : c.key))
+      .on_click(() => {
+        setShared(SELECTED, isSel ? null : c.key);
+        // Task cards open the detail pane; a label-only card has no task to show.
+        if (!isSel && c.key.startsWith("task-")) run("layout.show", { id: "detail" });
+        if (isSel) run("layout.hide", { id: "detail" });
+      })
       .child(h_flex().gap(6).items_center()
         .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
         .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim)

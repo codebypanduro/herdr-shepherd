@@ -17,9 +17,10 @@ Questions in tasks.json show in Needs you and the bar, and are answered with `hc
 **Done when:** a sub-agent question reaches you as a toast and is answered from the bar.
 **Built:** `shep ask` / `shep answer`; Needs you view (Board · Needs you switch in the pane header); the bar is `shepherd` with `panel:"bar"`. Checked live: an implementer's question reached tasks.json, and `answer q1: 1.0.0` (what the bar sends) reached the implementer. A planted question opened a toast. The bar on screen is not checked yet. History (⌘J) is not built.
 
-## 4. Task detail
+## 4. Task detail ✅
 Overview (summary, timeline, comments), Review grid, Changes (git diff in the worktree), Files, Proof.
 **Done when:** the Review tab shows a finding as found in loop 1 and fixed in loop 2.
+**Built:** `detail.js` (header, Overview, Review, Proof placeholder) and `git.js` (Changes, Files). Checked: T-2's finding f1 reads found (loop 1) → ✓ fixed (loop 2); all five tabs render with T-2's real data; the git commands return T-2's change. Not built yet: timeline hover, the Ask Shepherd field, the PR card (slice 6), keys 1–5 (slice 7). Not seen on screen yet.
 
 ## 5. Plan stages
 `/triage`, `/to-spec` or `/wayfinder` with grilling rounds, and `/to-tickets` with approval and blocking edges.

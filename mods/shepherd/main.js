@@ -14,6 +14,8 @@ import { TASKS, MAX_LOOPS, STAGES, localId, machineOf } from "./common.js";
 import { renderBoard } from "./board.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
+import { renderDetail, tint, TAB } from "./detail.js";
+import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
 
 const REFRESH_MS = 5000;
 const VIEW = "shepherd.view";
@@ -21,6 +23,7 @@ const PENDING = "shepherd.pending"; // question ids answered here that tasks.jso
 const ALERTED = "shepherd.alerted"; // "<repo key>#<question id>" already alerted
 const ALERT_WINDOW_MS = 15 * 60000; // older questions found on first sight are not news
 const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for Needs you cards
+const GIT_STALE_MS = 10000; // Changes and Files reload this often while shown
 
 /** Task status → board status. Queued, paused and parked read as idle (grey). */
 const TASK_STATUS = { working: "working", blocked: "blocked", done: "done" };
@@ -37,6 +40,7 @@ export default class Shepherd extends View {
     this.since = {}; // address -> { stage, since }: label-only cards' time in stage
     this.data = {}; // repo key -> { tasks, questions, alerts, error? }
     this.watching = new Set();
+    this.gitCache = {}; // "<repo key>#<task id>" -> { git, diffs: {path: text}, files: {path: {text, added}}, ui, loading }
     this.slots = Array.from({ length: REPLY_SLOTS }, () => ({ q: null, input: InputState.new({ placeholder: "Or write your own answer…" }) }));
     for (const s of this.slots) s.input.on("submit", () => { const q = this.questionById(s.q); if (q) this.answer(q, s.input.value()); });
     if (props()?.panel === "bar") {
@@ -46,7 +50,10 @@ export default class Shepherd extends View {
     // Time in stage changes by the minute; the 5 s tick also reloads remote repos and
     // retries a watch that failed (no tasks.json yet).
     cx.timer.every(60000, (cx) => cx.notify());
-    cx.timer.every(REFRESH_MS, (cx) => this.sync(cx));
+    cx.timer.every(REFRESH_MS, (cx) => {
+      this.sync(cx);
+      if (props()?.panel === "detail") { const task = this.selectedTask(); if (task) this.ensureGit(task, cx); }
+    });
     this.sync(cx);
   }
 
@@ -294,6 +301,58 @@ export default class Shepherd extends View {
     return best?.text ?? null;
   }
 
+  // ---- task detail ---------------------------------------------------------------------
+
+  selectedTask() {
+    const key = shared("shepherd.selected");
+    if (typeof key !== "string" || !key.startsWith("task-")) return null;
+    return (this.state().tasks ?? []).find((x) => `task-${x.id}` === key) ?? null;
+  }
+
+  tint(c, a) { return tint(c, a); }
+
+  entry(task) {
+    const k = `${this.repo()?.key}#${task.id}`;
+    return (this.gitCache[k] ??= { git: null, diffs: {}, files: {}, ui: { changesFile: null, open: new Set(), file: null }, loading: new Set() });
+  }
+
+  git(task) { return this.entry(task).git; }
+  diff(task, f) { return this.entry(task).diffs[f.path] ?? null; }
+  file(task, path) { return this.entry(task).files[path] ?? null; }
+  ui(task) { return this.entry(task).ui; }
+
+  /** Starts whatever git reads the shown tab needs and doesn't have yet. */
+  ensureGit(task, cx) {
+    const dir = worktreeOf(task);
+    const tab = shared(TAB);
+    if (!dir || (tab !== "changes" && tab !== "files")) return;
+    const e = this.entry(task);
+    const on = this.repo()?.machine ?? null;
+    const once = (key, work) => {
+      if (e.loading.has(key)) return;
+      e.loading.add(key);
+      cx.spawn(async (cx) => { try { await work(); } finally { e.loading.delete(key); } cx.notify(); });
+    };
+    if (!e.git || Date.now() - (e.git.at ?? 0) > GIT_STALE_MS) {
+      once("git", async () => {
+        const g = await loadGit(dir, on);
+        // Fresh contents: drop cached diffs and files so they reload.
+        if (e.git && g.at) { e.diffs = {}; e.files = {}; }
+        e.git = g;
+      });
+    }
+    const g = e.git;
+    if (!g || g.error) return;
+    if (tab === "changes" && g.files.length) {
+      const sel = g.files.find((f) => f.path === e.ui.changesFile) ?? g.files[0];
+      if (e.diffs[sel.path] == null) once(`diff:${sel.path}`, async () => { e.diffs[sel.path] = await loadDiff(dir, on, g.base, sel); });
+    }
+    if (tab === "files" && e.ui.file && !e.files[e.ui.file]) {
+      const path = e.ui.file;
+      once(`file:${path}`, async () => { e.files[path] = await loadFile(dir, on, g.base, path); });
+    }
+  }
+
   // ---- views -----------------------------------------------------------------------------
 
   view() { return shared(VIEW) ?? props()?.view ?? "board"; }
@@ -325,7 +384,11 @@ export default class Shepherd extends View {
     if (repo && !(repo.key in this.data)) { this.data[repo.key] = { tasks: [], questions: [], alerts: {} }; this.sync(cx); }
     if (p.panel === "status") return this.renderStatus();
     if (p.panel === "bar") return renderBar(this);
-    if (p.panel === "detail") return div().id("shepherd-detail").size_full().bg(theme().surface);
+    if (p.panel === "detail") {
+      const task = this.selectedTask();
+      if (task) this.ensureGit(task, cx);
+      return renderDetail(this);
+    }
     return this.view() === "needs" ? renderNeeds(this) : renderBoard(this);
   }
 
