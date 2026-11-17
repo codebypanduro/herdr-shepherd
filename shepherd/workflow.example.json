@@ -12,12 +12,17 @@
       "skill": "/triage",
       "only": "issues from other people"
     },
+    "grill": {
+      "agent": "claude",
+      "model": "opus",
+      "skill": "/grill-with-docs",
+      "or": "/grill-me"
+    },
     "spec": {
       "agent": "claude",
       "model": "opus",
       "skill": "/to-spec",
-      "big": "/wayfinder",
-      "grillQuestionsPerRound": 3
+      "big": "/wayfinder"
     },
     "tickets": {
       "agent": "claude",
@@ -51,7 +56,8 @@
   },
   "stuckMinutes": {
     "triage": 40,
-    "spec": 120,
+    "grill": 30,
+    "spec": 60,
     "tickets": 60,
     "implement": 50,
     "review": 25,

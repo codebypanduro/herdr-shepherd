@@ -8,9 +8,9 @@ Every terminal Shepherd starts carries `herdr.space` and these. Shepherd's own t
 
 | label | values | on |
 |---|---|---|
-| `herdr.role` | `shepherd`, `triager`, `planner`, `implementer`, `reviewer`, `ci`, `qa` | every agent |
+| `herdr.role` | `shepherd`, `triager`, `griller`, `planner`, `implementer`, `reviewer`, `ci`, `qa` | every agent |
 | `shepherd.task` | task id, e.g. `HRD-144` | build-loop agents (implementer, reviewer, ci, qa) |
-| `shepherd.stage` | `triage` `spec` `tickets` `implement` `review` `ci` `proof` `merge` | every sub-agent |
+| `shepherd.stage` | `triage` `grill` `spec` `tickets` `implement` `review` `ci` `proof` `merge` | every sub-agent |
 | `shepherd.loop` | `1`…`n` | build-loop agents |
 | `shepherd.title` | the task's title | implementer and reviewer (cards without a task use it) |
 | `shepherd.dir` | the repo's root | the Shepherd terminal (where the mods read tasks.json) |
@@ -65,7 +65,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
   "questions": [{
     "id": "q7", "task": "HRD-140", "kind": "triage | grill | approve | ask | escalate | merge",
     "from": "t5 implementer", "text": "…", "options": ["…"], "recommended": "…",
-    "round": 2, "questions": [{ "q": "…", "options": ["…"], "recommended": "…", "why": "…" }],
+    "why": "one line: why the recommended one (grilling questions)",
     "tickets": [{ "key": "A", "title": "…", "brief": "…", "blockedBy": ["…keys"] }],
     "asked": "2026-11-17T10:12:00Z", "answer": null
   }]
@@ -83,16 +83,17 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 | line | meaning |
 |---|---|
 | `answer q7: One more loop` | answer a question (free text works too) |
-| `round q2: 1. One loop 2. Only after both pass 3. Herdr and my phone` | answer a grilling round |
 | `steer HRD-144 redirect: fix the failing test first` | redirect the agent on a task |
 | `steer HRD-144 context: use the core's start time` | add context |
 | `pause HRD-144` / `resume HRD-144` | pause or resume |
 | `status HRD-144?` | Shepherd replies with `shep say --task HRD-144`, so the reply shows in the History |
 | anything else | a normal message to Shepherd |
 
-Every line the board sends, except `round …`, is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause and status with their task).
+Every line the board sends is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause and status with their task).
 
-Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). Planners report with `grill <id> round <n>: <path>`, `spec <id>: <path>` and `tickets <id>: <path>`; plan files live in `.herdr/shepherd/plans/<id>/`. They never talk to the person.
+Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). They never talk to the person.
+
+Planners report with `grill <id>: <path>` (one grilling question, `{q, options, recommended, why}` in `grill-<n>.json`; Shepherd asks it with `shep ask --kind grill --question <path>` and sends the answer back as `<qid> answer: <text>`), `grilled <id>: <path>` (the grilling is over: `grilling.md`), `spec <id>: <path>` and `tickets <id>: <path>`. Plan files live in `.herdr/shepherd/plans/<id>/`. A grilling question is an ordinary question of kind `grill`, answered with `answer <qid>: …` like any other; there are no rounds.
 
 ## Workflow: `shepherd/workflow.json` (per person) and `.herdr/orchestra.json` (per space)
 

@@ -62,7 +62,6 @@ export function renderHistory(m) {
     const q = it.q;
     const open = q.answer == null;
     const kind = KINDS[q.kind] ?? KINDS.ask;
-    const grill = q.kind === "grill" && Array.isArray(q.questions);
     return v_flex().id(`h-${i}`).gap(8).px(12).py(10).rounded(6).border(1)
       .border_color(open ? tint(t.blocked, 0.45) : t.border).bg(open ? tint(t.blocked, 0.05) : t.surface)
       .child(h_flex().gap(8).items_center().font_family(MONO).text_size(11).text_color(t.muted)
@@ -71,16 +70,12 @@ export function renderHistory(m) {
         .child(div().child(q.from ?? "shepherd"))
         .child(div().text_color(t.dim).child(`· ${q.task}`)))
       .child(div().text_size(13).line_height(1.45).text_color(t.foreground).child(q.text))
-      .when(grill, (el) => el.child(v_flex().gap(4).children(q.questions.map((g, j) => h_flex().gap(8)
-        .child(div().font_family(MONO).text_size(11).text_color(t.dim).child(`${j + 1}.`))
-        .child(div().flex_1().text_size(12.5).text_color(t.muted).child(g.q))))))
       .when(Array.isArray(q.tickets), (el) => el.child(v_flex().gap(3).children(q.tickets.map((k) => h_flex().gap(8).text_size(11.5)
         .child(div().w(22).font_family(MONO).text_color(t.dim).child(k.key))
         .child(div().flex_1().text_color(t.muted).child(k.title))
         .child(div().font_family(MONO).text_color(t.dim).child(k.blockedBy?.length ? `after ${k.blockedBy.join(", ")}` : ""))))))
-      .when(open && grill, (el) => el.child(h_flex().child(answerButton(t, `h-${i}-round`, `Answer round ${q.round ?? 1} in Needs you →`, false,
-        () => { setShared(VIEW, "needs"); close(); }))))
-      .when(open && !grill && (q.options ?? []).length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(
+      .when(open && Boolean(q.why), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(q.why)))
+      .when(open && (q.options ?? []).length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(
         q.options.map((o, j) => answerButton(t, `h-${i}-o${j}`, o, o === q.recommended, () => m.answer(q, o))))))
       .when(!open, (el) => el.child(h_flex().gap(4).text_size(11.5).text_color(t.muted)
         .child("↳ you:").child(div().text_color(t.foreground).child(q.answer))));

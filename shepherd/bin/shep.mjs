@@ -4,7 +4,7 @@
 // The file is found from --tasks <path>, $SHEP_FILE, or <git root of cwd>/.herdr/shepherd/tasks.json.
 //
 //   shep init <space>
-//   shep add --title "…" [--id X-1] [--source you] [--stage spec] [--max-loops 3]
+//   shep add --title "…" [--id X-1] [--source you] [--stage grill] [--max-loops 3]
 //            [--blocked-by "T-4,T-5"] [--parent T-3] [--brief "…"]                       prints the id
 //   shep ready                        queued tasks whose blockers are all done, one id per line
 //   shep start <id> <stage> [--terminal t6] [--model M] [--note "…"]      opens a stage run (status working)
@@ -17,7 +17,9 @@
 //   shep finding <id> <fid> open|fixing|resolved
 //   shep ask <id> --text "…" [--kind ask|escalate|merge|triage|grill|approve] [--from "t5 implementer"]
 //            [--options "One more loop|Park it|I'll take it"] [--recommended "One more loop"]   prints q1, q2, …
-//            grilling: --kind grill --round 2 --questions <file.json>   [{q, options:[…], recommended, why}]
+//            [--why "one line: why the recommended one"]
+//            grilling: --kind grill --question <file.json>   {q, options:[…], recommended, why}: one question at a
+//                      time; the file fills --text, --options, --recommended and --why (and spares quoting a "|")
 //            approval: --kind approve --tickets <file.json>             [{key, title, brief, blockedBy:[keys]}]
 //   shep answer <qid> "<answer>"      records the person's answer; the question leaves Needs you
 //   shep room [--wait] [--workflow f] is this machine under the workflow's CPU and memory limits? exit 0 yes, 3 no,
@@ -32,7 +34,7 @@ import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const STAGES = ["triage", "spec", "tickets", "implement", "review", "ci", "proof", "merge", "done"];
+const STAGES = ["triage", "grill", "spec", "tickets", "implement", "review", "ci", "proof", "merge", "done"];
 const STATUSES = ["working", "blocked", "queued", "paused", "parked", "done"];
 const RESULTS = ["pass", "fail", "ask"];
 const KINDS = ["triage", "grill", "approve", "ask", "escalate", "merge"];
@@ -105,7 +107,7 @@ switch (cmd) {
   case "add": {
     need();
     if (!opt.title || opt.title === true) die("add --title \"…\"");
-    const stage = opt.stage ?? "spec";
+    const stage = opt.stage ?? "grill";
     if (!STAGES.includes(stage)) die(`stage must be one of ${STAGES.join(" ")}`);
     let id = opt.id;
     if (!id) {
@@ -221,30 +223,38 @@ switch (cmd) {
   case "ask": {
     need();
     const t = task(state, args[0]);
-    if (!opt.text || opt.text === true) die("ask <id> --text \"…\"");
     const kind = opt.kind ?? "ask";
     if (!KINDS.includes(kind)) die(`kind one of ${KINDS.join(" ")}`);
+    if (opt.questions) die("--questions is gone: grilling asks one question at a time with --question <file.json>");
+    // --question <file.json>: one question {q, options, recommended, why}; flags given beside it win.
+    let one = {};
+    if (typeof opt.question === "string") {
+      try { one = JSON.parse(readFileSync(opt.question, "utf8")); } catch (e) { die(`--question ${opt.question}: ${e.message}`); }
+      if (!one || typeof one !== "object" || Array.isArray(one) || typeof one.q !== "string" || !one.q.trim())
+        die("--question must be a JSON object with q (and options, recommended, why)");
+      if (one.options != null && (!Array.isArray(one.options) || one.options.some((o) => typeof o !== "string")))
+        die("--question: options must be a list of strings");
+    }
+    const text = typeof opt.text === "string" ? opt.text : one.q;
+    if (!text) die("ask <id> --text \"…\" (or --question <file.json>)");
     state.questions = state.questions ?? [];
     const n = state.questions.reduce((m, q) => Math.max(m, parseInt(String(q.id).slice(1), 10) || 0), 0) + 1;
-    const options = typeof opt.options === "string" ? opt.options.split("|").map((x) => x.trim()).filter(Boolean) : [];
-    const recommended = typeof opt.recommended === "string" ? opt.recommended : null;
+    const options = typeof opt.options === "string" ? opt.options.split("|").map((x) => x.trim()).filter(Boolean)
+      : (one.options ?? []).map((x) => x.trim()).filter(Boolean);
+    const recommended = typeof opt.recommended === "string" ? opt.recommended
+      : typeof one.recommended === "string" && one.recommended.trim() ? one.recommended.trim() : null;
     if (recommended && options.length && !options.includes(recommended)) die("--recommended must be one of --options");
-    const readList = (k) => {
-      if (typeof opt[k] !== "string") return undefined;
-      let v;
-      try { v = JSON.parse(readFileSync(opt[k], "utf8")); } catch (e) { die(`--${k} ${opt[k]}: ${e.message}`); }
-      if (!Array.isArray(v) || !v.length) die(`--${k} must be a non-empty JSON array`);
-      return v;
-    };
-    const questions = readList("questions");
-    const tickets = readList("tickets");
-    if (kind === "grill" && !questions) die("--kind grill needs --questions <file.json>");
+    const why = typeof opt.why === "string" ? opt.why : typeof one.why === "string" && one.why.trim() ? one.why.trim() : null;
+    let tickets;
+    if (typeof opt.tickets === "string") {
+      try { tickets = JSON.parse(readFileSync(opt.tickets, "utf8")); } catch (e) { die(`--tickets ${opt.tickets}: ${e.message}`); }
+      if (!Array.isArray(tickets) || !tickets.length) die("--tickets must be a non-empty JSON array");
+    }
     if (kind === "approve" && !tickets) die("--kind approve needs --tickets <file.json>");
-    for (const g of questions ?? []) if (!g.q || !Array.isArray(g.options) || !g.options.length) die("each grilling question needs q and options");
     for (const k of tickets ?? []) if (!k.key || !k.title) die("each ticket needs key and title");
     const q = { id: `q${n}`, task: t.id, kind, from: typeof opt.from === "string" ? opt.from : "shepherd",
-      text: opt.text, options, recommended, asked: now(), answer: null, answered: null };
-    if (questions) { q.round = num(opt.round) ?? 1; q.questions = questions; }
+      text, options, recommended, asked: now(), answer: null, answered: null };
+    if (why) q.why = why;
     if (tickets) q.tickets = tickets.map((k) => ({ ...k, blockedBy: Array.isArray(k.blockedBy) ? k.blockedBy : k.blockedBy ? [k.blockedBy] : [] }));
     state.questions.push(q);
     t.status = "blocked";

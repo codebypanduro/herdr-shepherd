@@ -1,4 +1,4 @@
-// The board: nine stage columns of cards.
+// The board: ten stage columns of cards.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -68,7 +68,7 @@ export function renderBoard(m) {
       .child(h_flex().gap(6).items_center()
         .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
         .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
-          .child(STAGES[c.stage].skill))
+          .child(m.settings().stages?.[c.stage]?.skill ?? STAGES[c.stage].skill))
         .when(inBuild, (el) => el.child(loopDots(c)))
         .when(Boolean(c.task || c.address), (el) => el.child(div().id(`steer-${c.key}`).px(3).rounded(4).text_color(t.dim)
           .hover((s) => s.bg(t.hover).text_color(t.foreground))

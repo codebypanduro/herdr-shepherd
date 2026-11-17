@@ -14,6 +14,8 @@ import { chip, check, gitFacts, shepherdHome, shepherdOn, readWorkflow, editJson
 
 const BUILD = ["implement", "review", "ci", "proof"];
 const MODELS = ["opus", "sonnet", "haiku"];
+/** The Grill stage's skills: /grill-with-docs also writes CONTEXT.md and docs/adr as it goes. */
+const GRILL_SKILLS = ["/grill-with-docs", "/grill-me"];
 const CPU_OPTS = [60, 70, 80, 90];
 const MEM_OPTS = [70, 80, 85, 95];
 
@@ -95,6 +97,7 @@ export function renderWorkflow(m) {
   const lim = { ...LIMITS, ...wf.limits };
   const alerts = { toast: true, sound: true, phone: false, ...wf.alerts };
   const proof = st.proof ?? {};
+  const grillSkill = st.grill?.skill ?? GRILL_SKILLS[0];
   const shown = s.limits;
   const overridden = m.repo() && (shown.maxCpu !== lim.maxCpu || shown.maxMem !== lim.maxMem);
 
@@ -110,17 +113,18 @@ export function renderWorkflow(m) {
         .child(div().text_color(t.dim).child(`tracker: ${trackerName(wf.tracker)}`)))
       .child(row(t, "✳", title(t, "Shepherd"), "The agent you talk to. It plans the flow, hands out work and asks you questions. A new model takes effect when Shepherd restarts.", models("shepherd", wf.shepherd?.model)))
       .child(row(t, "01", title(t, "Triage", "/triage"), "Only for issues from other people. Your own work skips it.", models("triage", st.triage?.model)))
-      .child(row(t, "02", title(t, "Spec / wayfinder", "/to-spec · /wayfinder"), "Grills you in rounds, then writes one spec.",
-        h_flex().gap(4).children(withValue([1, 3, 5], st.spec?.grillQuestionsPerRound).map((n) =>
-          chip(t, `wf-grill-${n}`, `${n} q`, n === (st.spec?.grillQuestionsPerRound ?? 3), set(["stages", "spec", "grillQuestionsPerRound"], n))))))
-      .child(row(t, "03", title(t, "To tickets", "/to-tickets"), "Vertical slices with blocking edges. You approve the breakdown.",
+      .child(row(t, "02", title(t, "Grill", grillSkill), "Grills you until you agree. No limit.",
+        h_flex().gap(4).children(withValue(GRILL_SKILLS, grillSkill).map((k) =>
+          chip(t, `wf-grill-${k}`, k, k === grillSkill, set(["stages", "grill", "skill"], k))))))
+      .child(row(t, "03", title(t, "Spec / wayfinder", "/to-spec · /wayfinder"), "Writes the spec from the grilling."))
+      .child(row(t, "04", title(t, "To tickets", "/to-tickets"), "Vertical slices with blocking edges. You approve the breakdown.",
         div().text_size(12).text_color(t.muted).child("Asks you to approve")))
-      .child(row(t, "04", title(t, "Implement", "/implement"), "Builds one ticket and fixes review notes.", models("implement", st.implement?.model)))
-      .child(row(t, "05", title(t, "Code review", "/code-review"), "Findings send the ticket back to Implement.", models("review", st.review?.model)))
-      .child(row(t, "06", title(t, "CI checks"), "Runs on the ticket's PR. A failing check counts as a loop.",
+      .child(row(t, "05", title(t, "Implement", "/implement"), "Builds one ticket and fixes review notes.", models("implement", st.implement?.model)))
+      .child(row(t, "06", title(t, "Code review", "/code-review"), "Findings send the ticket back to Implement.", models("review", st.review?.model)))
+      .child(row(t, "07", title(t, "CI checks"), "Runs on the ticket's PR. A failing check counts as a loop.",
         h_flex().gap(6).items_center().text_size(12).text_color(t.muted).child("Set per space:")
           .child(svg("mods/shepherd/icons/gear.svg").size(12).text_color(t.dim)).child("on each space")))
-      .child(row(t, "07", title(t, "Proof"), "Tests the app in a headless browser and records what it saw.",
+      .child(row(t, "08", title(t, "Proof"), "Tests the app in a headless browser and records what it saw.",
         h_flex().gap(12)
           .child(check(t, "wf-shots", "Screenshots", proof.screenshots !== false, set(["stages", "proof", "screenshots"], proof.screenshots === false)))
           .child(check(t, "wf-video", "Screen recording", proof.recording !== false, set(["stages", "proof", "recording"], proof.recording === false)))))

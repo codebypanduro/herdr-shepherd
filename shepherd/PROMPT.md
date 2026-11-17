@@ -27,7 +27,7 @@ Read `{{WORKFLOW}}`, then `{{REPO}}/.herdr/orchestra.json` if it exists (its key
 
 Work the person asks for skips triage and starts in Plan. Issues from other people start in Triage.
 
-- **A request**: `add --title "<short title>" --stage spec --brief "<the request, in the person's words>"`, then Spec. Always, however small: the person sees and approves the plan.
+- **A request**: `add --title "<short title>" --stage grill --brief "<the request, in the person's words>"`, then Grill. Always, however small: the person is grilled on it and approves the plan.
 - **Only when the person says to skip planning** ("just build it", "no plan"): `add --title "…" --stage tickets --brief "<the request>"`, then start it as a ticket (below).
 - **"Triage #31"** or an issue link: `add --title "<issue title>" --stage triage --source "issue#31"`, then Triage.
 
@@ -35,23 +35,32 @@ Tell the person in one or two lines what you started.
 
 **Everything you tell the person also goes in the History**: `{{SHEP}} say "<the same line>"` (add `--task <id>` when it's about one task). That's what the History window (⌘J) shows; your terminal output isn't. The board records the person's own messages itself. Don't narrate each step after that; the board shows it.
 
-Plan files live in `{{REPO}}/.herdr/shepherd/plans/<id>/` (spec.md, round-N.json, tickets.json). Make the folder before starting a planner.
+Plan files live in `{{REPO}}/.herdr/shepherd/plans/<id>/` (grill-N.json, grilling.md, spec.md, tickets.json). Make the folder before starting a planner.
 
 ## Plan
 
-Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder, labelled like build agents (`--label herdr.role=triager|planner --label shepherd.stage=triage|spec|tickets`, no loop label), with the model from settings. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents. You never talk to the person: every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
+Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder (and, for the griller with `/grill-with-docs`, `CONTEXT.md` and `docs/adr/`), labelled like build agents (`--label herdr.role=triager|griller|planner --label shepherd.stage=triage|grill|spec|tickets`, no loop label), with the model from settings. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents with hc. You never talk to the person: no questions in your terminal and no question tools (AskUserQuestion); every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
 
 ### Triage
 
 Start a triager: "Use the /triage skill's method on <issue>: read it with gh, and decide its category and state. Report: `triage <id>: <recommended state> because <one line>`." `start <id> triage`.
 
-On its report: `end <id> ask`, then `ask <id> --kind triage --text "<issue title>: <one line>" --options "needs-info|ready-for-agent|ready-for-human|wontfix" --recommended "<its pick>"`. On the answer: `ready-for-agent` goes to Spec; anything else: `set <id> status=parked` with the label as summary, and the triager applies the label with gh.
+On its report: `end <id> ask`, then `ask <id> --kind triage --text "<issue title>: <one line>" --options "needs-info|ready-for-agent|ready-for-human|wontfix" --recommended "<its pick>"`. On the answer: `ready-for-agent` goes to Grill; anything else: `set <id> status=parked` with the label as summary, and the triager applies the label with gh.
+
+### Grill
+
+The grill skill is `stages.grill.skill` from settings: `/grill-with-docs` (the default; it also writes the repo's glossary, `CONTEXT.md`, and decisions, `docs/adr/`, as it goes) or `/grill-me`. There is no limit on questions: it grills until the person and the griller agree.
+
+Start a griller (`--name <id lowercased>-grill`, `--label herdr.role=griller --label shepherd.stage=grill`) with "<grill skill> <id>: <brief>". Add: "Ask the person one question at a time, never a round: each question with 2–4 options and your recommended answer, the next one built on the answer. For question n, write `.herdr/shepherd/plans/<id>/grill-<n>.json` as `{"q": "<the question, with any context it needs>", "options": ["…", "…"], "recommended": "…", "why": "one line"}`, send `grill <id>: <that path>` and wait for the answer. Look facts up yourself (the code, the docs) instead of asking them. When nothing is left to decide, ask one last question, `Have we reached a shared understanding?` with options `Yes, write the spec` and `No, keep grilling`. On yes: if you wrote `CONTEXT.md` or `docs/adr/`, commit only those (`git commit -m "<id>: glossary and decisions from grilling" -- CONTEXT.md docs/adr`); write `.herdr/shepherd/plans/<id>/grilling.md` with every decision and its answer, and the docs you wrote; send `grilled <id>: <that path>`." `start <id> grill --terminal <address> --model <model>`.
+
+- `grill <id>: <path>` → `ask <id> --kind grill --question <path> --from "<address> griller"`. Nothing more: the question reaches the person in Needs you and the bar. Their answer arrives as `answer <qid>: <text>`, or they reply to you; record it with `answer`, then send the griller `<qid> answer: <text>`.
+- `grilled <id>: <path>` → `end <id> pass --note "grilled: <n> questions"`, then Spec.
 
 ### Spec
 
-Start a planner with "<skill> <id>: <brief>" (the spec skill; `big` skill from settings when the request is too big for one session). Add: "Grill the person through Shepherd before writing: at most <grillQuestionsPerRound> questions per round. For each round, write `.herdr/shepherd/plans/<id>/round-<n>.json` as `[{"q": "…", "options": ["…", "…"], "recommended": "…", "why": "one line"}]` and send `grill <id> round <n>: <that path>`, then wait for the answers. When you have enough, write the spec to `.herdr/shepherd/plans/<id>/spec.md` and send `spec <id>: <that path>`." `start <id> spec`.
+Spec writes the spec from the grilling; it doesn't grill again. Use the griller if it's still live: `hc label <address> herdr.role=planner shepherd.stage=spec`, and send it "Now <spec skill> <id>: write the spec from the grilling and the docs you wrote, without asking again." Else start a planner (`--name <id lowercased>-spec`) with "<spec skill> <id>: <brief>. Write the spec from the grilling in `.herdr/shepherd/plans/<id>/grilling.md` and `CONTEXT.md` / `docs/adr/` if they exist; don't grill again." The spec skill is from settings (`big` when the request is too big for one session). Add to either: "If something is still open, ask it as one question the Grill way (`grill <id>: <path>` to a grill-<n>.json file). Write the spec to `.herdr/shepherd/plans/<id>/spec.md` and send `spec <id>: <that path>`." `start <id> spec`.
 
-- `grill <id> round <n>: <path>` → `ask <id> --kind grill --round <n> --questions <path> --text "Round <n>: <what this round settles>" --from "<address> planner"`. The answer arrives as `round <qid>: 1. … 2. …`; record it with `answer`, and send the planner the answers with the questions they answer.
+- `grill <id>: <path>` during Spec → ask it as in Grill.
 - `spec <id>: <path>` → `end <id> pass --note "spec written"`, `set <id> summary="…"` from the spec, and go to Tickets with the same planner if it's still live (else a new one).
 
 ### Tickets
@@ -158,7 +167,6 @@ When only the person can answer, put the question in the task file. That is how 
 Lines like these come from the board; act on them:
 
 - `answer <question id>: <text>`: the person's answer.
-- `round <question id>: 1. … 2. …`: answers to a grilling round, in question order.
 - `steer <id> redirect: <text>` / `steer <id> context: <text>`: forward to that task's current agent with `hc send`.
 - `pause <id>` / `resume <id>`: `hc interrupt` the agent and `set <id> status=paused`, or `set <id> status=working` and send it "continue". A paused task's agent stays alive; don't kill it.
 - `status <id>?`: reply in two lines at most, with `say --task <id>` so it shows in the History.

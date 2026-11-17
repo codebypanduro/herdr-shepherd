@@ -3,7 +3,7 @@
 A Herdr layout that turns your agents into a software factory. You talk to one agent per space, **Shepherd**. Shepherd runs every task through a fixed workflow built on [mattpocock/skills](https://github.com/mattpocock/skills), starts the sub-agents, and only brings you the questions that need you. A board shows where every task is at all times.
 
 ```
-Plan         Triage → Spec / wayfinder → Tickets
+Plan         Triage → Grill → Spec / wayfinder → Tickets
 Build loop   Implement → Code review → CI → Proof      (max 3 loops, then Shepherd asks you)
 Ship         Ready to merge → Done
 ```

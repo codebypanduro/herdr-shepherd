@@ -243,7 +243,9 @@ export default class Shepherd extends View {
     const pending = new Set(shared(PENDING) ?? []);
     return (questions ?? [])
       .filter((q) => q.answer == null && !pending.has(`${repo.key}#${q.id}`))
-      .map((q) => ({ ...q, taskObj: tasks.find((x) => x.id === q.task) ?? null }))
+      .map((q) => ({ ...q, taskObj: tasks.find((x) => x.id === q.task) ?? null,
+        // A grilling question's number in its task's grilling (they come one at a time, no limit).
+        grillNo: q.kind === "grill" ? questions.filter((x) => x.task === q.task && x.kind === "grill" && Number(x.id.slice(1)) <= Number(q.id.slice(1))).length : null }))
       .sort((a, b) => (Date.parse(a.asked) || 0) - (Date.parse(b.asked) || 0));
   }
 
@@ -266,19 +268,6 @@ export default class Shepherd extends View {
     const answer = String(text ?? "").trim();
     const repo = this.repo();
     if (!answer || !repo || !this.tell(`answer ${q.id}: ${answer}`, q.task ?? null)) return;
-    setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
-  }
-
-  /** The picked option for grilling question i: the person's pick, else the recommended one. */
-  grillPick(qid, i, g) { return this.grillPicks?.[qid]?.[i] ?? g.recommended ?? g.options[0]; }
-  setGrillPick(qid, i, o) { ((this.grillPicks ??= {})[qid] ??= {})[i] = o; }
-
-  sendRound(q) {
-    const line = q.questions.map((g, i) => `${i + 1}. ${this.grillPick(q.id, i, g)}`).join(" ");
-    const sh = this.shepherd();
-    const repo = this.repo();
-    if (!sh || !repo) return;
-    hc(["send", sh.address, `round ${q.id}: ${line}`]);
     setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
   }
 
@@ -331,7 +320,11 @@ export default class Shepherd extends View {
     // Blockers still to finish; done ones no longer hold the task.
     const doneIds = new Set((this.state().tasks ?? []).filter((x) => x.stage === "done").map((x) => x.id));
     const blockers = (task.blockedBy ?? []).filter((b) => b && !doneIds.has(b));
-    const minutes = (Date.now() - since) / 60000;
+    // Stuck counts from the stage run's start or the person's last answer in it, whichever is later:
+    // time waiting on the person isn't the agent being stuck.
+    const answeredAt = Math.max(0, ...(this.state().questions ?? [])
+      .filter((q) => q.task === task.id && q.answered).map((q) => Date.parse(q.answered) || 0));
+    const minutes = (Date.now() - Math.max(since, answeredAt)) / 60000;
     const limit = this.settings().stuckMinutes[task.stage];
     const stuck = task.status === "working" && !asked && limit != null && minutes > limit;
     const note = task.status === "parked" ? "parked"
@@ -579,9 +572,9 @@ export default class Shepherd extends View {
     return true;
   }
 
-  /** A: the recommended answer (Merge, Approve) of the task's open question; nothing without one. */
+  /** A: the recommended answer (Merge, Approve, a grilling question's) of the task's open question; nothing without one. */
   accept(task) {
-    const q = this.questions().find((x) => x.task === task.id && x.kind !== "grill" && x.recommended);
+    const q = this.questions().find((x) => x.task === task.id && x.recommended);
     if (q) this.answer(q, q.recommended);
   }
 

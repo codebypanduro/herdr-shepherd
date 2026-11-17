@@ -28,12 +28,13 @@ export const MAX_LOOPS = 3;
 export const MONO = "JetBrains Mono";
 
 export const GROUPS = [
-  { key: "plan", label: "PLAN", stages: ["triage", "spec", "tickets"] },
+  { key: "plan", label: "PLAN", stages: ["triage", "grill", "spec", "tickets"] },
   { key: "build", label: "BUILD LOOP · MAX 3", stages: ["implement", "review", "ci", "proof"] },
   { key: "ship", label: "SHIP", stages: ["merge", "done"] },
 ];
 export const STAGES = {
   triage: { title: "Triage", skill: "/triage" },
+  grill: { title: "Grill", skill: "/grill-with-docs" },
   spec: { title: "Spec", skill: "/to-spec" },
   tickets: { title: "Tickets", skill: "/to-tickets" },
   implement: { title: "Implement", skill: "/implement" },
@@ -47,10 +48,11 @@ export const STAGES = {
 export const ORDER = GROUPS.flatMap((g) => g.stages);
 
 /** Who works each stage, for the steer menu and comments. */
-export const ROLE = { triage: "triager", spec: "planner", tickets: "planner", implement: "implementer", review: "reviewer", ci: "ci", proof: "qa", merge: "shepherd" };
+export const ROLE = { triage: "triager", grill: "griller", spec: "planner", tickets: "planner", implement: "implementer", review: "reviewer", ci: "ci", proof: "qa", merge: "shepherd" };
 
-/** A working task goes stuck past its stage's limit (minutes); workflow.json's stuckMinutes wins. */
-export const STUCK_MIN = { triage: 40, spec: 120, tickets: 60, implement: 50, review: 25, ci: 20, proof: 20 };
+/** A working task goes stuck past its stage's limit (minutes); workflow.json's stuckMinutes wins.
+ *  The clock restarts at the person's last answer in the stage (Grill waits on them between questions). */
+export const STUCK_MIN = { triage: 40, grill: 30, spec: 60, tickets: 60, implement: 50, review: 25, ci: 20, proof: 20 };
 
 /** Machine load limits (percent) when the workflow sets none. Same defaults as `shep room`
  *  (shepherd/bin/shep.mjs): change both together. */
