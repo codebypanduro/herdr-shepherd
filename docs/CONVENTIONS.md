@@ -14,6 +14,7 @@ Every terminal Shepherd starts carries the Herdr labels (`herdr.space`, `herdr.t
 | `shepherd.loop` | `1`…`n` | build-loop agents |
 | `shepherd.title` | the task's title | sub-agents (cards without a task use it) |
 | `shepherd.dir` | the repo's root | the Shepherd terminal (where the mods read tasks.json) |
+| `shepherd.workflow` | the workflow file start.sh gave Shepherd (`workflow.json`, else `workflow.example.json`) | the Shepherd terminal (the status bar finds `load.sh` beside it; on another machine, the mods read the settings from it) |
 
 ```
 hc run --bg --keep \
@@ -90,7 +91,7 @@ Sub-agents report with `hc send <shepherd> "done HRD-144 …"` or `"ask HRD-144:
 
 ## Workflow: `shepherd/workflow.json` (per person) and `.herdr/orchestra.json` (per space)
 
-See `shepherd/workflow.example.json`. Per-space keys override per-person ones.
+See `shepherd/workflow.example.json`. Per-space keys override per-person ones. Workflow settings writes the person's `shepherd/workflow.json` (git-ignored; made from the example the first time) in the checkout `~/.config/herdr-app/mods/shepherd` links to, then sends every Shepherd on this computer `workflow changed: read <file>`. Space settings writes `.herdr/orchestra.json`; `stages.ci.command: ""` there means no CI for that space.
 
 ## Colors
 

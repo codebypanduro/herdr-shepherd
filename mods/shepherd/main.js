@@ -10,7 +10,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, ScrollHandle } from "gpui-base";
 import {
   props, terminals, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
-  hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand, appHome,
+  hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
 import {
   TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN,
@@ -27,12 +27,13 @@ import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
 import { renderDigest } from "./digest.js";
 import { renderHistory } from "./history.js";
+import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders } from "./sidebar.js";
+import { renderMachinePop, renderUsagePop } from "./machines.js";
+import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./dialogs.js";
+import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
 import {
-  initSidebar, renderSidebar, renderPlus, startNewFolder, openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow,
-} from "./sidebar.js";
-import { renderMachinePop, renderUsagePop, initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./machines.js";
-import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings, personalWorkflow } from "./settings.js";
-import { folders } from "./sidebar.js";
+  openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, readWorkflow, shepherdHome,
+} from "./ui.js";
 
 const REFRESH_MS = 5000;
 const PENDING = "shepherd.pending"; // question ids answered here that tasks.json hasn't caught up with
@@ -202,11 +203,16 @@ export default class Shepherd extends View {
       // Keep the last good state; shep writes atomically, so this is a hand edit gone wrong.
       next = { ...prev, error: `tasks.json: ${e.message ?? e}` };
     }
-    // Settings: the person's workflow (Shepherd's label, or workflow.json beside the example it
-    // names), then the space's orchestra.json on top.
+    // Settings: the person's workflow, then the space's orchestra.json on top. Here that's the one
+    // workflow.json Workflow settings writes (ui.js readWorkflow); on another machine, workflow.json
+    // beside the file Shepherd's label names there, else that file.
     let wf = {}, orch = {};
     try {
-      if (repo.workflow) wf = (await this.readJson(personalWorkflow(repo.workflow), repo.machine)) ?? (await this.readJson(repo.workflow, repo.machine)) ?? {};
+      if (!repo.machine) wf = (await readWorkflow(this)).wf;
+      else if (repo.workflow) {
+        const mine = repo.workflow.replace(/workflow\.example\.json$/, "workflow.json");
+        wf = (await this.readJson(mine, repo.machine)) ?? (await this.readJson(repo.workflow, repo.machine)) ?? {};
+      }
     } catch { /* defaults */ }
     try { orch = (await this.readJson(`${repo.dir}/.herdr/orchestra.json`, repo.machine)) ?? {}; } catch { /* defaults */ }
     const alerts = { toast: true, sound: true, phone: false, ntfy: "", ...wf.alerts, ...orch.alerts };
@@ -218,7 +224,6 @@ export default class Shepherd extends View {
       stages: Object.fromEntries([...new Set([...Object.keys(wf.stages ?? {}), ...Object.keys(orch.stages ?? {})])]
         .map((k) => [k, { ...wf.stages?.[k], ...orch.stages?.[k] }])),
     };
-    settings.usage = { ...wf.usage }; // weekly usage commands (machines.js)
     this.data[repo.key] = { ...next, alerts, settings, wf, orch };
     // Answers tasks.json has recorded are no longer pending.
     const pending = shared(PENDING) ?? [];
@@ -413,22 +418,18 @@ export default class Shepherd extends View {
 
   // ---- spaces ----------------------------------------------------------------------------
 
-  allSpaces() { return spaces(); }
-
   /** shepherd/start.sh for a space on this computer, in the background (it starts Shepherd in its
-   *  own tab). The script is found beside any running Shepherd's workflow file, else through the
-   *  mods/shepherd link back into this repo. */
+   *  own tab). The script is this mod's own checkout's, found through the mods/shepherd link. */
   startShepherd(space) {
     if (!space || space.machine) return;
-    const known = terminals().find((x) => x.labels?.["shepherd.workflow"])?.labels["shepherd.workflow"];
     const dir = space.folder || this.repo(space)?.dir;
     if (!dir) return;
-    const script = known ? `${known.replace(/\/[^/]*$/, "")}/start.sh` : null;
-    const line = script ? 'sh "$1" --space "$2" "$3"'
-      : 'd=$(cd "$(dirname "$(readlink "$4" || echo "$4")")/../shepherd" 2>/dev/null && pwd) && sh "$d/start.sh" --space "$2" "$3"';
-    exec("sh", ["-c", line, "start", script ?? "", localId(space), dir, `${appHome()}/mods/shepherd`], { timeout: 60000 })
-      .then((r) => { if (r.code !== 0) notify({ title: "Shepherd didn't start", body: (r.stderr || r.stdout).trim().split("\n").pop(), level: "error" }); })
-      .catch(() => null);
+    const fail = (body) => notify({ title: "Shepherd didn't start", body, level: "error" });
+    shepherdHome(this).then((h) => {
+      if (!h) return fail("mods/shepherd isn't inside a checkout with shepherd/start.sh.");
+      return exec("sh", [h.start, "--space", localId(space), dir], { timeout: 60000 })
+        .then((r) => { if (r.code !== 0) fail((r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop()); });
+    }).catch((e) => fail(String(e)));
   }
 
   // ---- steering and overlays --------------------------------------------------------------
@@ -594,14 +595,9 @@ export default class Shepherd extends View {
       return;
     }
     if (panel) return;
+    if (this.overlayCommand(name, arg)) return;
     const task = arg ? this.taskById(arg) : this.keyTask();
     if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
-    else if (name === "new-space") openNewSpace();
-    else if (name === "workflow") openWorkflow();
-    else if (name === "usage") openUsage();
-    else if (name === "add-machine") openAddMachine();
-    else if (name === "machine") openMachine(arg || null);
-    else if (name === "space-settings") { const s = arg ? spaces().find((x) => x.id === arg || localId(x) === arg) : this.space(); if (s) openSpaceSettings(s.id); }
     else if (name === "digest") this.toggleDigest();
     else if (name === "history") this.toggleHistory();
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
@@ -612,6 +608,26 @@ export default class Shepherd extends View {
     else if (name === "steer") this.openSteer(task.id, false);
     else if (name === "terminal") this.openTerminal(task.terminal, task.id);
     else if (name === "pause") this.togglePause(task);
+  }
+
+  /** Commands that open the sidebar's overlays, from keys.json or the board's N, F, W, U.
+   *  True when `name` was one of them. */
+  overlayCommand(name, arg) {
+    const act = {
+      "new-space": () => openNewSpace(),
+      "new-folder": () => { run("layout.show", { id: "sidebar" }); run("shepherd.new-folder"); },
+      workflow: () => openWorkflow(),
+      usage: () => openUsage(),
+      "add-machine": () => openAddMachine(),
+      machine: () => openMachine(arg || null),
+      "space-settings": () => {
+        const s = arg ? spaces().find((x) => x.id === arg || localId(x) === arg) : this.space();
+        if (s) openSpaceSettings(s.id);
+      },
+    }[name];
+    if (!act) return false;
+    act();
+    return true;
   }
 
   /** Board keys (RECIPE "Keys"). Plain letters, only while the board holds the keyboard. */
@@ -637,10 +653,8 @@ export default class Shepherd extends View {
     if (k === "g") { this.gAt = Date.now(); done(); return; }
     if (k === "d") { this.toggleDigest(); done(); return; }
     if (k === "c") { this.focusBar(); done(); return; }
-    if (k === "n") { openNewSpace(); done(); return; }
-    if (k === "w") { openWorkflow(); done(); return; }
-    if (k === "u") { openUsage(); done(); return; }
-    if (k === "f") { run("layout.show", { id: "sidebar" }); run("shepherd.new-folder"); done(); return; }
+    const key = { n: "new-space", f: "new-folder", w: "workflow", u: "usage" }[k];
+    if (key && this.overlayCommand(key)) { done(); return; }
     const task = this.keyTask();
     if (!task) return;
     if (k === "s") this.openSteer(task.id, false);

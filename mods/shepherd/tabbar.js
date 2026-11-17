@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { terminals, run, setShared } from "herdr";
-import { openWorkflow } from "./sidebar.js";
+import { openWorkflow } from "./ui.js";
 import { MONO, VIEW, VIEW_LIST, localId, machineOf, palette } from "./common.js";
 
 export function renderTabBar(m) {

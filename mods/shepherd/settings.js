@@ -1,56 +1,25 @@
-// Workflow settings (⚙ Workflow; dialog, panel "workflow") and Space settings (⚙ on a space row;
-// dialog, panel "spacesettings"). Workflow writes the person's shepherd/workflow.json (made from
-// workflow.example.json the first time); Space settings writes the space's .herdr/orchestra.json,
+// Workflow settings (⚙ Workflow or W; dialog, panel "workflow") and Space settings (⚙ on a space
+// row; dialog, panel "spacesettings"). Workflow writes the person's one shepherd/workflow.json,
+// found through the mods/shepherd link (made from workflow.example.json the first time), and tells
+// this computer's Shepherds to re-read it. Space settings writes the space's .herdr/orchestra.json,
 // whose keys win over the workflow's. Both show the machine load limits with each machine's load.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { spaces, terminals, readTextFile, writeTextFile, exec, run, closeOverlay, props } from "herdr";
+import { spaces, terminals, run, closeOverlay, props } from "herdr";
 import { MONO, LIMITS, MAX_LOOPS, palette, machineOf } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
+import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 const MODELS = ["opus", "sonnet", "haiku"];
 const CPU_OPTS = [60, 70, 80, 90];
 const MEM_OPTS = [70, 80, 85, 95];
 
-/** The person's workflow file for Shepherd's label: workflow.json beside workflow.example.json. */
-export const personalWorkflow = (label) => (label ? label.replace(/workflow\.example\.json$/, "workflow.json") : null);
-
-/** Reads JSON on a machine, edits it with `change`, and writes it back whole: atomically here,
- *  with node there. `base` fills a file that doesn't exist yet. */
-async function editJson(path, machine, change, base = null) {
-  const before = await readTextFile(path, { on: machine }).catch(() => null);
-  const start = before ?? (base ? await readTextFile(base, { on: machine }).catch(() => null) : null);
-  const obj = start ? JSON.parse(start) : {};
-  change(obj);
-  const text = `${JSON.stringify(obj, null, 2)}\n`;
-  if (!machine) {
-    if (before == null) await exec("mkdir", ["-p", path.replace(/\/[^/]*$/, "")]).catch(() => null);
-    await writeTextFile(path, text, before);
-    return;
-  }
-  const code = 'const fs=require("fs"),p=process.argv[1];fs.mkdirSync(require("path").dirname(p),{recursive:true});fs.writeFileSync(p+".tmp",process.argv[2]);fs.renameSync(p+".tmp",p)';
-  const r = await exec("node", ["-e", code, path, text], { on: machine, timeout: 15000 });
-  if (r.code !== 0) throw new Error(r.stderr || "node failed");
-}
-
 /** Build-stage agents running per machine: terminals labelled with a build stage. */
 const runningOn = (name) => terminals().filter((x) => x.state === "live" && BUILD.includes(x.labels?.["shepherd.stage"])
   && machineOf(x) === name).length;
-
-const seg = (t, id, label, on, onClick) => div().id(id).h(24).px(9).flex().items_center().rounded(5).border(1)
-  .cursor_pointer().text_size(12).font_family(MONO)
-  .border_color(on ? t.foreground : t.input).bg(on ? t.foreground : t.background).text_color(on ? t.background : t.muted)
-  .hover((s) => (on ? s : s.text_color(t.foreground)))
-  .on_click(onClick).child(label);
-
-const check = (t, id, label, on, onClick) => h_flex().id(id).gap(6).items_center().cursor_pointer().text_size(12)
-  .on_click(onClick)
-  .child(div().size(14).rounded(3).border(1).flex().items_center().justify_center().text_size(10)
-    .border_color(on ? t.accent : t.input).bg(on ? t.accent : t.background).text_color(t.accent_foreground).child(on ? "✓" : ""))
-  .child(label);
 
 /** Options with the current value added when it isn't one of them. */
 const withValue = (opts, v) => (v != null && !opts.includes(v) ? [...opts, v].sort((a, b) => (typeof a === "number" ? a - b : 0)) : opts);
@@ -83,25 +52,33 @@ const title = (t, text, skill) => h_flex().gap(6).items_center().text_size(13)
 // ---- Workflow settings -----------------------------------------------------------------------
 
 export function initWorkflow(m, cx) {
-  m.wf = { saving: false, error: null };
-  cx.spawn(async (cx) => { const repo = m.repo(); if (repo) await m.load(repo); cx.notify(); });
+  m.wf = { error: null, doc: null, file: null };
+  cx.spawn(async (cx) => { await reloadWorkflow(m); const repo = m.repo(); if (repo) await m.load(repo); cx.notify(); });
 }
 
-/** Sets one key path in the person's workflow file and reloads. */
+async function reloadWorkflow(m) {
+  const r = await readWorkflow(m);
+  m.wf.doc = r.wf;
+  m.wf.file = r.file;
+  if (r.error) m.wf.error = r.error;
+}
+
+/** Sets one key path in the person's workflow.json, reloads, and tells the Shepherds here. */
 function setWorkflow(m, cx, path, value) {
-  const repo = m.repo();
-  const label = repo?.workflow;
-  if (!label) { m.wf.error = "No Shepherd in this space: its workflow file is unknown."; cx.notify(); return; }
-  const file = personalWorkflow(label);
   cx.spawn(async (cx) => {
+    const h = await shepherdHome(m);
+    if (!h) { m.wf.error = "mods/shepherd isn't inside a checkout with shepherd/: no workflow file to write."; cx.notify(); return; }
     try {
-      await editJson(file, repo.machine, (o) => {
+      await editJson(m, h.workflow, null, (o) => {
         let at = o;
         for (const k of path.slice(0, -1)) at = (at[k] = { ...(at[k] ?? {}) });
         at[path[path.length - 1]] = value;
-      }, label);
+      }, h.example);
       m.wf.error = null;
-      await m.load(repo);
+      await reloadWorkflow(m);
+      tellWorkflowChanged(h.workflow);
+      const repo = m.repo();
+      if (repo) await m.load(repo);
     } catch (e) { m.wf.error = `workflow.json: ${e.message ?? e}`; }
     cx.notify();
   });
@@ -109,18 +86,17 @@ function setWorkflow(m, cx, path, value) {
 
 export function renderWorkflow(m) {
   const t = palette();
-  const repo = m.repo();
-  const d = repo ? m.data[repo.key] : null;
-  const wf = d?.wf ?? {};
+  const wf = m.wf.doc ?? {};
   const s = m.settings();
   const st = wf.stages ?? {};
   const set = (path, v) => (_e, cx) => setWorkflow(m, cx, path, v);
   const models = (stage, cur) => h_flex().gap(4).children(withValue(MODELS, cur).map((mo) =>
-    seg(t, `wf-${stage}-${mo}`, mo, mo === cur, stage === "shepherd" ? set(["shepherd", "model"], mo) : set(["stages", stage, "model"], mo))));
+    chip(t, `wf-${stage}-${mo}`, mo, mo === cur, stage === "shepherd" ? set(["shepherd", "model"], mo) : set(["stages", stage, "model"], mo))));
   const lim = { ...LIMITS, ...wf.limits };
   const alerts = { toast: true, sound: true, phone: false, ...wf.alerts };
   const proof = st.proof ?? {};
-  const file = personalWorkflow(repo?.workflow);
+  const shown = s.limits;
+  const overridden = m.repo() && (shown.maxCpu !== lim.maxCpu || shown.maxMem !== lim.maxMem);
 
   return v_flex().id("workflow-settings").size_full().bg(t.surface).text_color(t.foreground)
     .child(v_flex().px(18).pt(16).pb(12).gap(4).border_b(1).border_color(t.border)
@@ -132,11 +108,11 @@ export function renderWorkflow(m) {
         .child(div().text_color(t.dim).child("$"))
         .child(div().flex_1().child(`npx skills add ${wf.skills ?? "mattpocock/skills"}`))
         .child(div().text_color(t.dim).child(`tracker: ${trackerName(wf.tracker)}`)))
-      .child(row(t, "✳", title(t, "Shepherd"), "The agent you talk to. It plans the flow, hands out work and asks you questions.", models("shepherd", wf.shepherd?.model)))
+      .child(row(t, "✳", title(t, "Shepherd"), "The agent you talk to. It plans the flow, hands out work and asks you questions. A new model takes effect when Shepherd restarts.", models("shepherd", wf.shepherd?.model)))
       .child(row(t, "01", title(t, "Triage", "/triage"), "Only for issues from other people. Your own work skips it.", models("triage", st.triage?.model)))
       .child(row(t, "02", title(t, "Spec / wayfinder", "/to-spec · /wayfinder"), "Grills you in rounds, then writes one spec.",
         h_flex().gap(4).children(withValue([1, 3, 5], st.spec?.grillQuestionsPerRound).map((n) =>
-          seg(t, `wf-grill-${n}`, `${n} q`, n === (st.spec?.grillQuestionsPerRound ?? 3), set(["stages", "spec", "grillQuestionsPerRound"], n))))))
+          chip(t, `wf-grill-${n}`, `${n} q`, n === (st.spec?.grillQuestionsPerRound ?? 3), set(["stages", "spec", "grillQuestionsPerRound"], n))))))
       .child(row(t, "03", title(t, "To tickets", "/to-tickets"), "Vertical slices with blocking edges. You approve the breakdown.",
         div().text_size(12).text_color(t.muted).child("Asks you to approve")))
       .child(row(t, "04", title(t, "Implement", "/implement"), "Builds one ticket and fixes review notes.", models("implement", st.implement?.model)))
@@ -149,7 +125,7 @@ export function renderWorkflow(m) {
           .child(check(t, "wf-shots", "Screenshots", proof.screenshots !== false, set(["stages", "proof", "screenshots"], proof.screenshots === false)))
           .child(check(t, "wf-video", "Screen recording", proof.recording !== false, set(["stages", "proof", "recording"], proof.recording === false)))))
       .child(row(t, "↻", title(t, "Max build loops"), "Implement → review → CI → proof. After this, Shepherd asks you.",
-        h_flex().gap(4).children([1, 2, 3, 4, 5].map((n) => seg(t, `wf-loops-${n}`, String(n), n === (wf.maxLoops ?? MAX_LOOPS), set(["maxLoops"], n))))))
+        h_flex().gap(4).children([1, 2, 3, 4, 5].map((n) => chip(t, `wf-loops-${n}`, String(n), n === (wf.maxLoops ?? MAX_LOOPS), set(["maxLoops"], n))))))
       .child(row(t, "!", title(t, "When an agent needs you"), alerts.phone && !alerts.ntfy ? "Phone push needs alerts.ntfy (an ntfy.sh topic) in workflow.json."
         : "A toast, a sound and a push to your phone (ntfy.sh).",
         h_flex().gap(12)
@@ -158,10 +134,10 @@ export function renderWorkflow(m) {
           .child(check(t, "wf-phone", "Phone", Boolean(alerts.phone), set(["alerts", "phone"], !alerts.phone)))))
       .child(limitsBlock(t, "wf", lim, (k, v) => set(["limits", k], v), machineList(),
         "Shepherd starts another ticket only while the space's machine is under both limits. The rest wait in Tickets.",
-        s.limits.maxCpu !== lim.maxCpu || s.limits.maxMem !== lim.maxMem ? "This space overrides them in its settings." : null)))
+        overridden ? `This space overrides them in its settings: cpu ${shown.maxCpu}%, mem ${shown.maxMem}%.` : null)))
     .child(h_flex().px(16).py(10).gap(8).items_center().border_t(1).border_color(t.border)
       .child(div().flex_1().truncate().font_family(MONO).text_size(10.5).text_color(m.wf.error ? t.ansi1 : t.dim)
-        .child(m.wf.error ?? (file ? file.replace(/^.*\/(shepherd\/workflow\.json)$/, "$1") : "no Shepherd in this space")))
+        .child(m.wf.error ?? m.wf.file?.replace(/^.*\/(shepherd\/workflow\.json)$/, "$1") ?? "…"))
       .child(div().id("wf-done").px(14).h(28).flex().items_center().rounded(5).cursor_pointer().text_size(12).font_semibold()
         .bg(t.solid).text_color(t.solid_foreground).on_click(() => closeOverlay(props()?.overlay)).child("Done")));
 }
@@ -180,12 +156,12 @@ function limitsBlock(t, id, lim, pick, ms, sub, note, extra = null) {
     .child(v_flex().pl(30).gap(8)
       .child(h_flex().gap(8).items_center()
         .child(div().w(84).text_size(12).text_color(t.muted).child("Max CPU"))
-        .child(h_flex().gap(4).children(withValue(CPU_OPTS, lim.maxCpu).map((n) => seg(t, `${id}-cpu-${n}`, `${n}%`, n === lim.maxCpu, pick("maxCpu", n)))))
+        .child(h_flex().gap(4).children(withValue(CPU_OPTS, lim.maxCpu).map((n) => chip(t, `${id}-cpu-${n}`, `${n}%`, n === lim.maxCpu, pick("maxCpu", n)))))
         .child(div().flex_1())
         .when(Boolean(extra), (el) => el.child(extra)))
       .child(h_flex().gap(8).items_center()
         .child(div().w(84).text_size(12).text_color(t.muted).child("Max memory"))
-        .child(h_flex().gap(4).children(withValue(MEM_OPTS, lim.maxMem).map((n) => seg(t, `${id}-mem-${n}`, `${n}%`, n === lim.maxMem, pick("maxMem", n)))))))
+        .child(h_flex().gap(4).children(withValue(MEM_OPTS, lim.maxMem).map((n) => chip(t, `${id}-mem-${n}`, `${n}%`, n === lim.maxMem, pick("maxMem", n)))))))
     .child(v_flex().ml(30).p(10).gap(10).rounded(6).bg(t.background).border(1).border_color(t.border)
       .children(ms.map((mc) => loadRow(t, mc, lim))));
 }
@@ -193,35 +169,29 @@ function limitsBlock(t, id, lim, pick, ms, sub, note, extra = null) {
 // ---- Space settings --------------------------------------------------------------------------
 
 export function initSpaceSettings(m, cx, InputState) {
-  const s = spaces().find((x) => x.id === props()?.space);
-  m.ss = { error: null };
+  const s = ssSpace();
+  m.ss = { error: null, ci: null, ciTouched: false };
   m.ssName = InputState.new({ placeholder: s?.name ?? "" });
   m.ssName.set_value(s?.named ? s.name : "");
-  m.ssCi = InputState.new({ placeholder: "pnpm lint && pnpm test" });
+  m.ssCi = InputState.new({ placeholder: "none: Shepherd skips CI" });
   const rename = () => { const sp = ssSpace(); if (sp && m.ssName.value().trim() !== (sp.named ? sp.name : "")) run("space.rename", { id: sp.id, name: m.ssName.value().trim() }); };
   m.ssName.on("submit", rename);
   m.ssName.on("blur", rename);
+  m.ssCi.on("change", () => { m.ss.ciTouched = true; });
+  // Empty means no CI for this space ("" in orchestra.json); the workflow's command doesn't apply.
   const saveCi = (_e, cx) => {
     const v = m.ssCi.value().trim();
-    if (v === (m.ss.ci ?? "")) return;
-    setOrchestra(m, cx, (o) => { o.stages = { ...(o.stages ?? {}), ci: { ...(o.stages?.ci ?? {}), command: v || undefined } }; });
+    if (m.ss.ci == null || v === m.ss.ci) return;
+    setOrchestra(m, cx, (o) => { o.stages = { ...o.stages, ci: { ...o.stages?.ci, command: v } }; });
   };
   m.ssCi.on("submit", saveCi);
   m.ssCi.on("blur", saveCi);
   cx.spawn(async (cx) => {
     const repo = s ? m.repo(s) : null;
     if (repo) await m.load(repo);
-    const st = repo ? m.data[repo.key] : null;
-    m.ss.ci = st?.orch?.stages?.ci?.command ?? "";
-    m.ssCi.set_value(m.ss.ci);
-    // The repo's remote and branch, for the header.
-    if (repo) {
-      const r = await exec("sh", ["-c", 'git -C "$1" remote get-url origin 2>/dev/null; echo "--"; git -C "$1" branch --show-current 2>/dev/null', "x", repo.dir],
-        { on: repo.machine, timeout: 10000 }).catch(() => null);
-      const [url = "", branch = ""] = (r?.stdout ?? "").split("--\n");
-      m.ss.remote = url.trim().replace(/^(git@|https:\/\/)/, "").replace(/:/, "/").replace(/\.git$/, "") || null;
-      m.ss.branch = branch.trim() || s.branch;
-    }
+    m.ss.ci = repo ? m.data[repo.key]?.settings?.stages?.ci?.command ?? "" : "";
+    if (!m.ss.ciTouched) m.ssCi.set_value(m.ss.ci); // never over what was typed meanwhile
+    if (repo) m.ss.git = await gitFacts(repo.dir, repo.machine);
     cx.notify();
   });
 }
@@ -234,10 +204,11 @@ function setOrchestra(m, cx, change) {
   if (!repo) return;
   cx.spawn(async (cx) => {
     try {
-      await editJson(`${repo.dir}/.herdr/orchestra.json`, repo.machine, change);
+      await editJson(m, `${repo.dir}/.herdr/orchestra.json`, repo.machine, change);
+      await excludeHerdr(repo.dir, repo.machine);
       m.ss.error = null;
       await m.load(repo);
-      m.ss.ci = m.data[repo.key]?.orch?.stages?.ci?.command ?? "";
+      m.ss.ci = m.data[repo.key]?.settings?.stages?.ci?.command ?? "";
     } catch (e) { m.ss.error = `orchestra.json: ${e.message ?? e}`; }
     cx.notify();
   });
@@ -249,22 +220,26 @@ export function renderSpaceSettings(m) {
   if (!s) return v_flex().size_full().p(18).bg(t.surface).text_color(t.dim).child("This space is gone.");
   const repo = m.repo(s);
   const d = repo ? m.data[repo.key] : null;
-  const orch = d?.orch ?? {};
-  const wfLim = { ...LIMITS, ...d?.wf?.limits };
-  const lim = { ...wfLim, ...orch.limits };
-  const own = Boolean(orch.limits?.maxCpu || orch.limits?.maxMem);
+  const own = d?.orch?.limits ?? {};
+  const lim = d?.settings?.limits ?? LIMITS;
+  const isOwn = own.maxCpu != null || own.maxMem != null;
   const sh = m.shepherd(s);
   const mc = machineByName(s.machine);
   const fid = folderOf(s.id);
+  const g = m.ss.git;
   const field = (label, sub, right) => h_flex().gap(16).px(18).py(12).items_center().border_b(1).border_color(t.border)
     .child(v_flex().w(210).flex_none().gap(2)
       .child(div().text_size(13).child(label))
       .child(div().text_size(11.5).text_color(t.dim).child(sub)))
     .child(h_flex().flex_1().min_w(0).justify_end().child(right));
-  const chip = (id, label, on, onClick) => seg(t, id, label, on, onClick);
   const where = `${mc?.label ?? s.machine ?? "this mac"}:${(repo?.dir ?? s.folder ?? "").replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~")}`;
-  const setLim = (k, v) => (_e, cx) => setOrchestra(m, cx, (o) => { o.limits = { ...(o.limits ?? {}), [k]: v }; });
-  const clearLim = (_e, cx) => setOrchestra(m, cx, (o) => { o.limits = undefined; });
+  const setLim = (k, v) => (_e, cx) => setOrchestra(m, cx, (o) => { o.limits = { ...o.limits, [k]: v }; });
+  // Same as workflow: drop only this space's cpu and mem limits; any other keys stay.
+  const clearLim = (_e, cx) => setOrchestra(m, cx, (o) => {
+    if (!o.limits) return;
+    const { maxCpu: _c, maxMem: _m, ...rest } = o.limits;
+    o.limits = Object.keys(rest).length ? rest : undefined;
+  });
 
   return v_flex().id("space-settings").size_full().bg(t.surface).text_color(t.foreground)
     .child(h_flex().px(18).pt(16).pb(12).gap(12).items_center().border_b(1).border_color(t.border)
@@ -274,14 +249,14 @@ export function renderSpaceSettings(m) {
           .when(Boolean(mc), (el) => el.child(machineIcon(t, mc, { size: 0.78, dotRing: t.surface })))
           .child(div().truncate().child(where)))
         .child(div().font_family(MONO).text_size(11).text_color(t.dim).truncate()
-          .child(`${m.ss.remote ?? "no remote"} · ${m.ss.branch ?? s.branch ?? "—"}`))))
+          .child(`${g?.remote ?? "no remote"} · ${g?.branch ?? s.branch ?? "—"}`))))
     .child(v_flex().id("ss-rows").flex_1().min_h(0).overflow_y_scrollbar()
-      .child(field("CI checks", "Runs on each ticket's PR in this repo. A failing check counts as a loop.",
+      .child(field("CI checks", "Runs on each ticket's PR in this repo. A failing check counts as a loop. Empty: no CI.",
         Input.new(m.ssCi).w_full().h(30).px(8).font_family(MONO).text_size(12).rounded(5).border(1).border_color(t.input).bg(t.background)))
       .child(field("Folder", "Where it sits in the sidebar. You can also drag it.",
         h_flex().gap(4).flex_wrap().justify_end()
-          .child(chip("ss-nofolder", "No folder", !fid, () => setFolder(s.id, null)))
-          .children(folders().map((f) => chip(`ss-f-${f.id}`, f.name, fid === f.id, () => setFolder(s.id, f.id))))))
+          .child(chip(t, "ss-nofolder", "No folder", !fid, () => setFolder(s.id, null)))
+          .children(folders().map((f) => chip(t, `ss-f-${f.id}`, f.name, fid === f.id, () => setFolder(s.id, f.id))))))
       .child(field("Machine", "Where this space's agents run. A space lives on one machine: make a new space to run on another.",
         h_flex().gap(4).flex_wrap().justify_end().children(machineList().map((x) =>
           div().h(24).px(9).flex().items_center().gap(6).rounded(5).border(1).text_size(12)
@@ -297,7 +272,7 @@ export function renderSpaceSettings(m) {
         div().text_size(12).text_color(t.muted).child(trackerName(d?.wf?.tracker))))
       .child(limitsBlock(t, "ss", lim, setLim, mc ? [mc] : [],
         "Only for this space, over the workflow's. Shepherd starts a ticket while this machine is under both.",
-        null, chip("ss-lim-wf", "Same as workflow", !own, clearLim))))
+        null, chip(t, "ss-lim-wf", "Same as workflow", !isOwn, clearLim, { mono: false }))))
     .child(h_flex().px(16).py(10).gap(8).items_center().border_t(1).border_color(t.border)
       .child(div().flex_1().truncate().font_family(MONO).text_size(10.5).text_color(m.ss.error ? t.ansi1 : t.dim)
         .child(m.ss.error ?? ".herdr/orchestra.json"))

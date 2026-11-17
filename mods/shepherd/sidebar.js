@@ -5,13 +5,19 @@
 
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { spaces, terminals, shared, setShared, exec, appHome, run, openOverlay, closeOverlay, props } from "herdr";
+import { spaces, terminals, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
 import { MONO, palette } from "./common.js";
+import { machineList, machineIcon, agentIcon, usageRows, startProbes } from "./machines.js";
+import { findNewSpace } from "./dialogs.js";
 import {
-  FOLDERS, SPACE_FOLDERS, machineList, machineByName, machineIcon, agentIcon, usageRows, startProbes,
-} from "./machines.js";
+  FOLDERS, SPACE_FOLDERS, NEW_SPACE, gitFacts, openNewSpace, openAddMachine, openSpaceSettings, openMachine, openUsage, openPlus,
+} from "./ui.js";
 
-const INFO_MS = 60000; // org and worktree count per space
+const INFO_MS = 60000; // org, branch and worktree count per space
+const INFO_PARALLEL = 6; // git runs at once (remote spaces go over ssh)
+const LOCAL_MS = 5000; // tasks.json of spaces here, for the badges
+const REMOTE_MS = 30000; // and of spaces on other machines
+const NEW_SPACE_WAIT_MS = 60000;
 const AVATARS = "data/shepherd-avatars"; // under the app's home: image() reads only there
 
 export const folders = () => shared(FOLDERS) ?? [];
@@ -37,51 +43,60 @@ export function initSidebar(m, cx, InputState) {
   startProbes(m, cx);
   cx.timer.every(INFO_MS, (cx) => refreshSpaces(m, cx));
   refreshSpaces(m, cx);
-  // Every space's tasks.json, for the badges and counts (the board loads only the shown one).
-  cx.timer.every(5000, (cx) => loadAll(m, cx));
-  loadAll(m, cx);
+  // Every Shepherd space's tasks.json, for the badges and counts (the board loads only the shown one).
+  cx.timer.every(LOCAL_MS, (cx) => loadAll(m, cx, false));
+  cx.timer.every(REMOTE_MS, (cx) => loadAll(m, cx, true));
+  loadAll(m, cx, true);
 }
 
-function loadAll(m, cx) {
+/** Runs fn over items, at most n at a time. */
+async function pool(items, n, fn) {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: Math.min(n, queue.length) }, async () => {
+    while (queue.length) await fn(queue.shift()).catch(() => null);
+  }));
+}
+
+function loadAll(m, cx, remote) {
   cx.spawn(async (cx) => {
     // Only spaces with a Shepherd have a tasks.json.
     const all = terminals();
-    for (const s of spaces()) {
-      if (!m.shepherd(s, all)) continue;
-      const repo = m.repo(s, all);
-      if (repo) await m.load(repo).catch(() => null);
-    }
+    const repos = spaces().filter((s) => Boolean(s.machine) === remote && m.shepherd(s, all)).map((s) => m.repo(s, all)).filter(Boolean);
+    await pool(repos, INFO_PARALLEL, (repo) => m.load(repo));
     placeNewSpace(m);
     cx.notify();
   });
 }
 
-/** A space New space made: put it in the folder picked there, and start its Shepherd if asked. */
+/** The space New space made: put it in the folder picked there, and start its Shepherd if asked. */
 function placeNewSpace(m) {
-  const p = shared("shepherd.newSpace");
+  const p = shared(NEW_SPACE);
   if (!p) return;
-  if (Date.now() - p.at > 60000) { setShared("shepherd.newSpace", null); return; }
-  const s = spaces().find((x) => !x.machine && x.folder === p.folder);
-  if (!s) return;
-  setShared("shepherd.newSpace", null);
+  const s = findNewSpace(p);
+  if (!s) {
+    if (Date.now() - p.at > NEW_SPACE_WAIT_MS) {
+      setShared(NEW_SPACE, null);
+      if (p.group || p.start) notify({ title: "New space didn't show up", body: `No space in ${p.folder} after a minute: it wasn't filed${p.start ? " and Shepherd didn't start" : ""}.`, level: "warning" });
+    }
+    return;
+  }
+  setShared(NEW_SPACE, null);
   if (p.group) setFolder(s.id, p.group);
   if (p.start) m.startShepherd(s);
 }
 
-/** The org (for the avatar) and worktree count of each space, from git on its machine. */
+/** The org (for the avatar), branch and worktree count of each space, from git on its machine. */
 function refreshSpaces(m, cx) {
   cx.spawn(async (cx) => {
-    for (const s of spaces()) {
-      const dir = m.repo(s)?.dir;
-      if (!dir) continue;
-      const r = await exec("sh", ["-c", 'git -C "$1" remote get-url origin 2>/dev/null; echo "--"; git -C "$1" worktree list --porcelain 2>/dev/null | grep -c "^worktree "', "info", dir],
-        { on: s.machine, timeout: 10000 }).catch(() => null);
-      if (!r) continue;
-      const [url = "", count = ""] = r.stdout.split("--\n");
-      const org = url.trim().match(/github\.com[:/]([^/]+)\//)?.[1] ?? null;
-      m.spaceInfo[s.id] = { org, worktrees: Math.max(0, (parseInt(count, 10) || 1) - 1), at: Date.now() };
-      if (org) fetchAvatar(m, org, cx);
-    }
+    const all = terminals();
+    await pool(spaces(), INFO_PARALLEL, async (s) => {
+      const dir = m.repo(s, all)?.dir;
+      if (!dir) return;
+      const g = await gitFacts(dir, s.machine);
+      if (!g) return;
+      m.spaceInfo[s.id] = { ...g, at: Date.now() };
+      if (g.org) fetchAvatar(m, g.org, cx);
+    });
     cx.notify();
   });
 }
@@ -112,10 +127,6 @@ export function startNewFolder(m) {
   m.folderInput.set_value("");
   m.folderInput.focus();
 }
-
-export const openNewSpace = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 560, height: 540, props: { panel: "newspace" } });
-export const openAddMachine = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 540, height: 560, props: { panel: "addmachine" } });
-export const openSpaceSettings = (id) => openOverlay({ mod: "shepherd", kind: "dialog", width: 600, height: 0.85, props: { panel: "spacesettings", space: id } });
 
 /** Open questions and open tasks of a space, from its tasks.json. */
 export function spaceCounts(m, s, all = terminals()) {
@@ -271,7 +282,7 @@ export function renderSidebar(m) {
       .child(div().flex_1().text_size(11).text_color(t.dim).child("SPACES"))
       .child(div().id("spaces-plus").size(22).flex().items_center().justify_center().rounded(4).cursor_pointer()
         .text_size(15).text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground))
-        .on_click(() => openOverlay({ mod: "shepherd", kind: "popup", width: 210, height: 76, props: { panel: "plus" } }))
+        .on_click(() => openPlus())
         .child("+")))
     .child(v_flex().id("space-list").flex_1().min_h(0).px(8).gap(2).overflow_y_scrollbar().children(rows))
     .child(footer);
@@ -279,16 +290,6 @@ export function renderSidebar(m) {
 
 const badge = (t, n) => div().min_w(15).h(15).px(4).rounded(8).bg(t.blocked).text_color(t.background)
   .text_size(9.5).font_semibold().flex().items_center().justify_center().child(String(n));
-
-/** Popovers open at the pointer when clicked; from a key or command, near the sidebar's foot. */
-const popAt = (atPointer) => (atPointer ? {} : { at: { x: 248, y: 520 } });
-export function openMachine(name, atPointer = false) {
-  openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 236, props: { panel: "machine", machine: name ?? null }, ...popAt(atPointer) });
-}
-export function openUsage(atPointer = false) {
-  openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 150, props: { panel: "usage" }, ...popAt(atPointer) });
-}
-export const openWorkflow = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 680, height: 0.85, props: { panel: "workflow" } });
 
 /** The + menu: New space from folder… (N) and New folder (F). */
 export function renderPlus() {
