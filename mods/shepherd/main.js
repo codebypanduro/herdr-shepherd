@@ -102,7 +102,7 @@ export default class Shepherd extends View {
       cx.spawn(async (cx) => {
         for (;;) {
           const c = await nextCommand();
-          this.command(c);
+          this.command(c, cx);
           cx.notify();
         }
       });
@@ -583,11 +583,11 @@ export default class Shepherd extends View {
    *  focus, focus-bar, steer, terminal, pause, open, view:<v>, tab:<1-5>, next, prev. The board copy
    *  acts on all but focus-bar, which only the bar copy takes. Task commands act on the keyboard
    *  focus, else the open task; `:<id>` names one. */
-  command(c) {
+  command(c, cx) {
     const [name, arg] = String(c).split(":");
     const panel = props()?.panel;
     if (panel === "spaces") {
-      if (name === "new-folder") startNewFolder(this);
+      if (name === "new-folder") startNewFolder(this, cx);
       return;
     }
     if (panel === "bar") {

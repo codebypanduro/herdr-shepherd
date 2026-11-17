@@ -39,7 +39,11 @@ export function initSidebar(m, cx, InputState) {
   m.newFolder = false;
   m.folderInput = InputState.new({ placeholder: "Folder name" });
   m.folderInput.on("submit", (_e, cx) => { createFolder(m); cx.notify(); });
-  m.folderInput.on("blur", (_e, cx) => { if (m.newFolder) { createFolder(m); cx.notify(); } });
+  // Blur saves a typed name, but not the blur that comes with opening the row (the + menu closing).
+  m.folderInput.on("blur", (_e, cx) => {
+    if (!m.newFolder || Date.now() - (m.newFolderAt ?? 0) < 500) return;
+    createFolder(m); cx.notify();
+  });
   startProbes(m, cx);
   cx.timer.every(INFO_MS, (cx) => refreshSpaces(m, cx));
   refreshSpaces(m, cx);
@@ -122,10 +126,13 @@ function createFolder(m) {
   setShared(FOLDERS, [...folders(), { id: `f-${Date.now().toString(36)}`, name, open: true }]);
 }
 
-export function startNewFolder(m) {
+/** Show the name row and give it the keyboard once it's drawn (focusing before it renders is lost). */
+export function startNewFolder(m, cx) {
   m.newFolder = true;
+  m.newFolderAt = Date.now();
   m.folderInput.set_value("");
-  m.folderInput.focus();
+  cx.notify();
+  cx.timer.after(60, () => m.folderInput.focus());
 }
 
 /** Open questions and open tasks of a space, from its tasks.json. */
@@ -230,7 +237,10 @@ export function renderSidebar(m) {
   if (m.newFolder) {
     rows.push(h_flex().id("new-folder").h(30).px(8).gap(8).items_center().rounded(6).bg(t.popover).border(1).border_color(t.input)
       .child(svg("mods/shepherd/icons/folder.svg").w(14).h(12).flex_none().text_color(t.muted))
-      .child(Input.new(m.folderInput).flex_1().text_size(13))
+      // The pane takes a press it isn't stopped from: stop it and focus the field ourselves (as the bar does).
+      .child(div().id("new-folder-input").flex_1()
+        .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); m.folderInput.focus(); })
+        .child(Input.new(m.folderInput).w_full().text_size(13)))
       .on_key_down((e, cx) => { if (e.key === "escape") { m.newFolder = false; m.folderInput.set_value(""); cx.stop_propagation(); cx.notify(); } }));
   }
   for (const f of fs) {
