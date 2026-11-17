@@ -1,0 +1,66 @@
+{
+  "shepherd": {
+    "agent": "claude",
+    "model": "opus-4.5"
+  },
+  "skills": "mattpocock/skills",
+  "tracker": "github",
+  "stages": {
+    "triage": {
+      "agent": "claude",
+      "model": "opus-4.5",
+      "skill": "/triage",
+      "only": "issues from other people"
+    },
+    "spec": {
+      "agent": "claude",
+      "model": "opus-4.5",
+      "skill": "/to-spec",
+      "big": "/wayfinder",
+      "grillQuestionsPerRound": 3
+    },
+    "tickets": {
+      "agent": "claude",
+      "model": "opus-4.5",
+      "skill": "/to-tickets",
+      "approve": true
+    },
+    "implement": {
+      "agent": "claude",
+      "model": "sonnet-4.5",
+      "skill": "/implement"
+    },
+    "review": {
+      "agent": "claude",
+      "model": "opus-4.5",
+      "skill": "/code-review"
+    },
+    "ci": {
+      "command": "pnpm lint && pnpm test"
+    },
+    "proof": {
+      "browser": "chromium --headless",
+      "screenshots": true,
+      "recording": true
+    }
+  },
+  "maxLoops": 3,
+  "limits": {
+    "maxCpu": 80,
+    "maxMem": 85
+  },
+  "stuckMinutes": {
+    "triage": 40,
+    "spec": 120,
+    "tickets": 60,
+    "implement": 50,
+    "review": 25,
+    "ci": 20,
+    "proof": 20
+  },
+  "alerts": {
+    "toast": true,
+    "sound": true,
+    "phone": true
+  }
+}
