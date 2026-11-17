@@ -5,16 +5,18 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { theme } from "herdr";
 import { STAGES, KINDS, MONO, groupColor, age, palette } from "./common.js";
 
-export function answerButton(t, id, text, recommended, onClick) {
+export function answerButton(t, id, text, recommended, onClick, { fit = false } = {}) {
+  // fit: shrink to share a row and cut the text with … (the bar); the full text shows on hover.
   return h_flex().id(id).h(28).px(11).gap(6).items_center().rounded(6).cursor_pointer()
+    .when(fit, (el) => el.min_w(0).flex_shrink(1).tooltip(text))
     .border(1).border_color(recommended ? t.accent : t.input)
     .bg(recommended ? t.selected : t.raised).text_color(t.foreground).text_size(12)
     .hover((s) => s.bg(t.hover))
     // In the floating bar an unstopped press would drag the bar instead of clicking.
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_click(onClick)
-    .child(text)
-    .when(recommended, (el) => el.child(div().text_size(10.5).text_color(t.accent).child("recommended")));
+    .child(fit ? div().min_w(0).truncate().child(text) : text)
+    .when(recommended, (el) => el.child(div().flex_none().text_size(10.5).text_color(t.accent).child("recommended")));
 }
 
 /** Why the asker recommends its pick (grilling questions carry one). */

@@ -1,4 +1,4 @@
-// The floating Shepherd bar: the newest open question on top, then a line to talk to Shepherd.
+// The floating Shepherd bar: the oldest open question on top, then a line to talk to Shepherd.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
@@ -17,20 +17,27 @@ export function renderBar(m) {
   const space = m.space();
   const openNeeds = () => setShared(VIEW, "needs");
 
-  const strip = q && h_flex().id("bar-q").w_full().px(14).py(9).gap(8).items_center()
-    .bg(t.raised).border_b(1).border_color(t.blocked)
+  // Short options (Merge, Send back) sit on the question's line; longer ones (a grilling
+  // question's) get a row of their own under it and shrink with … to fit the bar.
+  const opts = (q?.options ?? []).slice(0, 3);
+  const inline = opts.join("").length <= 36;
+  const buttons = opts.map((o, i) => answerButton(t, `bar-o${i}`, o, o === q.recommended, () => m.answer(q, o), { fit: !inline }));
+  const line = q && h_flex().w_full().gap(8).items_center()
     .child(div().size(18).flex_none().rounded(9).bg(t.blocked).text_color(t.background)
       .text_size(11).font_semibold().flex().items_center().justify_center().child("?"))
-    .child(div().font_family(MONO).text_size(11).text_color(t.blocked).child(q.task))
+    .child(div().flex_none().font_family(MONO).text_size(11).text_color(t.blocked).child(q.task))
     .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(q.text))
-    .children((q.options ?? []).slice(0, 3).map((o, i) =>
-      answerButton(t, `bar-o${i}`, o, o === q.recommended, () => m.answer(q, o))))
-    .when((q.options ?? []).length === 0, (el) => el.child(answerButton(t, "bar-answer", "Answer…", false, openNeeds)))
+    .when(inline, (el) => el.children(buttons))
+    .when(opts.length === 0, (el) => el.child(answerButton(t, "bar-answer", "Answer…", false, openNeeds)))
     .when(qs.length > 1, (el) => el.child(
       div().id("bar-waiting").px(7).h(22).flex().items_center().rounded(5).cursor_pointer()
         .bg(t.blocked).text_color(t.background).text_size(11).font_semibold()
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(openNeeds).child(`${qs.length} waiting`)));
+  const strip = q && v_flex().id("bar-q").w_full().px(14).py(9).gap(7)
+    .bg(t.raised).border_b(1).border_color(t.blocked)
+    .child(line)
+    .when(!inline, (el) => el.child(h_flex().w_full().min_w(0).pl(26).gap(6).items_center().children(buttons)));
 
   const dot = div().absolute().right(-2).bottom(-2).size(9).rounded(5).border(2).border_color(t.popover)
     .bg(!sh ? t.idle : t[status] ?? t.idle)
