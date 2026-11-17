@@ -58,7 +58,7 @@ Make `plans/<id>/docs/` first; if the repo has `CONTEXT.md` or `docs/adr/`, copy
 
 How you ask, which overrides the grilling skill's rounds and numbered-frontier format and any CLAUDE.md rule about AskUserQuestion: the person can't see your terminal and you have no question tool. The only way a question reaches them is through Shepherd, one at a time. For question n (1, 2, 3, …), write {{REPO}}/.herdr/shepherd/plans/<id>/grill-<n>.json as {"q": "<the question, with any context it needs>", "options": ["…", "…"], "recommended": "<one of the options>", "why": "one line"} with 2–4 options, send `hc send $HC_TERMINAL_ID 'grill <id>: <that path>'`, and wait. The answer comes back as `grill-<n> answer: <text>`; it may be one of your options or the person's own words. Build the next question on it. Never ask a round, never ask in your terminal.
 
-Where your docs go: write the glossary and decisions only in {{REPO}}/.herdr/shepherd/plans/<id>/docs/ (CONTEXT.md and adr/), never in the repo's own CONTEXT.md or docs/adr/, and commit nothing. A ticket takes them into the code later.
+Where your docs go: write the glossary and decisions only in {{REPO}}/.herdr/shepherd/plans/<id>/docs/ (CONTEXT.md and adr/), never in the repo's own CONTEXT.md or docs/adr/, and commit nothing. A ticket takes them into the code later, CONTEXT.md to the repo's root and adr/* to docs/adr/, so write links as they'll be there: from CONTEXT.md, `docs/adr/<file>`.
 
 The request: <brief>
 
@@ -84,7 +84,7 @@ Add to either: "If something is still open, ask it as one question the Grill way
 
 ### Tickets
 
-Send the planner: "/to-tickets <id>: on the spec in `.herdr/shepherd/plans/<id>/spec.md`: vertical slices, the first one a prefactor if it helps, each with its blocking edges. Write `.herdr/shepherd/plans/<id>/tickets.json` as `[{"key": "A", "title": "…", "brief": "what it delivers, enough for an implementer", "blockedBy": ["…keys"]}]` and send `tickets <id>: <that path>`." `start <id> tickets`.
+Send the planner: "/to-tickets <id>: on the spec in `.herdr/shepherd/plans/<id>/spec.md`: vertical slices, the first one a prefactor if it helps, each with its blocking edges. Make no ticket for the glossary and decisions in `.herdr/shepherd/plans/<id>/docs/`: Shepherd commits them on the first ticket's branch before it starts. Write `.herdr/shepherd/plans/<id>/tickets.json` as `[{"key": "A", "title": "…", "brief": "what it delivers, enough for an implementer", "blockedBy": ["…keys"]}]` and send `tickets <id>: <that path>`." `start <id> tickets`.
 
 - `tickets <id>: <path>` → `end <id> ask`, `ask <id> --kind approve --tickets <path> --text "<n> tickets for <title>" --options "Approve|Merge them|Split them" --recommended "Approve"`.
 - Any answer other than Approve: send it to the planner and wait for a new tickets file; ask again.
