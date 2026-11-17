@@ -30,7 +30,7 @@ if [ -n "$EXCLUDE" ]; then
 fi
 node "$HERE/bin/shep.mjs" --tasks "$FILE" init "$SPACE" >/dev/null
 
-PROMPT=$(mktemp -t shepherd-prompt)
+PROMPT=$(mktemp "${TMPDIR:-/tmp}/shepherd-prompt.XXXXXX")
 sed -e "s#{{SHEP}}#node $HERE/bin/shep.mjs#g" -e "s#{{WORKFLOW}}#$CONFIG#g" -e "s#{{REPO}}#$REPO#g" -e "s#{{SPACE}}#$SPACE#g" \
   "$HERE/PROMPT.md" > "$PROMPT"
 

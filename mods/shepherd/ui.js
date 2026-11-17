@@ -54,6 +54,32 @@ export async function shepherdHome(m) {
   return m.home;
 }
 
+// On another machine: the login shell's PATH (node, hc and claude often live in ~/.nvm or
+// ~/.local/bin, which a plain `sh -c` lacks), then a shepherd/ folder with start.sh and
+// bin/shep.mjs, found like shepherdHome (through that machine's mods/shepherd link) or at this
+// checkout's path ($1), then the programs start.sh needs. Prints dir= and path=, or no=<reason>.
+const SHEP_CHECK = `P=$("\${SHELL:-sh}" -lic 'printf "\\n%s\\n" "$PATH"' 2>/dev/null </dev/null | tail -n 1)
+[ -n "$P" ] && PATH="$P:$PATH"
+d=""
+for c in "$HOME/.config/herdr-app/mods/shepherd" "$1/../mods/shepherd"; do
+  x=$(cd -P "$c" 2>/dev/null && cd ../../shepherd 2>/dev/null && [ -f start.sh ] && [ -f bin/shep.mjs ] && pwd -P) && { d=$x; break; }
+done
+[ -n "$d" ] || { echo "no=no herdr-shepherd checkout with shepherd/start.sh there"; exit 0; }
+for t in node hc claude git; do command -v "$t" >/dev/null 2>&1 || { echo "no=$t isn't installed there"; exit 0; }; done
+echo "dir=$d"
+echo "path=$PATH"`;
+
+/** Whether start.sh can run on a machine (null: this computer): { dir, path } (path: the PATH to
+ *  run it with there) or { reason }, one line. */
+export async function shepherdOn(m, machine) {
+  const h = await shepherdHome(m);
+  if (!machine) return h ? { dir: h.dir, path: null } : { reason: "mods/shepherd isn't inside a checkout with shepherd/start.sh" };
+  const r = await exec("sh", ["-c", SHEP_CHECK, "check", h?.dir ?? "/nonexistent"], { on: machine, timeout: 15000 }).catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
+  const kv = Object.fromEntries((r.stdout ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
+  if (kv.dir && kv.path) return { dir: kv.dir, path: kv.path };
+  return { reason: kv.no ?? `couldn't check ${machine}: ${((r.stderr || "").trim().split("\n").pop() || `exit ${r.code}`)}` };
+}
+
 /** The person's workflow: workflow.json, else the example it starts from ({} when neither reads). */
 export async function readWorkflow(m) {
   const h = await shepherdHome(m);
@@ -113,7 +139,8 @@ export function tellWorkflowChanged(file) {
 
 /** Popovers open at the pointer when clicked; from a key or command, near the sidebar's foot. */
 const popAt = (atPointer) => (atPointer ? {} : { at: { x: 248, y: 520 } });
-export const openNewSpace = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 560, height: 540, props: { panel: "newspace" } });
+/** New space, on this computer or (machine) on another one. */
+export const openNewSpace = (machine = null) => openOverlay({ mod: "shepherd", kind: "dialog", width: 560, height: 580, props: { panel: "newspace", machine } });
 export const openAddMachine = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 540, height: 600, props: { panel: "addmachine" } });
 export const openSpaceSettings = (id) => openOverlay({ mod: "shepherd", kind: "dialog", width: 600, height: 0.85, props: { panel: "spacesettings", space: id } });
 export const openWorkflow = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 680, height: 0.85, props: { panel: "workflow" } });

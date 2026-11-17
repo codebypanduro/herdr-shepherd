@@ -32,7 +32,7 @@ import { renderMachinePop, renderUsagePop } from "./machines.js";
 import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./dialogs.js";
 import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
 import {
-  openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, readWorkflow, shepherdHome,
+  openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, readWorkflow, shepherdOn,
 } from "./ui.js";
 
 const REFRESH_MS = 5000;
@@ -419,17 +419,21 @@ export default class Shepherd extends View {
 
   // ---- spaces ----------------------------------------------------------------------------
 
-  /** shepherd/start.sh for a space on this computer, in the background (it starts Shepherd in its
-   *  own tab). The script is this mod's own checkout's, found through the mods/shepherd link. */
+  /** shepherd/start.sh for a space, on its machine, in the background (it starts Shepherd in its
+   *  own tab). Here the script is this mod's own checkout's, found through the mods/shepherd link;
+   *  on another machine it's that machine's checkout, run with its login shell's PATH (shepherdOn). */
   startShepherd(space) {
-    if (!space || space.machine) return;
+    if (!space) return;
     const dir = space.folder || this.repo(space)?.dir;
     if (!dir) return;
+    const machine = space.machine ?? null;
     const fail = (body) => notify({ title: "Shepherd didn't start", body, level: "error" });
-    shepherdHome(this).then((h) => {
-      if (!h) return fail("mods/shepherd isn't inside a checkout with shepherd/start.sh.");
-      return exec("sh", [h.start, "--space", localId(space), dir], { timeout: 60000 })
-        .then((r) => { if (r.code !== 0) fail((r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop()); });
+    shepherdOn(this, machine).then((s) => {
+      if (!s.dir) return fail(machine ? `${machine}: ${s.reason}` : s.reason);
+      const args = [`${s.dir}/start.sh`, "--space", localId(space), dir];
+      const r = machine ? exec("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 60000 })
+        : exec("sh", args, { timeout: 60000 });
+      return r.then((r) => { if (r.code !== 0) fail((r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop()); });
     }).catch((e) => fail(String(e)));
   }
 
@@ -615,7 +619,7 @@ export default class Shepherd extends View {
    *  True when `name` was one of them. */
   overlayCommand(name, arg) {
     const act = {
-      "new-space": () => openNewSpace(),
+      "new-space": () => openNewSpace(arg || null),
       "new-folder": () => { run("layout.show", { id: "sidebar" }); run("shepherd.new-folder"); },
       workflow: () => openWorkflow(),
       usage: () => openUsage(),
