@@ -27,7 +27,7 @@ import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
 import { renderDigest } from "./digest.js";
 import { renderHistory } from "./history.js";
-import { initSidebar, renderSidebar, renderPlus, openNewFolder, initNewFolder, renderNewFolder, folders } from "./sidebar.js";
+import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
 import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./dialogs.js";
 import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
@@ -81,7 +81,6 @@ export default class Shepherd extends View {
       this.historyCount = 0;
     }
     if (p.panel === "spaces") initSidebar(this, cx, InputState);
-    if (p.panel === "newfolder") initNewFolder(this, cx, InputState);
     if (p.panel === "addmachine") initAddMachine(this, cx, InputState);
     if (p.panel === "newspace") initNewSpace(this, cx, InputState);
     if (p.panel === "workflow") initWorkflow(this, cx);
@@ -592,7 +591,7 @@ export default class Shepherd extends View {
     const [name, arg] = String(c).split(":");
     const panel = props()?.panel;
     if (panel === "spaces") {
-      if (name === "new-folder") openNewFolder();
+      if (name === "new-folder") startNewFolder(this, cx);
       return;
     }
     if (panel === "bar") {
@@ -785,7 +784,6 @@ export default class Shepherd extends View {
     if (p.panel === "status") return this.renderStatus();
     if (p.panel === "spaces") return renderSidebar(this);
     if (p.panel === "plus") return renderPlus();
-    if (p.panel === "newfolder") return renderNewFolder(this);
     if (p.panel === "machine") return renderMachinePop(this);
     if (p.panel === "usage") return renderUsagePop();
     if (p.panel === "addmachine") return renderAddMachine(this);
