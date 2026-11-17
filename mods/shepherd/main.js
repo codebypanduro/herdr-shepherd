@@ -82,6 +82,18 @@ export default class Shepherd extends View {
       this.historyScroll = ScrollHandle.new();
       this.historyCount = 0;
     }
+    if (p.panel === "detail") {
+      // The Overview's "Ask Shepherd about <id>…" field. No placeholder of its own: InputState can't
+      // change one, so the detail draws "Ask Shepherd about <id>…" under it while it's empty.
+      this.askInput = InputState.new({ placeholder: "" });
+      this.askInput.on("submit", () => this.askAbout());
+      this.askInput.on("change", (_e, cx) => cx.notify());
+      this.askInput.on("focus", () => { this.askFocused = true; });
+      this.askInput.on("blur", () => { this.askFocused = false; });
+      this.askTask = null; // the task the field's text is for
+      this.askDrafts = {}; // task id -> unsent text, kept when another task is opened
+      this.askPending = []; // lines sent here that chat.jsonl doesn't hold yet, shown at once
+    }
     if (p.panel === "spaces") initSidebar(this, cx, InputState);
     if (p.panel === "addmachine") initAddMachine(this, cx, InputState);
     if (p.panel === "newspace") initNewSpace(this, cx, InputState);
@@ -295,6 +307,35 @@ export default class Shepherd extends View {
   say(text) {
     const line = String(text ?? "").trim();
     if (line && this.tell(line)) this.barInput.set_value("");
+  }
+
+  /** The Overview's field: `re <id>: <text>` to Shepherd, kept in the chat with the task. */
+  askAbout() {
+    const task = this.selectedTask();
+    const text = String(this.askInput.value() ?? "").trim();
+    if (!task || !text) return;
+    const line = `re ${task.id}: ${text}`;
+    if (!this.tell(line, task.id)) return;
+    this.askPending.push({ at: new Date().toISOString(), from: "you", text: line, task: task.id, pending: true });
+    this.askInput.set_value("");
+    delete this.askDrafts[task.id];
+  }
+
+  /** The field's text belongs to one task: opening another keeps it as a draft and shows that one's. */
+  askFor(task) {
+    if (!this.askInput || this.askTask === task.id) return;
+    if (this.askTask) this.askDrafts[this.askTask] = this.askInput.value();
+    this.askTask = task.id;
+    this.askInput.set_value(this.askDrafts[task.id] ?? "");
+  }
+
+  /** chat.jsonl's lines about a task, plus what this copy sent that the file doesn't hold yet. */
+  taskChat(id) {
+    const chat = this.state().chat ?? [];
+    // A sent line counts as in the file once a line with its text and task is there; a minute at most.
+    this.askPending = (this.askPending ?? []).filter((p) => Date.now() - Date.parse(p.at) < 60000
+      && !chat.some((c) => c.from === "you" && c.task === p.task && c.text === p.text));
+    return [...chat.filter((c) => c.task === id), ...this.askPending.filter((p) => p.task === id)];
   }
 
   /** Toast, sound and phone push for each new question. Only the bar alerts, so it happens once. */
@@ -824,11 +865,14 @@ export default class Shepherd extends View {
     if (p.panel === "bar") return renderBar(this);
     if (p.panel === "detail") {
       const task = this.selectedTask();
-      if (task) this.ensureGit(task, cx);
-      // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too).
+      if (task) { this.ensureGit(task, cx); this.askFor(task); }
+      // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too), never
+      // while typing in the Ask field: its keys bubble up here. A click in the field stops there
+      // (detail.js), so this one doesn't take the keyboard from it.
       return renderDetail(this).track_focus(this.keys)
         .on_mouse_down("left", () => this.keys.focus())
         .on_key_down((e, cx) => {
+          if (this.askFocused) return;
           if (!e.modifiers?.platform && !e.modifiers?.control && this.detailTab(e.key)) cx.stop_propagation();
         });
     }

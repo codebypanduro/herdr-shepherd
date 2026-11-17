@@ -87,9 +87,10 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 | `steer HRD-144 context: use the core's start time` | add context |
 | `pause HRD-144` / `resume HRD-144` | pause or resume |
 | `status HRD-144?` | Shepherd replies with `shep say --task HRD-144`, so the reply shows in the History |
+| `re HRD-144: why did loop 1 fail?` | a question or note about one task, from its Overview's Ask field; Shepherd answers with `shep say --task HRD-144` (forwarding an instruction to the task's agent), so the reply shows in the task's Comments and the History |
 | anything else | a normal message to Shepherd |
 
-Every line the board sends is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause and status with their task).
+Every line the board sends is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause, status and `re` with their task). A task's Overview shows the chat lines with its task among its Comments.
 
 Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). They never talk to the person.
 

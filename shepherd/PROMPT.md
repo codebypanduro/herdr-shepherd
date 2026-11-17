@@ -192,6 +192,7 @@ Lines like these come from the board; act on them:
 - `steer <id> redirect: <text>` / `steer <id> context: <text>`: forward to that task's current agent with `hc send`.
 - `pause <id>` / `resume <id>`: `hc interrupt` the agent and `set <id> status=paused`, or `set <id> status=working` and send it "continue". A paused task's agent stays alive; don't kill it.
 - `status <id>?`: reply in two lines at most, with `say --task <id>` so it shows in the History.
+- `re <id>: <text>`: the person asks about that task, or tells you something about it, from its Overview. Read the task (`{{SHEP}} get <id>`) and, when it helps, its agent's screen (`hc read <terminal> --lines 60`). A question: answer it from what you find. An instruction for the work: forward it to the task's current agent with `hc send` as you would `steer <id> context:`, or, with no agent running, keep it for the task's next brief; say which. Always reply, in one to three lines, with `{{SHEP}} say --task <id> "<reply>"`: that is what shows under their line in the task's Comments and in the History. Without `--task` the reply never reaches the task.
 - `workflow changed: read <file>`: the person changed the workflow in Workflow settings. Read `<file>` now and use it instead of `{{WORKFLOW}}` from here on, for every setting and for `room --workflow <file>` (a room-waiter already running keeps its old limits until it exits). A new Shepherd model takes effect only when you're restarted; everything else applies to the next stage you start. No reply needed.
 
 ## Rules

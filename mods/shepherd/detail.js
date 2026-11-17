@@ -2,7 +2,7 @@
 // Changes and Files come from git in the task's worktree (see git.js); the rest is tasks.json.
 
 import { div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
 import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, palette, tint, money, kTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
@@ -111,7 +111,7 @@ function overview(m, task, t) {
       .child(div().truncate().text_size(10).text_color(t.dim).child(rs.map(({ r }) => STAGES[r.stage]?.title ?? r.stage).join(" · ")));
   };
 
-  const comment = (who, color, where, text, state) => v_flex().gap(4).p(10).rounded(6).bg(t.raised)
+  const comment = (who, color, where, text, state, fg = t.foreground) => v_flex().gap(4).p(10).rounded(6).bg(t.raised)
     .child(h_flex().gap(7).items_center()
       .child(div().w(3).h(12).rounded(2).bg(color))
       .child(div().text_size(11.5).font_semibold().child(who))
@@ -121,13 +121,21 @@ function overview(m, task, t) {
         .border_color(state === "resolved" ? t.done : state === "fixing" ? t.working : t.blocked)
         .text_size(10.5).text_color(state === "resolved" ? t.done : state === "fixing" ? t.working : t.blocked)
         .child(state))))
-    .child(div().text_size(12.5).line_height(1.4).text_color(t.foreground).child(text));
+    .child(div().text_size(12.5).line_height(1.4).text_color(fg).child(text));
 
   const comments = [
     ...runs.filter((r) => r.note).map((r) => ({
       at: Date.parse(r.end ?? r.start ?? "") || 0,
       el: comment(`${ROLE[r.stage] ?? r.stage} · ${r.model ?? "agent"}`, RESULT_COLOR(t, r.result),
         `${STAGES[r.stage]?.title ?? r.stage} · loop ${r.loop ?? 1}`, r.note, r.result === "running" ? null : r.result === "fail" ? "open" : null),
+    })),
+    // The task's chat (chat.jsonl lines with this task): your `re <id>: …` lines without the prefix,
+    // and what Shepherd said about it (`shep say --task`).
+    ...m.taskChat(task.id).map((c) => ({
+      at: Date.parse(c.at) || now,
+      el: c.from === "you"
+        ? comment("you", t.foreground, c.pending ? "sending…" : ago(c.at, now), String(c.text ?? "").replace(new RegExp(`^re ${esc(task.id)}:\\s*`), ""), null)
+        : comment("shepherd", t.accent, ago(c.at, now), c.text ?? "", null, t.muted),
     })),
     ...(task.findings ?? []).map((f) => ({
       // Findings carry no time: place each just after the review run that found it.
@@ -148,7 +156,31 @@ function overview(m, task, t) {
     .child(v_flex().gap(8)
       .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("COMMENTS"))
       .when(comments.length === 0, (el) => el.child(div().text_color(t.dim).child("No comments yet.")))
-      .children(comments));
+      .children(comments))
+    .child(askField(m, task, t));
+}
+
+const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const ago = (at, now) => { const x = Date.parse(at ?? ""); return x ? (now - x < 60000 ? "just now" : `${age(now - x)} ago`) : ""; };
+
+/** "❯ Ask Shepherd about T-4…" + Send: Enter or Send sends `re T-4: <text>` (main.js askAbout). */
+function askField(m, task, t) {
+  const empty = !(m.askInput?.value() ?? "");
+  // A press in the field stops here, so the pane's own mouse-down doesn't take the keyboard from it.
+  return h_flex().id("ask-field").flex_none().gap(8).px(10).py(8).items_center().rounded(6).border(1)
+    .border_color(t.input).bg(t.background)
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .child(div().font_family(MONO).text_size(12).text_color(t.accent).child("❯"))
+    .child(div().relative().flex_1().min_w(0).h(18)
+      .when(empty, (el) => el.child(div().absolute().inset_0().flex().items_center().truncate()
+        .font_family(MONO).text_size(12).text_color(t.dim).child(`Ask Shepherd about ${task.id}…`)))
+      .when(Boolean(m.askInput), (el) => el.child(Input.new(m.askInput).absolute().inset_0()
+        .font_family(MONO).text_size(12).text_color(t.foreground))))
+    .child(div().id("ask-send").px(10).py(3).rounded(4).bg(t.raised).cursor_pointer()
+      .text_size(11).text_color(empty ? t.dim : t.foreground)
+      .hover((s) => s.bg(t.hover))
+      .on_click(() => m.askAbout())
+      .child("Send"));
 }
 
 // ---- Review --------------------------------------------------------------------------------
