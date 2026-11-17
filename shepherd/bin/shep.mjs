@@ -4,7 +4,9 @@
 // The file is found from --tasks <path>, $SHEP_FILE, or <git root of cwd>/.herdr/shepherd/tasks.json.
 //
 //   shep init <space>
-//   shep add --title "…" [--id X-1] [--source you] [--stage implement] [--max-loops 3]   prints the id
+//   shep add --title "…" [--id X-1] [--source you] [--stage spec] [--max-loops 3]
+//            [--blocked-by "T-4,T-5"] [--parent T-3] [--brief "…"]                       prints the id
+//   shep ready                        queued tasks whose blockers are all done, one id per line
 //   shep start <id> <stage> [--terminal t6] [--model M] [--note "…"]      opens a stage run (status working)
 //   shep end <id> pass|fail|ask [--note "…"] [--tokens N] [--cost N]      closes the open stage run
 //   shep loop <id>                    next build loop; exits 2 when maxLoops is used up (ask the person)
@@ -13,6 +15,8 @@
 //   shep finding <id> <fid> open|fixing|resolved
 //   shep ask <id> --text "…" [--kind ask|escalate|merge|triage|grill|approve] [--from "t5 implementer"]
 //            [--options "One more loop|Park it|I'll take it"] [--recommended "One more loop"]   prints q1, q2, …
+//            grilling: --kind grill --round 2 --questions <file.json>   [{q, options:[…], recommended, why}]
+//            approval: --kind approve --tickets <file.json>             [{key, title, brief, blockedBy:[keys]}]
 //   shep answer <qid> "<answer>"      records the person's answer; the question leaves Needs you
 //   shep get <id> | shep ls
 
@@ -102,9 +106,15 @@ switch (cmd) {
       id = `${prefix}-${n}`;
     }
     if (state.tasks.some((t) => t.id === id)) die(`task ${id} exists`);
+    for (const b of typeof opt["blocked-by"] === "string" ? opt["blocked-by"].split(",").map((x) => x.trim()).filter(Boolean) : []) {
+      if (!state.tasks.some((t) => t.id === b)) die(`--blocked-by ${b}: no such task`);
+    }
     state.tasks.push({
       id, title: opt.title, source: opt.source ?? "you", stage, status: "queued",
-      loop: 1, maxLoops: num(opt["max-loops"]) ?? 3, blockedBy: [],
+      loop: 1, maxLoops: num(opt["max-loops"]) ?? 3,
+      blockedBy: typeof opt["blocked-by"] === "string" ? opt["blocked-by"].split(",").map((x) => x.trim()).filter(Boolean) : [],
+      parent: typeof opt.parent === "string" ? opt.parent : null,
+      brief: typeof opt.brief === "string" ? opt.brief : "",
       terminal: null, worktree: null, branch: null, pr: null,
       history: [], findings: [], summary: "",
     });
@@ -210,8 +220,24 @@ switch (cmd) {
     const options = typeof opt.options === "string" ? opt.options.split("|").map((x) => x.trim()).filter(Boolean) : [];
     const recommended = typeof opt.recommended === "string" ? opt.recommended : null;
     if (recommended && options.length && !options.includes(recommended)) die("--recommended must be one of --options");
-    state.questions.push({ id: `q${n}`, task: t.id, kind, from: typeof opt.from === "string" ? opt.from : "shepherd",
-      text: opt.text, options, recommended, asked: now(), answer: null, answered: null });
+    const readList = (k) => {
+      if (typeof opt[k] !== "string") return undefined;
+      let v;
+      try { v = JSON.parse(readFileSync(opt[k], "utf8")); } catch (e) { die(`--${k} ${opt[k]}: ${e.message}`); }
+      if (!Array.isArray(v) || !v.length) die(`--${k} must be a non-empty JSON array`);
+      return v;
+    };
+    const questions = readList("questions");
+    const tickets = readList("tickets");
+    if (kind === "grill" && !questions) die("--kind grill needs --questions <file.json>");
+    if (kind === "approve" && !tickets) die("--kind approve needs --tickets <file.json>");
+    for (const g of questions ?? []) if (!g.q || !Array.isArray(g.options) || !g.options.length) die("each grilling question needs q and options");
+    for (const k of tickets ?? []) if (!k.key || !k.title) die("each ticket needs key and title");
+    const q = { id: `q${n}`, task: t.id, kind, from: typeof opt.from === "string" ? opt.from : "shepherd",
+      text: opt.text, options, recommended, asked: now(), answer: null, answered: null };
+    if (questions) { q.round = num(opt.round) ?? 1; q.questions = questions; }
+    if (tickets) q.tickets = tickets.map((k) => ({ ...k, blockedBy: Array.isArray(k.blockedBy) ? k.blockedBy : k.blockedBy ? [k.blockedBy] : [] }));
+    state.questions.push(q);
     t.status = "blocked";
     save(file, state);
     console.log(`q${n}`);
@@ -232,10 +258,17 @@ switch (cmd) {
     save(file, state);
     break;
   }
+  case "ready": {
+    const done = new Set(need().tasks.filter((t) => t.stage === "done").map((t) => t.id));
+    for (const t of state.tasks) {
+      if (t.status === "queued" && (t.blockedBy ?? []).every((b) => done.has(b))) console.log(t.id);
+    }
+    break;
+  }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;
   case "ls":
     for (const t of need().tasks) console.log(`${t.id}\t${t.stage}\t${t.status}\tloop ${t.loop}/${t.maxLoops}\t${t.title}`);
     break;
   default:
-    die("commands: init add start end loop set finding ask answer get ls (see the top of shep.mjs)");
+    die("commands: init add ready start end loop set finding ask answer get ls (see the top of shep.mjs)");
 }

@@ -22,9 +22,10 @@ Overview (summary, timeline, comments), Review grid, Changes (git diff in the wo
 **Done when:** the Review tab shows a finding as found in loop 1 and fixed in loop 2.
 **Built:** `detail.js` (header, Overview, Review, Proof placeholder) and `git.js` (Changes, Files). Checked: T-2's finding f1 reads found (loop 1) → ✓ fixed (loop 2); all five tabs render with T-2's real data; the git commands return T-2's change. Not built yet: timeline hover, the Ask Shepherd field, the PR card (slice 6), keys 1–5 (slice 7). Not seen on screen yet.
 
-## 5. Plan stages
+## 5. Plan stages ✅
 `/triage`, `/to-spec` or `/wayfinder` with grilling rounds, and `/to-tickets` with approval and blocking edges.
 **Done when:** a request becomes approved tickets that wait on each other.
+**Built:** `shep add --blocked-by/--parent/--brief`, `shep ask --kind grill --questions` and `--kind approve --tickets`, `shep ready`; the Plan section of PROMPT.md; grilling-round and ticket cards in Needs you. Checked live: a request went Spec → two grilling rounds → 3 tickets approved (C after A and B), and Shepherd also made them wait on the unmerged T-1 and T-4 as answered in round 1. Triage is written but not run live.
 
 ## 6. CI, proof, merge
 The CI command per space, a headless browser with screenshots and a recording, a PR via `gh`, and Ready to merge.

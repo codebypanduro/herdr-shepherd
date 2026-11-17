@@ -160,6 +160,9 @@ Each group's label sits above its first column, and the column header has a 2px 
 - Comments are built from tasks.json: each stage run's note (by role and model) and each finding (reviewer, file:line, state). There is no separate comment store.
 - Changes and Files compare the worktree with `git merge-base HEAD main` (or master), committed or not, plus untracked files; they reload every 10 s while shown. Long files stop at 3000 lines.
 - Timeline segments flex by their share of total time (at least 2%), and running segments pulse. Hovering a segment shows nothing yet.
+- The planning skills (/to-spec, /to-tickets, /triage) publish to an issue tracker and talk to the user. Planners are told to follow their method but write files and ask through Shepherd instead.
+- Every request goes through Spec, however small, unless the person says to skip planning; without that rule Shepherd skips planning for anything that looks easy.
+- A blocker counts as finished only when its task is in `done` (merged), so tickets behind a task in Ready to merge wait until the merge.
 - `shep`'s own path option is `--tasks`; `--file` belongs to `finding add` (the finding's file).
 - Herdr writes `jsconfig.json` and `gpui-kit.d.ts` into each mod folder; they are git-ignored.
 

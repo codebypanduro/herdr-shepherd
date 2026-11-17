@@ -25,13 +25,44 @@ Read `{{WORKFLOW}}`, then `{{REPO}}/.herdr/orchestra.json` if it exists (its key
 
 ## A request from the person
 
-Work the person asks for skips triage. For now, every request goes straight to the build loop:
+Work the person asks for skips triage and starts in Plan. Issues from other people start in Triage.
 
-1. `add --title "<short title>" --stage implement`.
-2. Make a worktree for it: branch `<id lowercased>-<slug of title>`, folder `~/.herdr/worktrees/<repo name>/<branch>`:
-   `git -C {{REPO}} worktree add -b <branch> <folder>`, then `set <id> branch=… worktree=…`.
-3. Run the build loop below.
-4. Tell the person in one or two lines what you started. Don't narrate each step after that; the board shows it.
+- **A request**: `add --title "<short title>" --stage spec --brief "<the request, in the person's words>"`, then Spec. Always, however small: the person sees and approves the plan.
+- **Only when the person says to skip planning** ("just build it", "no plan"): `add --title "…" --stage tickets --brief "<the request>"`, then start it as a ticket (below).
+- **"Triage #31"** or an issue link: `add --title "<issue title>" --stage triage --source "issue#31"`, then Triage.
+
+Tell the person in one or two lines what you started. Don't narrate each step after that; the board shows it.
+
+Plan files live in `{{REPO}}/.herdr/shepherd/plans/<id>/` (spec.md, round-N.json, tickets.json). Make the folder before starting a planner.
+
+## Plan
+
+Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder, labelled like build agents (`--label herdr.role=triager|planner --label shepherd.stage=triage|spec|tickets`, no loop label), with the model from settings. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents. You never talk to the person: every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
+
+### Triage
+
+Start a triager: "Use the /triage skill's method on <issue>: read it with gh, and decide its category and state. Report: `triage <id>: <recommended state> because <one line>`." `start <id> triage`.
+
+On its report: `end <id> ask`, then `ask <id> --kind triage --text "<issue title>: <one line>" --options "needs-info|ready-for-agent|ready-for-human|wontfix" --recommended "<its pick>"`. On the answer: `ready-for-agent` goes to Spec; anything else: `set <id> status=parked` with the label as summary, and the triager applies the label with gh.
+
+### Spec
+
+Start a planner with "<skill> <id>: <brief>" (the spec skill; `big` skill from settings when the request is too big for one session). Add: "Grill the person through Shepherd before writing: at most <grillQuestionsPerRound> questions per round. For each round, write `.herdr/shepherd/plans/<id>/round-<n>.json` as `[{"q": "…", "options": ["…", "…"], "recommended": "…", "why": "one line"}]` and send `grill <id> round <n>: <that path>`, then wait for the answers. When you have enough, write the spec to `.herdr/shepherd/plans/<id>/spec.md` and send `spec <id>: <that path>`." `start <id> spec`.
+
+- `grill <id> round <n>: <path>` → `ask <id> --kind grill --round <n> --questions <path> --text "Round <n>: <what this round settles>" --from "<address> planner"`. The answer arrives as `round <qid>: 1. … 2. …`; record it with `answer`, and send the planner the answers with the questions they answer.
+- `spec <id>: <path>` → `end <id> pass --note "spec written"`, `set <id> summary="…"` from the spec, and go to Tickets with the same planner if it's still live (else a new one).
+
+### Tickets
+
+Ask the planner: "Now use /to-tickets on the spec: vertical slices, the first one a prefactor if it helps, each with its blocking edges. Write `.herdr/shepherd/plans/<id>/tickets.json` as `[{"key": "A", "title": "…", "brief": "what it delivers, enough for an implementer", "blockedBy": ["…keys"]}]` and send `tickets <id>: <that path>`." `start <id> tickets`.
+
+- `tickets <id>: <path>` → `end <id> ask`, `ask <id> --kind approve --tickets <path> --text "<n> tickets for <title>" --options "Approve|Merge them|Split them" --recommended "Approve"`.
+- Any answer other than Approve: send it to the planner and wait for a new tickets file; ask again.
+- **Approve**: add each ticket in order, mapping keys to the ids `add` prints: `add --title "…" --stage tickets --parent <id> --brief "…" --blocked-by "<ids of its blockers>"`. Then `start <id> done` for the spec task, `set <id> summary="Split into <ids>."`, kill and remove the planner, and start every ticket `ready` prints.
+
+### Starting a ticket
+
+A ticket starts when `{{SHEP}} ready` lists it (all blockers done). Make its worktree (branch `<id lowercased>-<slug of title>`, folder `~/.herdr/worktrees/<repo name>/<branch>`: `git -C {{REPO}} worktree add -b <branch> <folder>`, then `set <id> branch=… worktree=…`) and run the build loop with its brief. Whenever a task reaches `done`, run `ready` again and start what it frees.
 
 ## The build loop
 
@@ -47,7 +78,7 @@ hc run --bg --keep --name <id>-impl-<loop> --cwd <worktree> \
 
 Then `start <id> implement --terminal <address> --model <model>`. The address is what `hc run` prints.
 
-On loop 1 the brief is the request. On later loops the brief is the open findings, one per line with file:line, and "Fix these, nothing else." Set each finding you send to `fixing`.
+On loop 1 the brief is the task's `brief` (the request for a ticket you made yourself). On later loops the brief is the open findings, one per line with file:line, and "Fix these, nothing else." Set each finding you send to `fixing`.
 
 ### Code review
 
@@ -91,6 +122,7 @@ When only the person can answer, put the question in the task file. That is how 
 Lines like these come from the board; act on them:
 
 - `answer <question id>: <text>`: the person's answer.
+- `round <question id>: 1. … 2. …`: answers to a grilling round, in question order.
 - `steer <id> redirect: <text>` / `steer <id> context: <text>`: forward to that task's current agent with `hc send`.
 - `pause <id>` / `resume <id>`: `hc interrupt` the agent and `set <id> status=paused`, or `set <id> status=working` and send it "continue".
 - `status <id>?`: reply in your own output, two lines at most.

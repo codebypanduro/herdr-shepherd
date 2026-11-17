@@ -73,6 +73,8 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 |---|---|
 | `answer q7: One more loop` | answer a question (free text works too) |
 | `round q2: 1. One loop 2. Only after both pass 3. Herdr and my phone` | answer a grilling round |
+
+Planners report with `grill <id> round <n>: <path>`, `spec <id>: <path>` and `tickets <id>: <path>`; plan files live in `.herdr/shepherd/plans/<id>/`.
 | `steer HRD-144 redirect: fix the failing test first` | redirect the agent on a task |
 | `steer HRD-144 context: use the core's start time` | add context |
 | `pause HRD-144` / `resume HRD-144` | pause or resume |

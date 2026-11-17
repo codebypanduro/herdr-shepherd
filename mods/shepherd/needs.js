@@ -15,6 +15,45 @@ export function answerButton(t, id, text, recommended, onClick) {
     .when(recommended, (el) => el.child(div().text_size(10.5).text_color(t.accent).child("recommended")));
 }
 
+/** A grilling round: each question with its options, the recommended one picked until you change it. */
+function grillRound(m, q, t) {
+  return v_flex().gap(12)
+    .children(q.questions.map((g, i) => {
+      const pick = m.grillPick(q.id, i, g);
+      return v_flex().gap(6)
+        .child(h_flex().gap(8)
+          .child(div().font_family(MONO).text_size(11).text_color(t.dim).child(`${i + 1}.`))
+          .child(div().flex_1().text_size(13).line_height(1.4).child(g.q)))
+        .child(h_flex().pl(18).gap(6).flex_wrap().children(g.options.map((o, j) => {
+          const on = o === pick;
+          return h_flex().id(`g-${q.id}-${i}-${j}`).h(26).px(10).gap(6).items_center().rounded(6).cursor_pointer()
+            .border(1).border_color(on ? t.accent : t.input).bg(on ? t.selected : t.raised)
+            .text_size(12).text_color(on ? t.foreground : t.muted)
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => { m.setGrillPick(q.id, i, o); cx.notify(); })
+            .child(on ? "● " + o : o)
+            .when(o === g.recommended, (el) => el.child(div().text_size(10.5).text_color(t.accent).child("recommended")));
+        })))
+        .when(Boolean(g.why) && pick === g.recommended, (el) => el.child(
+          div().pl(18).text_size(11.5).text_color(t.dim).child(g.why)));
+    }))
+    .child(h_flex().child(answerButton(t, `g-${q.id}-send`, `Send round ${q.round ?? 1} answers`, false, () => m.sendRound(q))));
+}
+
+/** Proposed tickets and what each waits on. */
+function ticketList(q, t) {
+  const byKey = new Map(q.tickets.map((k) => [k.key, k]));
+  return v_flex().gap(1).rounded(6).border(1).border_color(t.border)
+    .children(q.tickets.map((k, i) => h_flex().px(10).py(7).gap(10).items_start()
+      .when(i > 0, (el) => el.border_t(1).border_color(t.border))
+      .child(div().w(22).font_family(MONO).text_size(11).text_color(t.muted).child(k.key))
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(div().text_size(12.5).child(k.title))
+        .when(Boolean(k.brief), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(k.brief))))
+      .child(div().font_family(MONO).text_size(10.5).text_color(k.blockedBy.length ? t.muted : t.done)
+        .child(k.blockedBy.length ? `after ${k.blockedBy.map((b) => byKey.get(b)?.key ?? b).join(", ")}` : "ready"))));
+}
+
 export function renderNeeds(m) {
   const t = theme();
   const qs = m.questions();
@@ -42,6 +81,8 @@ export function renderNeeds(m) {
       .child(div().text_size(14).line_height(1.4).text_color(t.foreground).child(q.text))
       .child(div().text_size(11.5).text_color(t.dim)
         .child(`asked by ${q.from ?? "shepherd"}${finding ? ` · last finding: ${finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""} ` : ""}${finding.text}` : ""}`))
+      .when(q.kind === "grill" && Array.isArray(q.questions), (el) => el.child(grillRound(m, q, t)))
+      .when(q.kind === "approve" && Array.isArray(q.tickets), (el) => el.child(ticketList(q, t)))
       .when((q.options ?? []).length > 0, (el) => el.child(h_flex().gap(8).flex_wrap().children(
         q.options.map((o, i) => answerButton(t, `q-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))))
       .when(Boolean(input), (el) => el.child(h_flex().gap(8).items_center()

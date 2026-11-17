@@ -177,6 +177,19 @@ export default class Shepherd extends View {
     setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
   }
 
+  /** The picked option for grilling question i: the person's pick, else the recommended one. */
+  grillPick(qid, i, g) { return this.grillPicks?.[qid]?.[i] ?? g.recommended ?? g.options[0]; }
+  setGrillPick(qid, i, o) { ((this.grillPicks ??= {})[qid] ??= {})[i] = o; }
+
+  sendRound(q) {
+    const line = q.questions.map((g, i) => `${i + 1}. ${this.grillPick(q.id, i, g)}`).join(" ");
+    const sh = this.shepherd();
+    const repo = this.repo();
+    if (!sh || !repo) return;
+    hc(["send", sh.address, `round ${q.id}: ${line}`]);
+    setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
+  }
+
   /** A message from the bar: plain text to Shepherd. */
   say(text) {
     const line = String(text ?? "").trim();
@@ -226,10 +239,13 @@ export default class Shepherd extends View {
     const last = runs[runs.length - 1];
     const cur = [...runs].reverse().find((r) => r.stage === task.stage);
     const since = Date.parse(cur?.start ?? "") || Date.now();
-    const blockers = (task.blockedBy ?? []).filter(Boolean);
+    // Blockers still to finish; done ones no longer hold the task.
+    const doneIds = new Set((this.state().tasks ?? []).filter((x) => x.stage === "done").map((x) => x.id));
+    const blockers = (task.blockedBy ?? []).filter((b) => b && !doneIds.has(b));
     const note = task.status === "parked" ? "parked"
       : task.status === "paused" ? "paused"
       : task.status === "queued" && blockers.length ? `blocked by ${blockers.join(", ")}`
+      : task.status === "queued" && task.stage === "tickets" ? "ready-for-agent"
       : (last?.note || (term?.report ?? "") || task.status);
     return {
       address: task.terminal ?? null,
