@@ -144,7 +144,8 @@ function overview(m, task, t) {
     })),
   ].sort((a, b) => a.at - b.at).map((c) => c.el);
 
-  return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).gap(16)
+  // 120px under the Ask field: the floating bar covers the pane's bottom, and the field is last.
+  return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).pb(120).gap(16)
     .when(task.stage === "merge", (el) => el.child(renderPrCard(m, task, t)))
     .child(div().text_size(14).line_height(1.45).text_color(task.summary ? t.foreground : t.dim)
       .child(task.summary || "Shepherd hasn't written a summary yet."))
