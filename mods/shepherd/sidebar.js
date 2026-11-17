@@ -5,7 +5,7 @@
 
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { spaces, terminals, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
+import { spaces, terminals, shared, setShared, exec, appHome, run, closeOverlay, openOverlay, props, notify } from "herdr";
 import { MONO, palette } from "./common.js";
 import { machineList, machineIcon, agentIcon, usageRows, startProbes } from "./machines.js";
 import { findNewSpace } from "./dialogs.js";
@@ -36,14 +36,6 @@ export function initSidebar(m, cx, InputState) {
   m.spaceInfo = {}; // space id -> { org, worktrees, at }
   m.avatars = {}; // org -> "ok" | "none" | "loading"
   m.drag = null; // { id, y, moved }
-  m.newFolder = false;
-  m.folderInput = InputState.new({ placeholder: "Folder name" });
-  m.folderInput.on("submit", (_e, cx) => { createFolder(m); cx.notify(); });
-  // Blur saves a typed name, but not the blur that comes with opening the row (the + menu closing).
-  m.folderInput.on("blur", (_e, cx) => {
-    if (!m.newFolder || Date.now() - (m.newFolderAt ?? 0) < 500) return;
-    createFolder(m); cx.notify();
-  });
   startProbes(m, cx);
   cx.timer.every(INFO_MS, (cx) => refreshSpaces(m, cx));
   refreshSpaces(m, cx);
@@ -118,21 +110,44 @@ function fetchAvatar(m, org, cx) {
   });
 }
 
-function createFolder(m) {
-  const name = m.folderInput.value().trim();
-  m.newFolder = false;
-  m.folderInput.set_value("");
-  if (!name) return;
-  setShared(FOLDERS, [...folders(), { id: `f-${Date.now().toString(36)}`, name, open: true }]);
+// ---- New folder: a small dialog. A field inside the sidebar block gets the caret but not the
+// typing (Herdr keeps the keyboard with the focused pane), so names are typed in a dialog, as
+// Herdr's own sidebar does for rename. Enter adds, Esc cancels.
+
+export const openNewFolder = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 360, height: 150, props: { panel: "newfolder" } });
+
+export function initNewFolder(m, cx, InputState) {
+  m.folderInput = InputState.new({ placeholder: "Folder name" });
+  m.folderInput.on("submit", () => createFolder(m));
+  m.folderInput.on("change", (_e, cx) => cx.notify());
+  cx.timer.after(0, () => m.folderInput.focus());
 }
 
-/** Show the name row and give it the keyboard once it's drawn (focusing before it renders is lost). */
-export function startNewFolder(m, cx) {
-  m.newFolder = true;
-  m.newFolderAt = Date.now();
-  m.folderInput.set_value("");
-  cx.notify();
-  cx.timer.after(60, () => m.folderInput.focus());
+function createFolder(m) {
+  const name = m.folderInput.value().trim();
+  if (!name) return;
+  setShared(FOLDERS, [...folders(), { id: `f-${Date.now().toString(36)}`, name, open: true }]);
+  closeOverlay(props()?.overlay);
+}
+
+export function renderNewFolder(m) {
+  const t = palette();
+  const ok = m.folderInput.value().trim().length > 0;
+  const button = (id, label, primary, enabled, onClick) => div().id(id).px(12).h(28).flex().items_center().rounded(5).text_size(12)
+    .when(primary, (el) => el.bg(enabled ? t.accent : t.hover).text_color(enabled ? t.accent_foreground : t.dim))
+    .when(!primary, (el) => el.border(1).border_color(t.border).text_color(t.muted))
+    .when(enabled, (el) => el.cursor_pointer().on_click(onClick))
+    .child(label);
+  return v_flex().id("new-folder").size_full().bg(t.popover).text_color(t.foreground)
+    .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(props()?.overlay); cx.stop_propagation(); } })
+    .child(v_flex().flex_1().px(18).pt(16).gap(12)
+      .child(div().text_size(15).font_semibold().child("New folder"))
+      .child(h_flex().h(32).px(10).gap(8).items_center().rounded(6).border(1).border_color(t.input)
+        .child(svg("mods/shepherd/icons/folder.svg").w(14).h(12).flex_none().text_color(t.muted))
+        .child(Input.new(m.folderInput).flex_1().text_size(13))))
+    .child(h_flex().px(18).py(12).gap(8).items_center().justify_end()
+      .child(button("nf-cancel", "Cancel", false, true, () => closeOverlay(props()?.overlay)))
+      .child(button("nf-add", "Add folder", true, ok, () => createFolder(m))));
 }
 
 /** Open questions and open tasks of a space, from its tasks.json. */
@@ -234,15 +249,6 @@ export function renderSidebar(m) {
   };
 
   const rows = [];
-  if (m.newFolder) {
-    rows.push(h_flex().id("new-folder").h(30).px(8).gap(8).items_center().rounded(6).bg(t.popover).border(1).border_color(t.input)
-      .child(svg("mods/shepherd/icons/folder.svg").w(14).h(12).flex_none().text_color(t.muted))
-      // The pane takes a press it isn't stopped from: stop it and focus the field ourselves (as the bar does).
-      .child(div().id("new-folder-input").flex_1()
-        .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); m.folderInput.focus(); })
-        .child(Input.new(m.folderInput).w_full().text_size(13)))
-      .on_key_down((e, cx) => { if (e.key === "escape") { m.newFolder = false; m.folderInput.set_value(""); cx.stop_propagation(); cx.notify(); } }));
-  }
   for (const f of fs) {
     const kids = all.filter((s) => folderOf(s.id) === f.id);
     rows.push(folderRow(f, kids));
