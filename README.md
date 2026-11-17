@@ -68,5 +68,5 @@ keys.json                      the layout:shepherd keys to merge into ~/.config/
 shepherd/                      the Shepherd agent: PROMPT.md, start.sh, workflow.example.json, bin/shep.mjs, bin/load.sh
 agents/                        hc templates for building slices (slice-builder, code-review)
 docs/                          recipe support: conventions, slices, design prototypes
-preview.png                    the layout with a live Shepherd's tasks on the board
+preview.png                    the layout with demo spaces and a real Shepherd run's tasks on the board
 ```
