@@ -8,7 +8,7 @@ import {
 } from "herdr";
 import { MONO, palette } from "./common.js";
 import { KINDS } from "./machines.js";
-import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, shepherdOn, execSafe, failLine, onMachine } from "./ui.js";
+import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, shepherdOn, execSafe, failLine, onMachine, openSetup } from "./ui.js";
 
 const stop = (_e, cx) => cx.stop_propagation();
 
@@ -354,7 +354,9 @@ export function renderNewSpace(m, folders) {
     .when(!canStart, (el) => el.child(h_flex().mx(18).mb(10).gap(10).items_center()
       .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.dim).truncate()
         .child(shep == null ? `Checking whether Shepherd can start on ${where}…` : `Can't start Shepherd on ${where}: ${shep.reason}.`))
-      .when(Boolean(shep?.unreachable) && !scan?.error, (el) => el.child(retryLink))))
+      .when(Boolean(shep?.unreachable) && !scan?.error, (el) => el.child(retryLink))
+      .when(Boolean(shep?.missing && machine), (el) => el.child(div().id("ns-setup").flex_none().text_size(12).text_color(t.accent).cursor_pointer()
+        .on_click((_e, cx) => { delete m.ns.shep[machine]; openSetup(machine); cx.notify(); }).child(`Set up Shepherd on ${machine}…`)))))
     .child(h_flex().px(18).py(12).gap(8).items_center().border_t(1).border_color(t.border)
       .when(!machine, (el) => el.child(div().id("ns-finder").px(10).h(28).flex().items_center().rounded(5).border(1).border_color(t.input).cursor_pointer()
         .text_size(12).hover((s) => s.bg(t.hover))

@@ -10,7 +10,7 @@ import { spaces, terminals, run, closeOverlay, props } from "herdr";
 import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
-import { chip, check, gitFacts, shepherdHome, shepherdOn, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged } from "./ui.js";
+import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, startable, checkStartable, openSetup } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 const MODELS = ["opus", "sonnet", "haiku"];
@@ -207,18 +207,19 @@ export function initSpaceSettings(m, cx, InputState) {
   });
 }
 
+/** Asks again whether start.sh can run on the space's machine (the dialog opening, Retry); the
+ *  answer is shared (ui.js STARTABLE), so the tab bar, the bar and History see it too. */
 function checkShepherd(m, cx, s) {
-  m.ss.shep = null;
-  cx.spawn(async (cx) => {
-    m.ss.shep = await shepherdOn(m, s.machine ?? null).catch((e) => ({ reason: String(e?.message ?? e), unreachable: true }));
-    cx.notify();
-  });
+  m.ss.checking = true;
+  const asked = checkStartable(m, s.machine ?? null, true);
+  cx.spawn(async (cx) => { await asked; m.ss.checking = false; cx.notify(); });
 }
 
-/** Start Shepherd, or why it can't (Retry when the machine didn't answer). */
+/** Start Shepherd, or why it can't, whole (it wraps under the button): Retry when the machine didn't
+ *  answer, Set up Shepherd on <machine> when it has no herdr-shepherd checkout. */
 function startButton(m, t, s) {
-  const shep = m.ss.shep;
-  const busy = Boolean(m.starting?.has(s.id));
+  const shep = m.ss.checking ? null : startable(s.machine ?? null);
+  const busy = m.isStarting(s);
   const ok = Boolean(shep?.dir) && !busy;
   const start = (_e, cx) => {
     if (!ok) return;
@@ -226,15 +227,17 @@ function startButton(m, t, s) {
     cx.notify();
     cx.spawn(async (cx) => { await done; cx.notify(); });
   };
-  return h_flex().gap(10).items_center().min_w(0)
-    .when(shep != null && !shep.dir, (el) => el.child(div().min_w(0).truncate().text_size(11.5).text_color(t.dim)
-      .child(`Can't start here: ${shep.reason}`)))
-    .when(Boolean(shep?.unreachable), (el) => el.child(div().id("ss-retry").flex_none().text_size(12).text_color(t.accent).cursor_pointer()
-      .on_click((_e, cx) => { checkShepherd(m, cx, s); cx.notify(); }).child("Retry")))
-    .child(div().id("ss-start").flex_none().px(10).h(26).flex().items_center().rounded(5).text_size(12).font_semibold()
-      .bg(ok ? t.solid : t.raised).text_color(ok ? t.solid_foreground : t.dim)
-      .when(ok, (el) => el.cursor_pointer()).on_click(start)
-      .child(busy ? "Starting…" : shep == null ? "Checking…" : "Start Shepherd"));
+  const link = (id, label, onClick) => div().id(id).flex_none().text_size(12).text_color(t.accent).cursor_pointer().on_click(onClick).child(label);
+  return v_flex().w_full().min_w(0).gap(6).items_end()
+    .child(h_flex().gap(10).items_center()
+      .when(Boolean(shep?.unreachable), (el) => el.child(link("ss-retry", "Retry", (_e, cx) => { checkShepherd(m, cx, s); cx.notify(); })))
+      .when(Boolean(shep?.missing && s.machine), (el) => el.child(link("ss-setup", `Set up Shepherd on ${s.machine}…`, () => openSetup(s.machine, s.id))))
+      .child(div().id("ss-start").flex_none().px(10).h(26).flex().items_center().rounded(5).text_size(12).font_semibold()
+        .bg(ok ? t.solid : t.raised).text_color(ok ? t.solid_foreground : t.dim)
+        .when(ok, (el) => el.cursor_pointer()).on_click(start)
+        .child(busy ? "Starting…" : shep == null ? "Checking…" : "Start Shepherd")))
+    .when(shep != null && !shep.dir, (el) => el.child(div().w_full().text_size(11.5).line_height(1.4).text_color(t.dim)
+      .child(`Can't start here: ${shep.reason}`)));
 }
 
 const ssSpace = () => spaces().find((x) => x.id === props()?.space) ?? null;

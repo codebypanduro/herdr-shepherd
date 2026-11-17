@@ -5,10 +5,11 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, setShared } from "herdr";
 import { MONO, VIEW, palette } from "./common.js";
 import { answerButton } from "./needs.js";
+import { startAction } from "./start.js";
 
 const WIDTH = 780;
 
-export function renderBar(m) {
+export function renderBar(m, cx) {
   const t = palette();
   const qs = m.questions();
   const q = qs[0];
@@ -48,9 +49,16 @@ export function renderBar(m) {
   const avatar = div().relative().size(32).flex_none().rounded(8).bg(t.accent).text_color(t.accent_foreground)
     .flex().items_center().justify_center().text_size(16).child("✻").child(dot);
 
+  // Without a Shepherd: Start Shepherd (or why not), and the lines that wait for it.
+  const waiting = m.queued(space).length;
+  const waits = waiting ? `${waiting} message${waiting > 1 ? "s" : ""} wait${waiting > 1 ? "" : "s"} for it` : null;
   const sub = sh
-    ? `shepherd · ${space?.name ?? "—"} · ${m.lastEvent() ?? "ready"}`
-    : "no Shepherd in this space · run shepherd/start.sh in a terminal here";
+    ? `shepherd · ${space?.name ?? "—"} · ${waiting ? `sending ${waiting} waiting message${waiting > 1 ? "s" : ""}…` : m.lastEvent() ?? "ready"}`
+    : h_flex().min_w(0).gap(6).items_center()
+      .child(div().flex_none().child(m.isStarting(space) ? "Starting Shepherd" : "no Shepherd in this space"))
+      .child(div().flex_none().child("·"))
+      .child(startAction(m, cx, t, space, "bar-shep", { size: 10.5 }))
+      .when(Boolean(waits), (el) => el.child(div().flex_none().child("·")).child(div().flex_none().text_color(t.blocked).child(waits)));
 
   const main = h_flex().w_full().h(56).px(12).gap(12).items_center()
     .child(avatar)

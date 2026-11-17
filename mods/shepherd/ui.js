@@ -4,7 +4,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, readTextFile, writeTextFile, appHome, openOverlay, closeOverlay, terminals, hc } from "herdr";
+import { exec, readTextFile, writeTextFile, appHome, openOverlay, closeOverlay, terminals, hc, shared, setShared } from "herdr";
 import { MONO, machineOf } from "./common.js";
 
 export const MACHINE_INFO = "shepherd.machineInfo"; // { "<machine name, '' here>": {cpu, mem, disk, kind, model, tools, at, error} }
@@ -13,6 +13,14 @@ export const USAGE = "shepherd.usage"; // { at, by: { "<machine, '' here>": { cl
 export const FOLDERS = "shepherd.folders"; // sidebar folders: [{ id, name, open }]
 export const SPACE_FOLDERS = "shepherd.spaceFolders"; // { space id: folder id }
 export const NEW_SPACE = "shepherd.newSpace"; // New space's pending { folder, real, before, group, start, at }
+export const STARTABLE = "shepherd.startable"; // { "<machine, '' here>": shepherdOn's answer + at }: whether start.sh can run there
+export const STARTING = "shepherd.starting"; // { space id: ms }: start.sh running for that space (any copy)
+export const QUEUED = "shepherd.queued"; // [{ id, space, line, task, at }]: lines written with no Shepherd, sent once one is up
+
+/** Where "Set up Shepherd on <machine>" clones the public repo on another machine (setup.sh), and
+ *  where shepherdOn looks last. */
+export const SETUP_DIR = "~/.herdr-shepherd";
+export const SETUP_REPO = "https://github.com/codebypanduro/herdr-shepherd";
 
 /** A choice chip: the selected one is foreground on background, the others muted on an input border. */
 export const chip = (t, id, label, on, onClick, { mono = true, dim = false } = {}) => div().id(id).h(24).px(9).flex().items_center()
@@ -70,13 +78,13 @@ export async function shepherdHome(m) {
 // them, since an interactive shell can stop on a prompt; read after a __P= sentinel so anything a
 // logout prints is ignored), then a shepherd/ folder with start.sh and
 // bin/shep.mjs, found like shepherdHome (through that machine's mods/shepherd link) or at this
-// checkout's path ($1), then the programs start.sh needs. Prints dir= and path=, or no=<reason>.
+// checkout's path ($1), else in ~/.herdr-shepherd (Set up Shepherd's clone), then the programs start.sh needs. Prints dir= and path=, or no=<reason>.
 const SHEP_CHECK = `lp() { "\${SHELL:-sh}" "$1" 'printf "__P=%s\\n" "$PATH"' 2>/dev/null </dev/null | sed -n 's/^__P=//p' | tail -n 1; }
 has() { ( PATH="$1:$PATH"; for t in node hc claude git; do command -v "$t" >/dev/null 2>&1 || exit 1; done ); }
 P=$(lp -lc); has "$P" || { Q=$(lp -lic); [ -n "$Q" ] && P=$Q; }
 [ -n "$P" ] && PATH="$P:$PATH"
 d=""
-for c in "$HOME/.config/herdr-app/mods/shepherd" "$1/../mods/shepherd"; do
+for c in "$HOME/.config/herdr-app/mods/shepherd" "$1/../mods/shepherd" "$HOME/.herdr-shepherd/mods/shepherd"; do
   x=$(cd -P "$c" 2>/dev/null && cd ../../shepherd 2>/dev/null && [ -f start.sh ] && [ -f bin/shep.mjs ] && pwd -P) && { d=$x; break; }
 done
 [ -n "$d" ] || { echo "no=no herdr-shepherd checkout with shepherd/start.sh there"; exit 0; }
@@ -93,7 +101,39 @@ export async function shepherdOn(m, machine) {
   const r = await execSafe("sh", ["-c", SHEP_CHECK, "check", h?.dir ?? "/nonexistent"], { on: machine, timeout: 15000 });
   const kv = Object.fromEntries((r.stdout ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
   if (kv.dir && kv.path) return { dir: kv.dir, path: kv.path };
-  return kv.no ? { reason: kv.no } : { reason: `couldn't check ${machine}: ${failLine(r)}`, unreachable: true };
+  if (kv.no) return { reason: kv.no, missing: kv.no.startsWith("no herdr-shepherd checkout") };
+  return { reason: `couldn't check ${machine}: ${failLine(r)}`, unreachable: true };
+}
+
+/** shepherdOn's last answer for a machine (null: this computer), shared by every copy: { dir, path }
+ *  or { reason, unreachable, missing }, with `at`; null while never asked. */
+export const startable = (machine) => (shared(STARTABLE) ?? {})[machine ?? ""] ?? null;
+
+/** Asks shepherdOn again when there's no answer or it's old (a yes for 10 minutes, a machine that
+ *  didn't answer for 1, any other no for 5), or with `force` (Retry, a dialog opening, after setup).
+ *  One check per machine at a time per copy. Resolves with the answer. */
+export async function checkStartable(m, machine, force = false) {
+  const key = machine ?? "";
+  const had = startable(machine);
+  const ttl = had?.dir ? 600000 : had?.unreachable ? 60000 : 300000;
+  if (!force && had && Date.now() - had.at < ttl) return had;
+  const busy = (m.checkingStart ??= {});
+  if (busy[key]) return busy[key];
+  busy[key] = shepherdOn(m, machine).catch((e) => ({ reason: String(e?.message ?? e), unreachable: true }))
+    .then((r) => { setShared(STARTABLE, { ...(shared(STARTABLE) ?? {}), [key]: { ...r, at: Date.now() } }); return r; })
+    .finally(() => { delete busy[key]; });
+  return busy[key];
+}
+
+/** "Set up Shepherd on <machine>": mods/shepherd/setup.sh run there (clones SETUP_REPO into
+ *  SETUP_DIR with that machine's login PATH). { ok: <dir> } or { error }. */
+export async function setupShepherd(machine) {
+  const script = await readTextFile(`${appHome()}/mods/shepherd/setup.sh`).catch(() => null);
+  if (!script) return { error: "mods/shepherd/setup.sh is missing here" };
+  const r = await execSafe("sh", ["-c", script, "setup.sh", SETUP_REPO], { on: machine, timeout: 300000 });
+  const kv = Object.fromEntries((r.stdout ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
+  if (kv.ok) return { ok: kv.ok };
+  return { error: kv.no ?? `couldn't reach ${machine}: ${failLine(r)}` };
 }
 
 /** The person's workflow: workflow.json, else the example it starts from ({} when neither reads). */
@@ -160,6 +200,8 @@ export const openNewSpace = (machine = null) => openOverlay({ mod: "shepherd", k
 export const openAddMachine = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 540, height: 600, props: { panel: "addmachine" } });
 export const openSpaceSettings = (id) => openOverlay({ mod: "shepherd", kind: "dialog", width: 600, height: 0.85, props: { panel: "spacesettings", space: id } });
 export const openWorkflow = () => openOverlay({ mod: "shepherd", kind: "dialog", width: 680, height: 0.85, props: { panel: "workflow" } });
+/** The confirm-then-run dialog that clones herdr-shepherd onto a machine (`space`: offer to start its Shepherd after). */
+export const openSetup = (machine, space = null) => openOverlay({ mod: "shepherd", kind: "dialog", width: 540, height: 420, props: { panel: "setup", machine, space } });
 export const openPlus = () => openOverlay({ mod: "shepherd", kind: "popup", width: 210, height: 76, props: { panel: "plus" } });
 export const openMachine = (name, atPointer = false) => openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 236,
   props: { panel: "machine", machine: name ?? null }, ...popAt(atPointer) });

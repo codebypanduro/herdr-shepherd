@@ -149,8 +149,8 @@ function overview(m, task, t) {
     const asked = text.match(new RegExp(`^re ${escRe(id)}:\\s*([\\s\\S]*)$`));
     if (asked) {
       return comment({ who: "you", color: t.foreground, text: asked[1],
-        where: c.failed ? `not kept in the History: ${c.failed}` : c.pending ? "sending…" : ago(c.at, now),
-        whereColor: c.failed ? t.ansi1 : t.dim });
+        where: c.failed ? `not kept in the History: ${c.failed}` : c.queued ? "waits for Shepherd…" : c.pending ? "sending…" : ago(c.at, now),
+        whereColor: c.failed ? t.ansi1 : c.queued ? t.blocked : t.dim });
     }
     // Lines the board sent about this task: one short line each, like the History's ⎿ events.
     return h_flex().gap(8).px(2).items_start().font_family(MONO).text_size(11).text_color(t.muted)

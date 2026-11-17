@@ -7,13 +7,14 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { props, closeOverlay, setShared } from "herdr";
 import { STAGES, KINDS, MONO, VIEW, palette, groupColor, tint } from "./common.js";
 import { answerButton, whyLine, oldRound } from "./needs.js";
+import { startAction } from "./start.js";
 
 const toneOf = (t, result) => (result === "pass" ? t.done : result === "fail" ? t.ansi1 : result === "ask" ? t.blocked : t.working);
 
 /** Every line of the History, sorted by time. */
 export function historyItems(m) {
   const { tasks = [], questions = [], chat = [] } = m.state();
-  const items = chat.map((c) => ({ at: Date.parse(c.at) || 0, kind: c.from === "you" ? "you" : "shepherd", text: c.text, task: c.task ?? null }));
+  const items = [...chat, ...m.queuedChat()].map((c) => ({ at: Date.parse(c.at) || 0, kind: c.from === "you" ? "you" : "shepherd", text: c.text, task: c.task ?? null, queued: Boolean(c.queued) }));
   for (const task of tasks) {
     for (const r of task.history ?? []) {
       const title = STAGES[r.stage]?.title ?? r.stage;
@@ -31,7 +32,7 @@ export function historyItems(m) {
   return items.sort((a, b) => a.at - b.at);
 }
 
-export function renderHistory(m) {
+export function renderHistory(m, cx) {
   const t = palette();
   const p = props() ?? {};
   const items = historyItems(m);
@@ -46,7 +47,8 @@ export function renderHistory(m) {
     if (it.kind === "you") {
       return mono(h_flex().id(`h-${i}`).gap(8).px(10).py(8).rounded(5).bg(t.raised).items_start())
         .child(div().text_color(t.accent).child("❯"))
-        .child(div().flex_1().min_w(0).text_color(t.foreground).child(it.text));
+        .child(div().flex_1().min_w(0).text_color(t.foreground).child(it.text))
+        .when(it.queued, (el) => el.child(div().flex_none().text_size(11).text_color(t.blocked).child("waits for Shepherd")));
     }
     if (it.kind === "shepherd") {
       return mono(h_flex().id(`h-${i}`).gap(8).items_start())
@@ -88,7 +90,10 @@ export function renderHistory(m) {
       .child(div().size(7).rounded(4).bg(t[status] ?? t.idle)
         .when(status === "working", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 })))
       .child(div().font_semibold().child(`Shepherd · ${m.space()?.name ?? "—"}`))
-      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${sh?.address ?? "not running"} · ${items.length} messages`))
+      .when(Boolean(sh), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${sh.address} · ${items.length} messages`)))
+      .when(!sh, (el) => el.child(h_flex().flex_1().min_w(0).gap(6).items_center().text_color(t.dim)
+        .child(div().flex_none().child(m.isStarting(m.space()) ? "starting ·" : "not running ·"))
+        .child(startAction(m, cx, t, m.space(), "h-shep"))))
       .when(waiting > 0, (el) => el.child(div().id("h-waiting").px(8).py(2).rounded(10).cursor_pointer()
         .bg(tint(t.blocked, 0.14)).text_color(t.blocked).text_size(11)
         .on_click(() => { setShared(VIEW, "needs"); close(); })
