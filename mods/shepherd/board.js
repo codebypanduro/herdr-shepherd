@@ -65,6 +65,8 @@ export function renderBoard(m) {
       .on_mouse_move((e) => trackPeek(m, c, e))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); steer(); })
       .on_click(() => {
+        // Opening the detail shifts the board under the pointer, and no hover-out follows: close here.
+        closePeek(m);
         m.kf = c.key;
         setShared(SELECTED, isSel ? null : c.key);
         // Task cards open the detail pane; a label-only card has no task to show.

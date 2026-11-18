@@ -21,7 +21,7 @@ import { peekedKey, closePeek } from "./peek.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
 import { renderDetail, TAB, TABS } from "./detail.js";
-import { initTerm, syncTerm, stopTerm } from "./term.js";
+import { initTerm, syncTerm, stopTerm, termAddress } from "./term.js";
 import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
 import { loadPr, loadProof } from "./ship.js";
 import { renderTabBar, renderCloseTab } from "./tabbar.js";
@@ -475,7 +475,9 @@ export default class Shepherd extends View {
 
   /** A card from a task in tasks.json. Its live agent's status wins over the file's. */
   taskCard(task, byAddress, asked) {
-    const term = task.terminal ? byAddress.get(task.terminal) : null;
+    // tasks.json names the agent as its own machine knows it (t1r5); here a remote one is macmini/t1r5.
+    const address = termAddress(this, task);
+    const term = address ? byAddress.get(address) : null;
     const live = term && term.state === "live" ? term.status : null;
     let status = TASK_STATUS[task.status] ?? "idle";
     if (task.status === "working" && (live === "blocked" || live === "working")) status = live;
@@ -501,7 +503,7 @@ export default class Shepherd extends View {
       : task.status === "queued" && task.stage === "tickets" ? "ready-for-agent"
       : (last?.note || (term?.report ?? "") || task.status);
     return {
-      address: task.terminal ?? null,
+      address,
       live: term?.state === "live",
       key: `task-${task.id}`,
       id: task.id,
@@ -808,6 +810,9 @@ export default class Shepherd extends View {
    *  `name`: what the footer calls a terminal that's neither Shepherd nor a task's (a tab's name). */
   openTerminal(address, taskId, name = null) {
     if (!address) return;
+    // A bare address (as tasks.json writes it) is on the shown space's machine.
+    const machine = this.space()?.machine ?? null;
+    if (machine && !String(address).includes("/")) address = `${machine}/${address}`;
     const bar = (panel, px) => ({ type: "block", size: { px }, content: { mod: "shepherd", props: { panel, terminal: address, task: taskId, name } } });
     openOverlay({
       kind: "window", key: TERM_WINDOW, width: 900, height: 640,

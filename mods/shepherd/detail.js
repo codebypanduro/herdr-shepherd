@@ -9,7 +9,7 @@ import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageG
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
-import { renderTerm, termBlocked } from "./term.js";
+import { renderTerm, termBlocked, termAddress } from "./term.js";
 
 export { TAB, TABS, currentTab };
 const TAB_TITLES = { overview: "Overview", review: "Review", changes: "Changes", files: "Files", proof: "Proof", terminal: "Terminal" };
@@ -63,7 +63,7 @@ export function renderDetail(m) {
         div().id("detail-term").px(7).h(20).flex().items_center().rounded(5).bg(t.raised).cursor_pointer()
           .font_family(MONO).text_size(11).text_color(t.foreground)
           .hover((s) => s.bg(t.hover))
-          .on_click(() => run("terminal.peek", { terminal: task.terminal }))
+          .on_click(() => run("terminal.peek", { terminal: termAddress(m, task) }))
           .child(`▭ ${task.terminal}`))))
     .when(Boolean(task.worktree), (el) => el.child(
       div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
