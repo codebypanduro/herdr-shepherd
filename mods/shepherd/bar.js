@@ -54,9 +54,9 @@ export function renderBar(m) {
       .flex().items_center().justify_center().child(programIcon(t, sh.program, 20))
     : div().relative().size(32).flex_none().rounded(8).bg(t.accent).text_color(t.accent_foreground)
       .flex().items_center().justify_center().text_size(16).child("✻"))
-    .id("bar-avatar").cursor_pointer().tooltip(sh ? `Shepherd · ${sh.program?.name ?? "agent"} (⌘J)` : "Shepherd")
+    .id("bar-avatar").cursor_pointer().tooltip(sh ? `Shepherd · ${sh.program?.name ?? "agent"}: open its terminal` : "Shepherd")
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-    .on_click(() => m.toggleHistory(true))
+    .on_click(() => { if (sh) m.openTerminal(sh.address, null, "Shepherd"); })
     .child(dot);
 
   // Without a Shepherd: Start Shepherd (or why not), and the lines that wait for it.
@@ -85,7 +85,8 @@ export function renderBar(m) {
         .child(Input.new(m.barInput).w_full().h(24).text_size(15).text_color(t.foreground)))
       .child(div().id("bar-sub").truncate().font_family(MONO).text_size(10.5).text_color(t.dim).cursor_pointer()
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click(() => m.toggleHistory(true))
+        // Shepherd's own terminal (Claude as it runs); History stays on its button and ⌘J.
+        .on_click(() => { if (sh) m.openTerminal(sh.address, null, "Shepherd"); else m.toggleHistory(true); })
         .child(sub)))
     .child(h_flex().id("bar-history").flex_none().h(32).px(10).gap(6).items_center().rounded(8).cursor_pointer()
       .border(1).border_color(t.input).text_size(12).text_color(t.foreground)
