@@ -20,7 +20,8 @@ import { renderBoard } from "./board.js";
 import { peekedKey, closePeek } from "./peek.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
-import { renderDetail, TAB, TABS } from "./detail.js";
+import { renderDetail, TAB, TABS, currentTab } from "./detail.js";
+import { syncTerm, stopTerm, sendTerm } from "./term.js";
 import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
 import { loadPr, loadProof } from "./ship.js";
 import { renderTabBar, renderCloseTab } from "./tabbar.js";
@@ -112,6 +113,13 @@ export default class Shepherd extends View {
       this.askTask = null; // the task the field's text is for
       this.askDrafts = {}; // task id -> unsent text, kept when another task is opened
       this.askPending = []; // lines sent here that chat.jsonl doesn't hold yet, shown at once
+      // The Terminal tab (term.js): its scroll, kept at the bottom, and "Type to <address>…".
+      this.termScroll = ScrollHandle.new();
+      this.termInput = InputState.new({ placeholder: "" });
+      this.termInput.on("submit", (_e, cx) => sendTerm(this, cx));
+      this.termInput.on("change", (_e, cx) => cx.notify());
+      this.termInput.on("focus", () => { this.termFocused = true; });
+      this.termInput.on("blur", () => { this.termFocused = false; });
     }
     if (p.panel === "spaces") initSidebar(this, cx, InputState);
     if (p.panel === "addmachine") initAddMachine(this, cx, InputState);
@@ -171,6 +179,7 @@ export default class Shepherd extends View {
     if (p.panel === "history" && shared(HISTORY_OPEN) === p.overlay) setShared(HISTORY_OPEN, null);
     if (p.panel === "steer" && shared(STEER_OPEN) === p.overlay) setShared(STEER_OPEN, null);
     closePeek(this);
+    stopTerm(this);
   }
 
   // ---- where things are ----------------------------------------------------------------
@@ -882,7 +891,7 @@ export default class Shepherd extends View {
     return true;
   }
 
-  /** 1–5: the open task's tabs. */
+  /** 1–6: the open task's tabs. */
   detailTab(k) {
     const tab = TABS[Number(k) - 1];
     if (!tab || typeof shared(SELECTED) !== "string") return false;
@@ -1001,7 +1010,7 @@ export default class Shepherd extends View {
       return;
     }
     const sel = shared(SELECTED);
-    if (["1", "2", "3", "4", "5"].includes(k)) { if (this.detailTab(k)) done(); return; }
+    if (["1", "2", "3", "4", "5", "6"].includes(k)) { if (this.detailTab(k)) done(); return; }
     // The peek's footer names S / T / ↵: those act on the peeked card and close the peek; j/k and Esc
     // close it too (the keyboard moved on). P, A and key commands keep to the keyboard focus.
     const peeked = peekedKey(this);
@@ -1171,13 +1180,15 @@ export default class Shepherd extends View {
       // The task's body starts at once, still inside render, where cx.notify() is refused: let the
       // foreground executor run it after this frame (cx.sleep), then switch and redraw.
       if ((task?.id ?? null) !== this.askTask) cx.spawn(async (cx) => { await cx.sleep(0); this.askFor(this.selectedTask()?.id ?? null); cx.notify(); });
+      // The Terminal tab reads the agent's screen only while it's shown (term.js).
+      syncTerm(this, task, currentTab(), cx, currentTab);
       // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too), never
       // while typing in the Ask field: its keys bubble up here. A click in the field stops there
       // (detail.js), so this one doesn't take the keyboard from it.
       return renderDetail(this).track_focus(this.keys)
         .on_mouse_down("left", () => this.keys.focus())
         .on_key_down((e, cx) => {
-          if (this.askFocused) return;
+          if (this.askFocused || this.termFocused) return;
           if (!e.modifiers?.platform && !e.modifiers?.control && this.detailTab(e.key)) cx.stop_propagation();
         });
     }

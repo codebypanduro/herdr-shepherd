@@ -1,5 +1,6 @@
-// Task detail: header, worktree line and five tabs (Overview, Review, Changes, Files, Proof).
-// Changes and Files come from git in the task's worktree (see git.js); the rest is tasks.json.
+// Task detail: header, worktree line and six tabs (Overview, Review, Changes, Files, Proof, Terminal).
+// Changes and Files come from git in the task's worktree (see git.js), Terminal mirrors the task's
+// agent (term.js); the rest is tasks.json.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
@@ -8,10 +9,13 @@ import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, 
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
+import { renderTerm, termBlocked } from "./term.js";
 
 export const TAB = "shepherd.detailTab";
-export const TABS = ["overview", "review", "changes", "files", "proof"];
-const TAB_TITLES = { overview: "Overview", review: "Review", changes: "Changes", files: "Files", proof: "Proof" };
+export const TABS = ["overview", "review", "changes", "files", "proof", "terminal"];
+const TAB_TITLES = { overview: "Overview", review: "Review", changes: "Changes", files: "Files", proof: "Proof", terminal: "Terminal" };
+/** The open task's tab (shared, so the board's 1–6 keys switch it too). */
+export const currentTab = () => (TABS.includes(shared(TAB)) ? shared(TAB) : "overview");
 const BUILD = ["implement", "review", "ci", "proof"];
 
 export { tint };
@@ -37,7 +41,7 @@ export function renderDetail(m) {
     return root.items_center().justify_center()
       .child(div().text_color(t.dim).child("Pick a task on the board."));
   }
-  const tab = TABS.includes(shared(TAB)) ? shared(TAB) : "overview";
+  const tab = currentTab();
   const runs = task.history ?? [];
   const tokens = runTokens(runs);
   const color = groupColor(t, stageGroup(task.stage));
@@ -74,12 +78,15 @@ export function renderDetail(m) {
       .hover((s) => s.bg(t.hover))
       .on_click(() => setShared(TAB, k))
       .child(TAB_TITLES[k])
+      // The agent waits on the person (a permission or trust prompt): an amber dot on Terminal.
+      .when(k === "terminal" && termBlocked(m, task), (el) => el.child(div().size(6).rounded(3).bg(t.blocked)))
       .child(div().font_family(MONO).text_size(10).text_color(t.dim).child(String(i + 1)))));
 
   const body = tab === "overview" ? overview(m, task, t)
     : tab === "review" ? review(task, t)
     : tab === "changes" ? renderChanges(m, task, t)
     : tab === "files" ? renderFiles(m, task, t)
+    : tab === "terminal" ? renderTerm(m, task, t)
     : renderProof(m, task, t);
 
   return root.child(header).child(tabs).child(body);

@@ -61,7 +61,7 @@ Each group's label sits above its first column, and the column header (title and
 **Task detail pane.**
 - Header: id, title and ✕; under them a stage chip in its group color (merge icon for Ready to merge, ✓ for Done), "loop 2/3" (build-loop stages), the task's tokens ("126k tokens", once a run recorded any), and a terminal chip (▭ t6; click peeks at it).
 - Worktree line: ⑂ branch · machine:~/.herdr/worktrees/<repo>/<branch>.
-- Tabs (switch with 1–5): **Overview · Review · Changes · Files · Proof**.
+- Tabs (switch with 1–6): **Overview · Review · Changes · Files · Proof · Terminal**.
   - **Overview**:
     - First, each open question of the task (not a merge question: that's the PR card's), drawn and answered exactly as its Needs you card (`questionCard` in needs.js): kind, text, asker, the ticket list for approve, the options with the recommended one, why, and a reply field.
     - Ready-to-merge tasks start with a PR card: PR number (or "Local merge · no remote"), branch → main, diff size, every GitHub check with its time, Shepherd's CI and Proof results, then **Squash and merge** and **Send back** (once Shepherd has asked) and "Open on GitHub ↗".
@@ -75,6 +75,7 @@ Each group's label sits above its first column, and the column header (title and
   - **Changes**: the list of changed files (+/−) on the left, a unified diff on the right.
   - **Files**: the worktree's file tree (folders first, ▸/▾), with a small mark per row colored by extension (grey for folders). Changed files are marked A/M. Clicking a file shows it with line numbers and its added lines highlighted.
   - **Proof**: the headless-browser checks (✓/✕ with a note), a grid of 260px screenshots, and an "Open <recording>" button.
+  - **Terminal** (`term.js`, an extra, not in the design): a live mirror of the task's agent terminal (`task.terminal`; `<machine>/<t>` in a space on another machine), since a mod can't hold a real terminal. Its whole screen from `hc read`, ANSI stripped, mono 11.5px on `background`, one row per screen line (Claude's input box and prompts kept, so a folder-trust or permission dialog shows), scrolled to the bottom. It reads at once and every 1 s while the tab is shown and the terminal is live, never otherwise: the detail's render only notices what to mirror and a task after the frame starts or stops the timer; the timer stops itself when a redraw it asked for never came (the pane was hidden; `close()` isn't called for that), and `close()` stops it. Under the screen, key buttons ↑ ↓ Enter Esc Tab 1 2 (`hc keys <address> <key>`, then a read at once), a read or key error in red, and **Open terminal ↗** (the terminal window, as T). Last, a field like the Ask field, "Type to <address>…" + **Send** (Enter or Send: `hc send <address> <text>`, which waits for a draft the person is typing in that terminal; "Sending…" meanwhile, the text comes back on failure, and while the agent is blocked hc refuses it and the tab says to answer with the keys; another task starts with it empty; 1–6 don't switch tabs while typing in it). No terminal: "No agent runs for T-2 right now."; an ended one: "<address> has ended" with the last lines read, dimmed, and Open terminal ↗. The Terminal tab carries a 6px amber dot while the agent's status is blocked (a permission or trust prompt).
 
 **Floating Shepherd bar.** A floating block on `work`, bottom center, 780px wide; Herdr places it (its floating inset) and draws its frame.
 - When questions are open, a top strip with an amber line under it shows the oldest one: its task id, the question, and up to 3 answer buttons (the recommended one marked; short ones like Merge / Send back on the question's line, longer ones like a grilling question's on a row under it, shrunk with … to fit the bar, full text on hover), or **Answer…** (opens Needs you) when it has no options, and an amber "N waiting" chip (opens Needs you) when there are more.
@@ -136,7 +137,7 @@ Each group's label sits above its first column, and the column header (title and
 - C new task (the bar takes the keyboard with "add " typed)
 - D digest (again: closes it)
 - N new space, F new folder (shows the sidebar if hidden), W workflow settings, U weekly usage
-- 1–5 task tabs
+- 1–6 task tabs
 - Esc closes the top overlay
 - ⌘⇧D digest, ⌘⌥1–4 the four views, ↓ / ↑ like J / K: not in the design, added for this build
 - R reply to the next question: Needs you with the keyboard in the oldest question's reply field (also `shepherd.reply`)
