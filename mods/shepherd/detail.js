@@ -4,12 +4,12 @@
 
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { run, setShared, terminals } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens } from "./common.js";
+import { run, setShared } from "herdr";
+import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens, stateColor, sectionHeading } from "./common.js";
 import { renderChanges, renderFiles, fileIcon, worktreeOf } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
-import { renderTerm, termBlocked } from "./term.js";
+import { renderTerm, termBlocked, termState } from "./term.js";
 import { shepherdMark, programIcon } from "./start.js";
 
 export { TAB, TABS, currentTab };
@@ -27,31 +27,10 @@ export function closeDetail() {
 
 /** Where the task's worktree is, as the design words it before and after: none yet for plan
  *  stages and queued tickets, "merged · worktree removed" once done. */
-export function worktreeLine(m, task) {
+function worktreeLine(m, task) {
   if (task.stage === "done") return { branch: task.branch ?? "merged", path: "merged · worktree removed", active: false };
   if (!task.worktree) return { branch: "no worktree yet", path: "one is made when the ticket starts", active: false };
   return { branch: task.branch ?? "—", path: `${m.space()?.machine ?? "this mac"}:${task.worktree}`, active: true };
-}
-
-/** What the stage chip and the timeline's last total say about where the task is now:
- *  done, stuck, waiting on you, or how long it's been in its stage. */
-function nowState(m, task) {
-  const asked = m.questions().some((q) => q.task === task.id);
-  const card = m.taskCard(task, new Map(terminals().map((x) => [x.address, x])), asked);
-  const stage = STAGES[task.stage]?.title ?? task.stage;
-  // Since the stage's run started; a stage with no run of its own (Ready to merge) counts from
-  // the last run's end.
-  const runs = task.history ?? [];
-  const own = runs.some((r) => r.stage === task.stage);
-  const since = own ? card.since : Date.parse(runs[runs.length - 1]?.end ?? "") || null;
-  const inStage = since ? `${mins((Date.now() - since) / 60000)} in ${stage}` : stage;
-  if (task.stage === "done") return { kind: "done", text: "done" };
-  if (task.status === "queued") return { kind: "queued", text: "queued" };
-  if (task.status === "parked") return { kind: "parked", text: "parked" };
-  if (card.stuck) return { kind: "stuck", text: `stuck · ${inStage}` };
-  if (asked || task.status === "blocked" || card.status === "blocked") return { kind: "waiting", text: `waiting on you · ${inStage}` };
-  if (task.status === "paused") return { kind: "paused", text: `paused · ${inStage}` };
-  return { kind: "working", text: inStage };
 }
 
 export function renderDetail(m) {
@@ -65,25 +44,29 @@ export function renderDetail(m) {
   const tab = currentTab();
   const runs = task.history ?? [];
   const tokens = runTokens(runs);
-  const now = nowState(m, task);
+  const where = m.taskNow(task);
   // The design's chip: 12% fill, 45% edge, in the group's color, amber while it waits on you.
-  const color = now.kind === "waiting" && stageGroup(task.stage) !== "ship" ? t.blocked : groupColor(t, stageGroup(task.stage));
+  const color = where.kind === "waiting" && stageGroup(task.stage) !== "ship" ? t.blocked : groupColor(t, stageGroup(task.stage));
   const stageIcon = task.stage === "merge" ? "⑃ " : task.stage === "done" ? "✓ " : "";
-  const skill = m.settings().stages?.[task.stage]?.skill ?? STAGES[task.stage]?.skill ?? "";
+  const skill = m.skillOf(task.stage);
   const loopText = BUILD.includes(task.stage) ? `loop ${task.loop ?? 1}/${Math.max(task.maxLoops ?? 3, task.loop ?? 1)}`
     : stageGroup(task.stage) === "plan" ? skill : "";
   const wt = worktreeLine(m, task);
   const meta = (text) => div().flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(text);
 
-  // The agent's terminal: opens the terminal window (as T does); "no agent" greyed without one.
+  // The agent's terminal: a live one opens the terminal window (as T does); greyed when there's none
+  // ("no agent") or it isn't running (its address, ended).
+  const term = termState(m, task);
+  const live = term.state === "live";
   const termChip = h_flex().id("detail-term").flex_none().h(24).px(8).gap(6).items_center().rounded(5)
     .border(1).border_color(t.input).font_family(MONO).text_size(11)
-    .text_color(task.terminal ? t.foreground : t.dim)
-    .tooltip(task.terminal ? "Open terminal (T)" : "No agent running")
-    .when(Boolean(task.terminal), (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
+    .text_color(live ? t.foreground : t.dim)
+    .tooltip(live ? "Open terminal (T)" : term.state === "none" ? "No agent running"
+      : term.state === "unknown" ? `${task.terminal} isn't running` : `${task.terminal} has ended`)
+    .when(live, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
       .on_click(() => m.openTerminal(task.terminal, task.id)))
-    .child(div().w(12).h(9).rounded(2).border(1).border_color(task.terminal ? t.muted : t.dim))
-    .child(task.terminal ?? "no agent");
+    .child(div().w(12).h(9).rounded(2).border(1).border_color(live ? t.muted : t.dim))
+    .child(term.state === "none" ? "no agent" : live ? task.terminal : `${task.terminal} · ended`);
 
   const header = v_flex().flex_none().px(14).pt(12).pb(9).gap(6)
     .child(h_flex().gap(10).items_start()
@@ -124,7 +107,7 @@ export function renderDetail(m) {
       .when(k === "terminal" && termBlocked(m, task), (el) => el.child(div().size(6).rounded(3).bg(t.blocked)))
       .child(div().font_family(MONO).text_size(10).text_color(t.dim).child(String(i + 1)))));
 
-  const body = tab === "overview" ? overview(m, task, t, now)
+  const body = tab === "overview" ? overview(m, task, t, where)
     : tab === "review" ? review(task, t)
     : tab === "changes" ? renderChanges(m, task, t)
     : tab === "files" ? renderFiles(m, task, t)
@@ -136,7 +119,8 @@ export function renderDetail(m) {
 
 // ---- Overview ------------------------------------------------------------------------------
 
-const RESULT_COLOR = (t, r) => (r === "pass" ? t.done : r === "fail" ? t.ansi1 : r === "ask" ? t.blocked : t.working);
+/** A run's color by its result; an open run (no result yet) is running. */
+const resultColor = (t, r) => stateColor(t, !r ? "running" : r, t.working);
 
 /** A timeline segment's tooltip, as the design: "Loop 2 · Code review · fail · 12m · 45k tokens · opus — 1 finding".
  *  Plan stages have no loop; a running stage reads "run"; the model goes with the tokens (no $). */
@@ -159,7 +143,7 @@ const ROLES = (t) => ({
 });
 
 /** Which agent a model runs in: Codex for codex/gpt models, else Claude Code; null with no model. */
-export const agentOf = (model) => (!model ? null : /codex|gpt/i.test(model) ? "codex" : "claude");
+const agentOf = (model) => (!model ? null : /codex|gpt/i.test(model) ? "codex" : "claude");
 
 /** A comment's 22px avatar: the agent's icon (Claude Code, Codex, or the Shepherd terminal's own
  *  program) with a corner in the role's color, else the role's initial on its color. */
@@ -178,16 +162,13 @@ function avatar(t, role, { model = null, program = null } = {}) {
       .border(2).border_color(t.surface).bg(color)));
 }
 
-const STATE_COLOR = (t, s) => (s === "resolved" || s === "approved" ? t.done : s === "fixing" ? t.working : t.blocked);
-
-function overview(m, task, t, nowSt) {
+function overview(m, task, t, where) {
   const now = Date.now();
   const runs = task.history ?? [];
   const total = runs.reduce((n, r) => n + ms(r, now), 0) || 1;
   const tokens = runTokens(runs);
   const findings = task.findings ?? [];
   const open = findings.filter((f) => f.state !== "resolved").length;
-  const skillOf = (stage) => m.settings().stages?.[stage]?.skill ?? STAGES[stage]?.skill ?? "";
   const shepherd = m.shepherd();
 
   // Timeline: one segment per stage run, flexed by its share of the time (2% floor), tinted in
@@ -204,7 +185,7 @@ function overview(m, task, t, nowSt) {
     ? h_flex().h(22).px(5).items_center().rounded(3).border(1).border_color(t.border).bg(t.raised)
       .font_family(MONO).text_size(10).text_color(t.dim).child("not started")
     : h_flex().h(22).gap(2).children(segs.map((s) => {
-      const c = RESULT_COLOR(t, s.r.result);
+      const c = resultColor(t, s.r.result);
       return cell(s).id(`seg-${s.i}`).h_full().flex().items_center().px(5).overflow_hidden().rounded(3)
         .bg(tint(c, 0.22)).border(1).border_color(tint(c, 0.55))
         .tooltip(segmentTitle(s.r, now))
@@ -212,12 +193,12 @@ function overview(m, task, t, nowSt) {
         .when(s.share > 0.07, (el) => el.child(div().min_w(0).truncate().font_family(MONO).text_size(10).text_color(t.foreground)
           .child(`${SHORT[s.r.stage] ?? s.r.stage} ${mins(ms(s.r, now) / 60000)}`)));
     }));
-  const marks = h_flex().h(14).gap(2).children(segs.map((s) => cell(s).flex().items_end()
-    .font_family(MONO).text_size(10).text_color(t.muted).child(s.mark)));
-  const nowColor = nowSt.kind === "stuck" ? t.ansi1 : nowSt.kind === "waiting" ? t.blocked : nowSt.kind === "done" ? t.done : t.muted;
+  // A mark stays inside its part's first cell (clipped there), so it never runs into the next one.
+  const marks = h_flex().h(14).gap(2).children(segs.map((s) => cell(s).flex().items_end().overflow_hidden()
+    .font_family(MONO).text_size(10).text_color(t.muted).child(div().min_w(0).whitespace_nowrap().child(s.mark))));
 
   // One comment: avatar, who, "model · skill", "loop n", a state chip, a file:line chip, the text.
-  const comment = ({ role, model = null, program = null, sub = null, loop = null, state = null, file = null, line = null, text, fg = t.foreground, subColor = t.dim }) => {
+  const comment = ({ role, model = null, program = null, sub = null, loop = null, state = null, file = null, line = null, chipId = null, text, fg = t.foreground, subColor = t.dim }) => {
     const [name] = ROLES(t)[role] ?? [role];
     return h_flex().gap(10).py(10).items_start().border_t(1).border_color(t.border)
       .child(avatar(t, role, { model, program }))
@@ -228,21 +209,21 @@ function overview(m, task, t, nowSt) {
           .when(loop != null, (el) => el.child(div().font_family(MONO).text_size(11).text_color(t.dim).child(`loop ${loop}`)))
           .child(div().flex_1())
           .when(Boolean(state), (el) => el.child(div().px(7).h(18).flex().items_center().rounded(9).border(1)
-            .border_color(STATE_COLOR(t, state)).text_size(10.5).text_color(STATE_COLOR(t, state)).child(state))))
-        .when(Boolean(file), (el) => el.child(fileChip(m, task, t, file, line)))
+            .border_color(stateColor(t, state)).text_size(10.5).text_color(stateColor(t, state)).child(state))))
+        .when(Boolean(file), (el) => el.child(fileChip(m, task, t, file, line, chipId)))
         .child(div().text_size(13).line_height(1.5).text_color(fg).child(text)));
   };
   const modelSub = (role, stage, model) => {
-    const skill = role === "implementer" ? "" : skillOf(stage);
+    const skill = role === "implementer" ? "" : m.skillOf(stage);
     return [model, skill.startsWith("/") ? skill : ""].filter(Boolean).join(" · ") || null;
   };
 
   const comments = [
     ...runs.filter((r) => r.note).map((r) => {
       const role = r.stage === "merge" ? "shepherd" : ROLE[r.stage] ?? r.stage;
-      // A failed run is open until a later loop runs; a passed review is approved.
-      const later = runs.some((x) => (x.loop ?? 1) > (r.loop ?? 1));
-      const state = r.result === "fail" ? (later ? "resolved" : "open") : r.result === "pass" && r.stage === "review" ? "approved" : null;
+      // As the design: only a passed review gets a chip on a run's note ("approved"); findings carry
+      // their own open / fixing / resolved.
+      const state = r.result === "pass" && r.stage === "review" ? "approved" : null;
       return {
         at: Date.parse(r.end ?? r.start ?? "") || 0,
         el: comment({ role, model: r.model, sub: modelSub(role, r.stage, r.model),
@@ -255,13 +236,13 @@ function overview(m, task, t, nowSt) {
       at: Date.parse(c.at) || now,
       el: chatComment(c, task.id, now),
     })),
-    ...findings.map((f) => {
+    ...findings.map((f, i) => {
       // Findings carry no time: place each just after the review run that found it.
       const rev = runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0];
       return {
         at: (Date.parse(rev?.end ?? "") || 0) + 1,
         el: comment({ role: "reviewer", model: rev?.model, sub: modelSub("reviewer", "review", rev?.model),
-          loop: f.loop ?? 1, state: f.state, file: f.file, line: f.line, text: f.text }),
+          loop: f.loop ?? 1, state: f.state, file: f.file, line: f.line, chipId: `fchip-${f.id ?? i}`, text: f.text }),
       };
     }),
   ].sort((a, b) => a.at - b.at).map((c) => c.el);
@@ -283,7 +264,7 @@ function overview(m, task, t, nowSt) {
       .child(div().flex_none().text_color(t.dim).child(ago(c.at, now)));
   }
 
-  const heading = (text) => div().text_size(11).text_color(t.dim).child(text);
+  const heading = (text) => sectionHeading(t, text);
 
   // 120px under the Ask field: the floating bar covers the pane's bottom, and the field is last.
   return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).pt(16).pb(120).gap(18)
@@ -300,7 +281,8 @@ function overview(m, task, t, nowSt) {
         .child(h_flex().flex_wrap().gap(14).font_family(MONO).text_size(11).text_color(t.muted)
           .when(runs.length > 0, (el) => el.child(`${mins(total / 60000)} total`))
           .when(tokens > 0, (el) => el.child(`${kTokens(tokens)} tokens`))
-          .child(div().text_color(nowColor).child(nowSt.text)))))
+          // stuck red, waiting on you amber, done green; the plain time in stage muted.
+          .child(div().text_color(["stuck", "waiting", "done"].includes(where.kind) ? stateColor(t, where.kind) : t.muted).child(where.text)))))
     .child(v_flex()
       .child(h_flex().gap(10).pb(8).items_center()
         .child(heading("COMMENTS"))
@@ -311,12 +293,15 @@ function overview(m, task, t, nowSt) {
     .child(askField(m, task, t));
 }
 
-/** A finding's file:line as a chip that opens it: in Changes when the task changed it, else in Files. */
-function fileChip(m, task, t, file, line) {
-  return h_flex().id(`fchip-${file}-${line ?? ""}`).self_start().gap(6).px(7).py(2).items_center().rounded(4)
-    .bg(t.raised).cursor_pointer().hover((s) => s.bg(t.hover))
-    .font_family(MONO).text_size(11).text_color(t.accent)
-    .on_click((_e, cx) => { m.openFileAt(task, file); cx.notify(); })
+/** A finding's file:line as a chip that opens it: in Changes when the task changed it, else in Files
+ *  (the design always goes to Changes; a file review flagged but the task didn't change has no diff).
+ *  Without a worktree (not made, or removed once Done) it's only a label. */
+function fileChip(m, task, t, file, line, id) {
+  const open = Boolean(worktreeOf(task));
+  return h_flex().id(id).self_start().gap(6).px(7).py(2).items_center().rounded(4).bg(t.raised)
+    .font_family(MONO).text_size(11).text_color(open ? t.accent : t.muted)
+    .when(open, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { m.openFileAt(task, file); cx.notify(); }))
     .child(fileIcon(t, file))
     .child(`${file}${line ? `:${line}` : ""}`);
 }
@@ -374,10 +359,12 @@ function review(task, t) {
   const findings = task.findings ?? [];
   const runs = task.history ?? [];
   const cur = task.loop ?? 1;
-  const loops = Array.from({ length: Math.max(cur, ...findings.flatMap((f) => (f.history ?? []).map((x) => x.loop))) }, (_, i) => i + 1);
-  const cellColor = (s) => (s === "fixed" ? t.done : s === "fixing" ? t.working : s === "found" ? t.ansi1 : s === "still open" ? t.blocked : t.dim);
+  // A column for every loop up to the current one or the last a finding was found or changed in.
+  const last = Math.max(cur, ...findings.flatMap((f) => [f.loop ?? 1, ...(f.history ?? []).map((x) => x.loop)]));
+  const loops = Array.from({ length: last }, (_, i) => i + 1);
+  const cellColor = (s) => stateColor(t, s, t.dim);
   const fixed = findings.filter((f) => f.state === "resolved").length;
-  const heading = (text) => div().text_size(11).text_color(t.dim).child(text);
+  const heading = (text) => sectionHeading(t, text);
 
   // The grid: a finding column, then one per loop; the current loop's column is shaded.
   const COLW = 112;

@@ -512,7 +512,7 @@ export default class Shepherd extends View {
       title: task.title ?? task.id,
       stage: STAGES[task.stage] ? task.stage : "spec",
       // The workflow's skill for the stage where it names one (Grill: /grill-me when picked).
-      skill: this.settings().stages?.[task.stage]?.skill ?? STAGES[task.stage]?.skill ?? "",
+      skill: this.skillOf(task.stage),
       loop: Math.max(1, task.loop ?? 1),
       maxLoops: Math.max(1, task.maxLoops ?? MAX_LOOPS),
       status,
@@ -525,6 +525,31 @@ export default class Shepherd extends View {
       paused: task.status === "paused",
       task,
     };
+  }
+
+  /** The workflow's skill for a stage where it names one (Grill: /grill-me when picked), else the default. */
+  skillOf(stage) { return this.settings().stages?.[stage]?.skill ?? STAGES[stage]?.skill ?? ""; }
+
+  /** Where a task is now, for the detail's stage chip and the timeline's last total: done, queued,
+   *  parked, waiting on you (a question, or its agent on a prompt), stuck, paused, or working; with
+   *  how long it's been in its stage. A stage with no run of its own (Ready to merge) counts from
+   *  the last run's end. Builds only this task's card. */
+  taskNow(task) {
+    const address = termAddress(this, task);
+    const x = address ? terminals().find((y) => y.address === address) : null;
+    const asked = this.questions().some((q) => q.task === task.id);
+    const card = this.taskCard(task, new Map(x ? [[address, x]] : []), asked);
+    const stage = STAGES[task.stage]?.title ?? task.stage;
+    const runs = task.history ?? [];
+    const since = runs.some((r) => r.stage === task.stage) ? card.since : Date.parse(runs[runs.length - 1]?.end ?? "") || null;
+    const inStage = since ? `${mins((Date.now() - since) / 60000)} in ${stage}` : stage;
+    if (task.stage === "done") return { kind: "done", text: "done" };
+    if (task.status === "queued") return { kind: "queued", text: "queued" };
+    if (task.status === "parked") return { kind: "parked", text: "parked" };
+    if (asked || task.status === "blocked" || card.status === "blocked") return { kind: "waiting", text: `waiting on you · ${inStage}` };
+    if (card.stuck) return { kind: "stuck", text: `stuck · ${inStage}` };
+    if (task.status === "paused") return { kind: "paused", text: `paused · ${inStage}` };
+    return { kind: "working", text: inStage };
   }
 
   /** Cards: the space's tasks, then terminals with a shepherd.stage label that no task claims,
@@ -1123,10 +1148,12 @@ export default class Shepherd extends View {
     if (repo && tab === "proof" && stale(e.proof, PROOF_STALE_MS)) once("proof", async () => { e.proof = await loadProof(repo, task); });
     const prCard = tab === "overview" && task.stage === "merge";
     if (repo && prCard && task.pr && stale(e.pr, PR_STALE_MS)) once("pr", async () => { e.pr = await loadPr(repo, task); });
-    // Every tab reads git (Changes' count on the tab bar, a local merge's diff size); only Changes
-    // and Files read diffs and files.
-    if (!dir) return;
-    const gitStale = tab === "changes" || tab === "files" ? GIT_STALE_MS : GIT_COUNT_STALE_MS;
+    // Changes and Files read git; the other tabs too in a space on this computer (Changes' count on
+    // the tab bar) and for a local merge's PR card, but not over ssh just for a count. No worktree
+    // (Done: it was removed): no git.
+    const gitTab = tab === "changes" || tab === "files";
+    if (!dir || !(gitTab || !on || (prCard && !task.pr))) return;
+    const gitStale = gitTab ? GIT_STALE_MS : GIT_COUNT_STALE_MS;
     if (!e.git || Date.now() - (e.git.at ?? 0) > gitStale) {
       once("git", async () => {
         const g = await loadGit(dir, on);

@@ -147,3 +147,34 @@ export const loopDots = (t, c, radius = 1) => h_flex().gap(3).children(Array.fro
   const n = i + 1;
   return div().size(6).rounded(radius).bg(n < c.loop ? t.muted : n === c.loop ? statusColor(t, c.status) : t.raised);
 }));
+
+/** One color per state, for every place the detail shows one: run results, finding states, review
+ *  cells and where the task is now. Pass/fixed/done green, fail/found/stuck red, running/fixing
+ *  blue, open/waiting amber; anything else `fallback`. */
+export function stateColor(t, s, fallback = t.muted) {
+  if (["pass", "approved", "resolved", "fixed", "done"].includes(s)) return t.done;
+  if (["fail", "found", "stuck"].includes(s)) return t.ansi1;
+  if (["running", "fixing", "working"].includes(s)) return t.working;
+  if (["open", "still open", "waiting", "ask"].includes(s)) return t.blocked;
+  return fallback;
+}
+
+/** A section heading: "COMMENTS", "SHEPHERD SUMMARY", "CHECKS · …" (11px, dim). */
+export const sectionHeading = (t, text) => div().text_size(11).text_color(t.dim).child(text);
+
+/** "1 file", "3 files". */
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Seconds (or a string kept as is) as the design's m:ss: 0:23, 2:14; "" for nothing. */
+export function clock(x) {
+  if (typeof x === "string") return x;
+  if (typeof x !== "number" || !Number.isFinite(x) || x < 0) return "";
+  const s = Math.round(x);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** The m:ss between two ISO times, "" when either is missing. */
+export const spanClock = (start, end) => {
+  const a = Date.parse(start ?? ""), b = Date.parse(end ?? "");
+  return a && b ? clock((b - a) / 1000) : "";
+};

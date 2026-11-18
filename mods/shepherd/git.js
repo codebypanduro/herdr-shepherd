@@ -4,14 +4,17 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, readTextFile, home } from "herdr";
-import { MONO, tint } from "./common.js";
+import { MONO, tint, plural } from "./common.js";
 
 const MAX_LINES = 3000;
 
-export const worktreeOf = (task) => (task.worktree ? task.worktree.replace(/^~(?=\/|$)/, home()) : null);
+/** The task's worktree folder, or null when it has none: not made yet, or removed once Done. */
+export const worktreeOf = (task) => (task.worktree && task.stage !== "done" ? task.worktree.replace(/^~(?=\/|$)/, home()) : null);
 
 const git = (args, dir, on) => exec("git", args, { cwd: dir, on, timeout: 20000 })
   .then((r) => (r.code === 0 ? r.stdout : null)).catch(() => null);
+
+const MAX_UNTRACKED_COUNTS = 200; // untracked files whose lines are counted (one git call each)
 
 /** The commit the branch left main (or master) at; null when neither exists. */
 async function baseOf(dir, on) {
@@ -22,41 +25,68 @@ async function baseOf(dir, on) {
   return null;
 }
 
-/** Files changed since base, committed or not, plus untracked ones; and every file in the worktree. */
+/** `--numstat -z` output as Map(new path → {add, del}). A rename is "a\td\t" then old and new. */
+export function parseNumstat(out) {
+  const counts = new Map();
+  const tok = String(out ?? "").split("\0");
+  for (let i = 0; i < tok.length; i++) {
+    const m = tok[i].match(/^(\S+)\t(\S+)\t([\s\S]*)$/);
+    if (!m) continue;
+    let path = m[3];
+    if (path === "") { path = tok[i + 2] ?? ""; i += 2; }
+    counts.set(path, { add: m[1] === "-" ? 0 : +m[1], del: m[2] === "-" ? 0 : +m[2] });
+  }
+  return counts;
+}
+
+/** `--name-status -z` output as [{path, status}]: renames and copies by their new path, as M / A. */
+export function parseNameStatus(out) {
+  const files = [];
+  const tok = String(out ?? "").split("\0");
+  for (let i = 0; i < tok.length; i++) {
+    const s = tok[i];
+    if (!s) continue;
+    if (s[0] === "R" || s[0] === "C") { files.push({ path: tok[i + 2], status: s[0] === "R" ? "M" : "A" }); i += 2; }
+    else { files.push({ path: tok[i + 1], status: s[0] }); i += 1; }
+  }
+  return files.filter((f) => f.path);
+}
+
+/** Files changed since base, committed or not, plus untracked ones (their lines counted as added);
+ *  and every file in the worktree. Failures carry `at` too, so they're retried on the stale clock. */
 export async function loadGit(dir, on) {
+  const at = Date.now();
   const base = await baseOf(dir, on);
-  if (!base) return { error: "No main or master branch to compare with.", files: [], tree: [] };
+  if (!base) return { error: "No main or master branch to compare with.", files: [], tree: [], at };
   const [numstat, names, untracked, all] = await Promise.all([
-    git(["diff", "--numstat", base], dir, on),
-    git(["diff", "--name-status", base], dir, on),
+    git(["diff", "-M", "--numstat", "-z", base], dir, on),
+    git(["diff", "-M", "--name-status", "-z", base], dir, on),
     git(["ls-files", "--others", "--exclude-standard"], dir, on),
     git(["ls-files", "--cached", "--others", "--exclude-standard"], dir, on),
   ]);
-  if (numstat == null || names == null) return { error: `git failed in ${dir}`, files: [], tree: [] };
-  const counts = new Map(numstat.trim().split("\n").filter(Boolean).map((l) => {
-    const [a, d, ...p] = l.split("\t");
-    return [p.join("\t"), { add: a === "-" ? 0 : +a, del: d === "-" ? 0 : +d }];
-  }));
-  const files = names.trim().split("\n").filter(Boolean).map((l) => {
-    const [s, ...p] = l.split("\t");
-    const path = p[p.length - 1];
-    return { path, status: s[0] === "R" ? "M" : s[0], ...(counts.get(path) ?? { add: 0, del: 0 }) };
-  });
-  for (const path of (untracked ?? "").trim().split("\n").filter(Boolean)) {
-    if (!files.some((f) => f.path === path)) files.push({ path, status: "A", add: 0, del: 0, untracked: true });
-  }
+  if (numstat == null || names == null) return { error: `git failed in ${dir}`, files: [], tree: [], at };
+  const counts = parseNumstat(numstat);
+  const files = parseNameStatus(names).map((f) => ({ ...f, ...(counts.get(f.path) ?? { add: 0, del: 0 }) }));
+  const fresh = (untracked ?? "").trim().split("\n").filter((p) => p && !files.some((f) => f.path === p));
+  // git diff --numstat leaves untracked files out: count each against /dev/null (exit 1 = differs).
+  const newCounts = fresh.length ? parseNumstat(await exec("sh", ["-c", 'for f; do git diff --no-index --numstat -z /dev/null "$f"; done', "sh",
+    ...fresh.slice(0, MAX_UNTRACKED_COUNTS)], { cwd: dir, on, timeout: 20000 }).then((r) => r.stdout).catch(() => "")) : new Map();
+  for (const path of fresh) files.push({ path, status: "A", ...(newCounts.get(path) ?? { add: 0, del: 0 }), untracked: true });
   files.sort((a, b) => a.path.localeCompare(b.path));
   const tree = [...new Set((all ?? "").trim().split("\n").filter(Boolean))].sort();
-  return { base, files, tree, at: Date.now() };
+  return { base, files, tree, at };
+}
+
+/** An untracked file's text as a diff: one hunk, every line added. */
+export function untrackedDiff(text) {
+  const lines = String(text ?? "").replace(/\n$/, "").split("\n").slice(0, MAX_LINES);
+  return text ? [`@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => `+${l}`)].join("\n") : "";
 }
 
 /** One file's unified diff against base (an untracked file: all of it, added). */
 export async function loadDiff(dir, on, base, file) {
-  if (file.untracked) {
-    const text = await readTextFile(`${dir}/${file.path}`, { on }).catch(() => "");
-    return text.split("\n").slice(0, MAX_LINES).map((l) => `+${l}`).join("\n");
-  }
-  return (await git(["diff", base, "--", file.path], dir, on)) ?? "";
+  if (file.untracked) return untrackedDiff(await readTextFile(`${dir}/${file.path}`, { on }).catch(() => ""));
+  return (await git(["diff", "-M", base, "--", file.path], dir, on)) ?? "";
 }
 
 /** A file's text and the line numbers added since base. */
@@ -75,8 +105,9 @@ export async function loadFile(dir, on, base, path) {
 
 // ---- views ---------------------------------------------------------------------------------
 
-const STATUS_COLOR = (t, s) => (s === "A" ? t.done : s === "D" ? t.ansi1 : t.blocked);
-export const EXT_COLOR = (t, path) => {
+/** A changed file's status color, everywhere it shows: added green, deleted red, changed amber. */
+const fileStatusColor = (t, s) => (s === "A" ? t.done : s === "D" ? t.ansi1 : t.blocked);
+const EXT_COLOR = (t, path) => {
   const ext = String(path).split(".").pop().toLowerCase();
   if (["js", "mjs", "cjs", "jsx"].includes(ext)) return t.ansi3;
   if (["ts", "tsx"].includes(ext)) return t.ansi4;
@@ -134,7 +165,7 @@ const splitPath = (p) => {
 
 export function renderChanges(m, task, t) {
   const g = m.git(task);
-  if (!worktreeOf(task)) return stateLine(t, "No code changes yet.");
+  if (!worktreeOf(task)) return stateLine(t, task.stage === "done" ? "Merged · the worktree was removed." : "No code changes yet.");
   if (!g) return stateLine(t, "Reading the worktree…");
   if (g.error) return stateLine(t, g.error);
   if (!g.files.length) return stateLine(t, "No code changes yet.");
@@ -146,7 +177,7 @@ export function renderChanges(m, task, t) {
   const list = v_flex().id("chg-list").w(240).flex_none().min_h(0).overflow_y_scrollbar().px(6).py(8).gap(1)
     .border_r(1).border_color(t.border)
     .child(div().px(8).pt(2).pb(8).font_family(MONO).text_size(11).text_color(t.dim)
-      .child(`${g.files.length} file${g.files.length === 1 ? "" : "s"} · +${add} −${del}`))
+      .child(`${plural(g.files.length, "file")} · +${add} −${del}`))
     .children(g.files.map((f) => {
       const { name, dir } = splitPath(f.path);
       return h_flex().id(`chg-${f.path}`).px(8).py(6).gap(8).items_center().rounded(5).cursor_pointer()
@@ -172,14 +203,14 @@ export function renderChanges(m, task, t) {
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().flex_none().gap(8).px(12).py(8).items_center().border_b(1).border_color(t.border)
         .font_family(MONO).text_size(11.5).text_color(t.foreground)
-        .child(div().flex_none().px(5).rounded(3).bg(STATUS_COLOR(t, sel.status)).text_size(10).text_color(t.background).child(sel.status))
+        .child(div().flex_none().px(5).rounded(3).bg(fileStatusColor(t, sel.status)).text_size(10).text_color(t.background).child(sel.status))
         .child(div().min_w(0).truncate().child(sel.path)))
       .child(codeLines(t, rows)));
 }
 
 export function renderFiles(m, task, t) {
   const g = m.git(task);
-  if (!worktreeOf(task)) return stateLine(t, "This task has no worktree yet.");
+  if (!worktreeOf(task)) return stateLine(t, task.stage === "done" ? "Merged · the worktree was removed." : "This task has no worktree yet.");
   if (!g) return stateLine(t, "Reading the worktree…");
   if (g.error) return stateLine(t, g.error);
   const ui = m.ui(task);
@@ -231,7 +262,7 @@ export function renderFiles(m, task, t) {
         .child(div().flex_1().min_w(0).truncate().text_size(12.5)
           .text_color(r.isDir || changed.has(r.path) ? t.foreground : t.muted).child(r.name))
         .when(Boolean(badge), (el) => el.child(div().flex_none().font_family(MONO).text_size(10)
-          .text_color(r.isDir ? t.blocked : STATUS_COLOR(t, badge)).child(badge)));
+          .text_color(fileStatusColor(t, r.isDir ? "M" : badge)).child(badge)));
     }));
 
   const file = ui.file ? m.file(task, ui.file) : null;
@@ -256,8 +287,8 @@ export function renderFiles(m, task, t) {
           ...(i < crumbs.length - 1 ? [div().text_color(t.border).child("/")] : []),
         ]))
         .child(div().flex_1())
-        .when(Boolean(status), (e2) => e2.child(div().text_size(11)
-          .text_color(status === "A" ? t.done : t.blocked)
-          .child(status === "A" ? "added in this task" : status === "D" ? "deleted in this task" : "changed in this task")))))
+        // Deleted files aren't in the tree, so a shown file is added or changed.
+        .when(Boolean(status), (e2) => e2.child(div().text_size(11).text_color(fileStatusColor(t, status))
+          .child(status === "A" ? "added in this task" : "changed in this task")))))
       .child(view));
 }

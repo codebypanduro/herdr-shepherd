@@ -5,13 +5,17 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { theme } from "herdr";
 import { STAGES, KINDS, MONO, groupColor, age, palette } from "./common.js";
 
-export function answerButton(t, id, text, recommended, onClick, { fit = false } = {}) {
+export function answerButton(t, id, text, recommended, onClick, { fit = false, solid = null, icon = null } = {}) {
   // fit: shrink to share a row and cut the text with … (the bar); the full text shows on hover.
+  // solid: a filled button in that color (the PR card's Squash and merge), with an optional icon.
   return h_flex().id(id).h(28).px(11).gap(6).items_center().rounded(6).cursor_pointer()
     .when(fit, (el) => el.min_w(0).flex_shrink(1).tooltip(text))
-    .border(1).border_color(recommended ? t.accent : t.input)
-    .bg(recommended ? t.selected : t.raised).text_color(t.foreground).text_size(12)
-    .hover((s) => s.bg(t.hover))
+    .when(!solid, (el) => el.border(1).border_color(recommended ? t.accent : t.input)
+      .bg(recommended ? t.selected : t.raised).text_color(t.foreground).hover((s) => s.bg(t.hover)))
+    .when(Boolean(solid), (el) => el.border(1).border_color(solid).bg(solid).text_color(t.background).font_semibold()
+      .hover((s) => s.opacity(0.9)))
+    .text_size(12)
+    .when(Boolean(icon), (el) => el.child(icon))
     // In the floating bar an unstopped press would drag the bar instead of clicking.
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_click(onClick)

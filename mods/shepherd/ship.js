@@ -4,7 +4,8 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, readTextFile, appHome } from "herdr";
-import { MONO, tint } from "./common.js";
+import { MONO, tint, plural, clock, spanClock, sectionHeading, stateColor } from "./common.js";
+import { answerButton } from "./needs.js";
 
 /** Where a task's proof lives: what Shepherd recorded, else the conventional folder. */
 export const proofDir = (repo, task) => task.proof ?? (repo ? `${repo.dir}/.herdr/shepherd/proof/${task.id}` : null);
@@ -47,14 +48,6 @@ export async function loadProof(repo, task) {
   };
 }
 
-/** Seconds (or a string Shepherd's qa wrote, kept as is) as the design's m:ss: 0:23, 2:14. */
-export function clock(x) {
-  if (typeof x === "string") return x;
-  if (typeof x !== "number" || !Number.isFinite(x) || x < 0) return "";
-  const s = Math.round(x);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
 /** A GitHub check's state: "pass", "fail" or "run". */
 const checkState = (c) => {
   const s = String(c.conclusion || c.state || c.status || "").toUpperCase();
@@ -62,10 +55,7 @@ const checkState = (c) => {
   if (["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(s)) return "fail";
   return "run";
 };
-const runTime = (r) => {
-  const a = Date.parse(r?.start ?? ""), b = Date.parse(r?.end ?? "");
-  return a && b ? clock((b - a) / 1000) : "";
-};
+const runTime = (r) => spanClock(r?.start, r?.end);
 const resultState = (r) => (r.result === "pass" ? "pass" : r.result === "fail" ? "fail" : "run");
 
 export function renderPrCard(m, task, t) {
@@ -83,7 +73,7 @@ export function renderPrCard(m, task, t) {
     ...(pr && !pr.error ? pr.statusCheckRollup ?? [] : []).map((c) => ({
       state: checkState(c), name: c.name ?? c.context ?? "check", cmd: c.workflowName ?? "",
       meta: String(c.conclusion || c.state || c.status || "").toLowerCase(),
-      time: (() => { const a = Date.parse(c.startedAt ?? ""), b = Date.parse(c.completedAt ?? ""); return a && b ? clock((b - a) / 1000) : ""; })(),
+      time: spanClock(c.startedAt, c.completedAt),
     })),
     ...(ci ? [{ state: resultState(ci), name: "CI", cmd: stageSetting("ci", "command"), meta: ci.note || ci.result, time: runTime(ci) }] : []),
     ...(proof ? [{ state: resultState(proof), name: "Proof", cmd: stageSetting("proof", "browser") || "headless browser", meta: proof.note || proof.result, time: runTime(proof) }] : []),
@@ -91,20 +81,19 @@ export function renderPrCard(m, task, t) {
   const failing = checks.filter((c) => c.state === "fail").length;
   const running = checks.filter((c) => c.state === "run").length;
   const summary = !checks.length ? { mark: "○", color: t.dim, text: "No checks recorded" }
-    : failing ? { mark: "✕", color: t.ansi1, text: `${failing} of ${checks.length} check${checks.length === 1 ? "" : "s"} failing` }
-    : running ? { mark: "●", color: t.working, text: `${checks.length - running} of ${checks.length} checks passed · ${running} running` }
-    : { mark: "✓", color: t.done, text: `All ${checks.length} check${checks.length === 1 ? "" : "s"} passed` };
+    : failing ? { mark: "✕", color: stateColor(t, "fail"), text: `${failing} of ${plural(checks.length, "check")} failing` }
+    : running ? { mark: "●", color: stateColor(t, "running"), text: `${checks.length - running} of ${checks.length} checks passed · ${running} running` }
+    : { mark: "✓", color: stateColor(t, "pass"), text: `All ${plural(checks.length, "check")} passed` };
   const reviewText = approved ? ` · review approved on loop ${approved.loop ?? 1}` : "";
 
-  const files = (n) => `${n} file${n === 1 ? "" : "s"}`;
-  const size = pr && !pr.error ? `${files(pr.changedFiles)} · +${pr.additions} −${pr.deletions}`
-    : g && !g.error ? `${files(g.files.length)} · +${g.files.reduce((n, f) => n + f.add, 0)} −${g.files.reduce((n, f) => n + f.del, 0)}`
+  const size = pr && !pr.error ? `${plural(pr.changedFiles, "file")} · +${pr.additions} −${pr.deletions}`
+    : g && !g.error ? `${plural(g.files.length, "file")} · +${g.files.reduce((n, f) => n + f.add, 0)} −${g.files.reduce((n, f) => n + f.del, 0)}`
     : "";
   const head = task.pr
     ? `PR #${task.pr}${pr?.state && pr.state !== "OPEN" ? ` (${pr.state.toLowerCase()})` : ""} · ${task.title ?? task.id}`
     : `Local merge · ${task.title ?? task.id}`;
   const sub = [`${task.branch ?? "—"} → ${pr?.baseRefName ?? "main"}`, size, task.pr ? "" : "no remote"].filter(Boolean).join(" · ");
-  const markOf = (s) => (s === "pass" ? ["✓", t.done] : s === "fail" ? ["✕", t.ansi1] : ["●", t.working]);
+  const markOf = (s) => [s === "pass" ? "✓" : s === "fail" ? "✕" : "●", stateColor(t, s === "run" ? "running" : s)];
   const mono = (text, c = t.dim) => div().flex_none().font_family(MONO).text_size(11).text_color(c).child(text);
 
   return v_flex().rounded(7).border(1).border_color(tint(t.done, 0.45)).overflow_hidden()
@@ -131,20 +120,13 @@ export function renderPrCard(m, task, t) {
       })))
     .child(h_flex().flex_wrap().gap(8).px(14).py(10).items_center().border_t(1).border_color(t.border)
       .when(Boolean(q), (el) => el
-        .child(h_flex().id(`pr-merge-${task.id}`).gap(7).px(14).py(7).items_center().rounded(5).cursor_pointer()
-          .bg(t.done).text_color(t.background).text_size(12.5).font_semibold()
-          .hover((s) => s.opacity(0.9))
-          .on_click(() => m.answer(q, "Merge"))
-          .child("⑃").child("Squash and merge"))
-        .child(div().id(`pr-back-${task.id}`).px(12).py(7).rounded(5).border(1).border_color(t.input).cursor_pointer()
-          .text_size(12.5).text_color(t.foreground).hover((s) => s.bg(t.hover))
-          .on_click(() => m.answer(q, "Send back"))
-          .child("Send back")))
+        .child(answerButton(t, `pr-merge-${task.id}`, "Squash and merge", false, () => m.answer(q, "Merge"), { solid: t.done, icon: "⑃" }))
+        .child(answerButton(t, `pr-back-${task.id}`, "Send back", false, () => m.answer(q, "Send back"))))
       .when(!q, (el) => el.child(div().text_size(11.5).text_color(t.dim).child("Waiting for Shepherd to ask for the merge.")))
       .when(Boolean(task.prUrl), (el) => el.child(div().id(`pr-open-${task.id}`).text_size(11.5).text_color(t.accent).cursor_pointer()
         .on_click(() => exec("open", [task.prUrl]).catch(() => null)).child("Open on GitHub ↗")))
       .child(div().flex_1())
-      .child(div().text_size(11.5).text_color(t.dim).child("Deletes the branch and worktree after merge")));
+      .when(Boolean(q), (el) => el.child(div().text_size(11.5).text_color(t.dim).child("Deletes the branch and worktree after merge"))));
 }
 
 export function renderProof(m, task, t) {
@@ -154,7 +136,7 @@ export function renderProof(m, task, t) {
   if (!p) return empty("Reading proof…");
   if (p.error) return empty(p.error);
   if (p.none) return empty("Screenshots, checks and a recording show up here when the task reaches Proof.");
-  const heading = (text) => div().text_size(11).text_color(t.dim).child(text);
+  const heading = (text) => sectionHeading(t, text);
   const browser = m.settings().stages?.proof?.browser;
 
   return v_flex().id("proof-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).py(16).pb(120).gap(16)
@@ -162,7 +144,7 @@ export function renderProof(m, task, t) {
       .child(div().pb(6).child(heading(`CHECKS · ${String(browser || "headless browser").toUpperCase()}`)))
       .when(p.checks.length === 0, (el) => el.child(div().py(6).border_t(1).border_color(t.border).text_color(t.dim).child("No checks recorded.")))
       .children(p.checks.map((c, i) => h_flex().id(`pc-${i}`).gap(10).py(6).items_start().border_t(1).border_color(t.border)
-        .child(div().w(16).flex_none().font_family(MONO).text_color(c.pass ? t.done : t.ansi1).child(c.pass ? "✓" : "✕"))
+        .child(div().w(16).flex_none().font_family(MONO).text_color(stateColor(t, c.pass ? "pass" : "fail")).child(c.pass ? "✓" : "✕"))
         .child(v_flex().flex_1().min_w(0).gap(2)
           .child(div().text_size(13).child(c.name ?? "check"))
           .when(Boolean(c.note), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(c.note))))
