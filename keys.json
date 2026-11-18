@@ -1,6 +1,6 @@
 {
   "layout:shepherd": {
-    "cmd-k": "app.palette",
+    "cmd-k": "shepherd.palette",
     "cmd-shift-d": "shepherd.digest",
     "cmd-alt-1": "shepherd.view:board",
     "cmd-alt-2": "shepherd.view:pipeline",

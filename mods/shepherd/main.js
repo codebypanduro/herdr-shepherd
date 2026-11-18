@@ -33,7 +33,8 @@ import { renderHistory } from "./history.js";
 import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders, setScope } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
 import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./dialogs.js";
-import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
+import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings, writeWorkflow } from "./settings.js";
+import { PALETTE_OPEN, paletteSpec, initPalette, renderPalette } from "./palette.js";
 import {
   openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, openSetup, readWorkflow,
   execSafe, failLine, TERM_WINDOW, closeTermWindow, STARTING, QUEUED, QUEUE_MAX_MS, checkStartable, startStale,
@@ -63,7 +64,7 @@ const REMOTE_FRESH_MS = 4000; // the shown space on another machine: one read pe
 const EMPTY = Object.freeze({ tasks: [], questions: [], chat: [], alerts: {} });
 // Copies that show every Shepherd space in All spaces; the others (detail, steer, terminal window)
 // show one task's space.
-const ALL_PANELS = ["bar", "tabs", "history", "digest"];
+const ALL_PANELS = ["bar", "tabs", "history", "digest", "palette"];
 
 // Module code is shared by every copy of the mod (AGENTS.md), so these are too:
 // - READS: reads of another machine's repo (4-5 ssh file reads each), by repo key:
@@ -189,12 +190,14 @@ export default class Shepherd extends View {
     if (p.panel === "workflow") initWorkflow(this, cx);
     if (p.panel === "spacesettings") initSpaceSettings(this, cx, InputState);
     if (p.panel === "setup") initSetup(this);
+    if (p.panel === "palette") { initPalette(this, cx, InputState); setShared(PALETTE_OPEN, p.overlay ?? null); }
     // D and ⌘J toggle these: the open copy's overlay id, cleared in close().
     if (p.panel === "digest") setShared(DIGEST_OPEN, p.overlay ?? null);
     if (p.panel === "history") setShared(HISTORY_OPEN, p.overlay ?? null);
     if (p.panel === "steer") setShared(STEER_OPEN, p.overlay ?? null); // the board skips the peek while it's up
     // A steer menu never outlives a restart, but its id in shared state would (close() didn't run).
     if (!p.panel && shared(STEER_OPEN)) setShared(STEER_OPEN, null);
+    if (!p.panel && shared(PALETTE_OPEN)) setShared(PALETTE_OPEN, null); // same for the palette: ⌘K must open it first time
     // Keys (J/K, S, P, T, …) go to these copies only while they hold the keyboard, so typing in the
     // bar, a reply field or a terminal never triggers them. The board gets the keyboard when clicked
     // or from "focus" (mod.json focusable: pane.go, or a popup over it closing); popups and the
@@ -240,6 +243,7 @@ export default class Shepherd extends View {
     if (p.panel === "digest" && shared(DIGEST_OPEN) === p.overlay) setShared(DIGEST_OPEN, null);
     if (p.panel === "history" && shared(HISTORY_OPEN) === p.overlay) setShared(HISTORY_OPEN, null);
     if (p.panel === "steer" && shared(STEER_OPEN) === p.overlay) setShared(STEER_OPEN, null);
+    if (p.panel === "palette" && shared(PALETTE_OPEN) === p.overlay) setShared(PALETTE_OPEN, null);
     closePeek(this);
     stopTerm(this);
   }
@@ -1124,6 +1128,12 @@ export default class Shepherd extends View {
     this.toggleOverlay(DIGEST_OPEN, { mod: "shepherd", kind: "dialog", width: 720, height: 480, props: { panel: "digest" } }, open);
   }
 
+  /** ⌘K: Shepherd's palette (again: closes it). `query`: open it with that typed (closing an open one). */
+  togglePalette(query = null) {
+    if (query && shared(PALETTE_OPEN)) { closeOverlay(shared(PALETTE_OPEN)); setShared(PALETTE_OPEN, null); }
+    this.toggleOverlay(PALETTE_OPEN, paletteSpec(query ?? ""), query ? true : undefined);
+  }
+
   toggleHistory(open) {
     this.toggleOverlay(HISTORY_OPEN, { mod: "shepherd", kind: "dialog", width: 760, height: 0.85, props: { panel: "history" } }, open);
   }
@@ -1218,7 +1228,22 @@ export default class Shepherd extends View {
     let a;
     try { a = JSON.parse(arg); } catch { return; }
     const space = spaces().find((s) => s.id === a?.space);
-    if (space && a.q && a.text) this.answer({ id: a.q, task: a.task ?? null }, a.text, space);
+    if (!space || !a.q || !a.text) return;
+    // The question as loaded, when this copy has it (a grilling answer then goes straight to its griller).
+    const q = this.spaceState(space).questions.find((x) => x.id === a.q && x.answer == null);
+    this.answer(q ?? { id: a.q, task: a.task ?? null }, a.text, space);
+  }
+
+  /** shepherd.workflow-set:<json {path, value}> (the palette's Workflow rows): one key of the person's workflow.json. */
+  workflowSet(arg, cx) {
+    let a;
+    try { a = JSON.parse(arg); } catch { return; }
+    if (!Array.isArray(a?.path) || !a.path.length) return;
+    cx.spawn(async (cx) => {
+      const error = await writeWorkflow(this, a.path, a.value);
+      if (error) notify({ title: "Workflow not saved", body: error, level: "error" });
+      cx.notify();
+    });
   }
 
   /** R (and shepherd.reply): Needs you, with the keyboard in the oldest question's reply field. */
@@ -1233,7 +1258,7 @@ export default class Shepherd extends View {
   focusBar() { run("shepherd.focus-bar"); }
 
   /** A key command (keys.json `shepherd.<command>`, delivered to every shown copy): digest, history,
-   *  focus, focus-bar, steer, terminal, pause, open, view:<v>, scope[:all|space], tab:<1-5>, next, prev. The board copy
+   *  focus, focus-bar, steer, terminal, pause, accept, open, view:<v>, scope[:all|space], tab:<1-6>, next, prev, palette[:<text>], workflow-set:<json>. The board copy
    *  acts on all but focus-bar, which only the bar copy takes. Task commands act on the keyboard
    *  focus, else the open task; `:<id>` names one. */
   command(c, cx) {
@@ -1262,6 +1287,8 @@ export default class Shepherd extends View {
     else if (name === "scope") setScope(arg === "all" || (arg !== "space" && shared(SCOPE) !== "all")); // all | space | toggle
     else if (name === "needs") this.openNeeds(arg || null);
     else if (name === "answer") this.answerFromToast(arg);
+    else if (name === "palette") this.togglePalette(arg || null);
+    else if (name === "workflow-set") this.workflowSet(arg, cx);
     else if (name === "reply") this.replyNext(cx);
     else if (name === "tab") this.detailTab(arg);
     else if (name === "next" || name === "prev") this.moveFocus(name === "next" ? 1 : -1);
@@ -1270,6 +1297,7 @@ export default class Shepherd extends View {
     else if (name === "steer") this.openSteer(task._ref, false);
     else if (name === "terminal") this.openTerminal(task.terminal, task._ref);
     else if (name === "pause") this.togglePause(task);
+    else if (name === "accept") this.accept(task);
   }
 
   /** Commands that open the sidebar's overlays, from keys.json or the board's N, F, W, U.
@@ -1526,6 +1554,7 @@ export default class Shepherd extends View {
     if (p.panel === "termfoot") return renderTermFoot(this).track_focus(this.keys)
       .on_mouse_down("left", () => this.keys.focus()).on_key_down((e, cx) => this.termKey(e, cx));
     if (p.panel === "digest") return renderDigest(this);
+    if (p.panel === "palette") return renderPalette(this);
     if (p.panel === "history") return renderHistory(this);
     if (p.panel === "bar") return renderBar(this);
     if (p.panel === "detail") {

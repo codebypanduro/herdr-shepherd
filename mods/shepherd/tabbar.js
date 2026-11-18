@@ -181,7 +181,7 @@ export function renderTabBar(m) {
     .child(div().flex_1())
     .child(seg)
     .child(button("open-digest", [div().child("Digest"), div().font_family(MONO).text_size(10.5).text_color(t.dim).child("D")], () => m.toggleDigest()))
-    .child(button("open-palette", [div().font_family(MONO).text_size(11).text_color(t.muted).child("⌘K")], () => run("app.palette")))
+    .child(button("open-palette", [div().font_family(MONO).text_size(11).text_color(t.muted).child("⌘K")], () => m.togglePalette()))
     .child(button("open-workflow", [div().font_family(MONO).text_color(t.dim).child("⚙"), div().child("Workflow")],
       () => openWorkflow()));
 }
