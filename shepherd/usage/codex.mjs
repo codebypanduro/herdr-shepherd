@@ -49,8 +49,12 @@ function weekly(path) {
     const w = [rl?.secondary, rl?.primary].find((x) => x && x.window_minutes === WEEK_MIN);
     if (!w || typeof w.used_percent !== "number") continue;
     const at = Date.parse(e.timestamp) || null;
+    // No reset time: the window ends at most a week after the event; without a time either, the
+    // entry can't be dated, so it's skipped (its % could be any week's).
     const resets = typeof w.resets_at === "number" ? w.resets_at * 1000
-      : typeof w.resets_in_seconds === "number" && at ? at + w.resets_in_seconds * 1000 : null;
+      : typeof w.resets_in_seconds === "number" && at ? at + w.resets_in_seconds * 1000
+      : at ? at + WEEK_MIN * 60000 : null;
+    if (resets == null) continue;
     return { pct: w.used_percent, resets };
   }
   return null;
@@ -66,8 +70,8 @@ for (const f of files()) {
 if (!found) fail(`no Codex rate limits logged under ${root}`);
 
 const now = Date.now();
-const reset = found.resets != null && found.resets <= now;
+const reset = found.resets <= now;
 const out = [String(reset ? 0 : Math.max(0, Math.min(100, Math.round(found.pct))))];
 out.push(reset ? "no run since it reset" : "weekly limit");
-if (found.resets != null && !reset) out.push(`resets=${new Date(found.resets).toISOString()}`);
+if (!reset) out.push(`resets=${new Date(found.resets).toISOString()}`);
 process.stdout.write(`${out.join("\n")}\n`);

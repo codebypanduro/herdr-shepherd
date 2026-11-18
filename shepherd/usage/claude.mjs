@@ -24,30 +24,40 @@ import { join } from "node:path";
 
 const fail = (msg) => { process.stderr.write(`${msg}\n`); process.exit(1); };
 
+/** The claude.ai login token: the Keychain item first (macOS), then .credentials.json; each source
+ *  is parsed on its own, so a Keychain item without a claude.ai login still falls back to the file.
+ *  Only printable ASCII is accepted, so the token can't make fetch reject the header (whose error
+ *  message would carry it). */
 function token() {
-  let raw = null;
+  const sources = [];
   if (process.platform === "darwin") {
     try {
-      raw = execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 });
-    } catch { /* not in the Keychain: try the file */ }
+      sources.push(execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 }));
+    } catch { /* not in the Keychain (or locked, e.g. over ssh): try the file */ }
   }
-  if (!raw) {
-    const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
-    try { raw = readFileSync(join(dir, ".credentials.json"), "utf8"); } catch { /* none */ }
+  const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  try { sources.push(readFileSync(join(dir, ".credentials.json"), "utf8")); } catch { /* none */ }
+  if (!sources.length) fail("no Claude Code login found (Keychain or .credentials.json)");
+  let malformed = false;
+  for (const raw of sources) {
+    let t = null;
+    try { t = JSON.parse(raw)?.claudeAiOauth?.accessToken; } catch { continue; }
+    if (typeof t !== "string" || !t) continue;
+    if (/^[\x21-\x7e]+$/.test(t)) return t;
+    malformed = true;
   }
-  if (!raw) fail("no Claude Code login found (Keychain or .credentials.json)");
-  try {
-    const t = JSON.parse(raw)?.claudeAiOauth?.accessToken;
-    if (typeof t === "string" && t) return t;
-  } catch { /* fall through */ }
-  return fail("Claude Code's credentials have no claude.ai login");
+  return fail(malformed ? "Claude Code's login token is malformed" : "Claude Code's credentials have no claude.ai login");
 }
+
+/** An ISO time, or null for anything Date can't read. */
+const iso = (v) => (v != null && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
 
 const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
   headers: { Authorization: `Bearer ${token()}`, "anthropic-beta": "oauth-2025-04-20", Accept: "application/json" },
   signal: AbortSignal.timeout(15000),
-}).catch((e) => fail(`usage endpoint unreachable: ${e?.name === "TimeoutError" ? "timed out" : e?.message ?? e}`));
+}).catch((e) => fail(e?.name === "TimeoutError" ? "usage endpoint timed out"
+  : `usage endpoint unreachable${typeof e?.cause?.code === "string" ? ` (${e.cause.code})` : ""}`)); // never e.message: it can quote the headers
 if (res.status === 401) fail("Claude login token expired; it renews the next time Claude Code runs");
 if (!res.ok) fail(`usage endpoint answered ${res.status}`);
 const u = await res.json().catch(() => fail("usage endpoint sent no JSON"));
@@ -74,10 +84,10 @@ const out = [String(pct)];
 if (scoped.length) {
   const parts = [{ name: "others", pct: Math.max(0, pct - scoped.reduce((a, s) => a + s.pct, 0)) }, ...scoped];
   out.push(parts.map((p) => `${p.name} ${p.pct}%`).join(" · "));
-  if (week.resets_at) out.push(`resets=${new Date(week.resets_at).toISOString()}`);
+  if (iso(week.resets_at)) out.push(`resets=${iso(week.resets_at)}`);
   for (const p of parts) out.push(`part=${p.name} ${p.pct}`);
 } else {
   out.push(legacy.length ? legacy.join(" · ") : "weekly limit");
-  if (week.resets_at) out.push(`resets=${new Date(week.resets_at).toISOString()}`);
+  if (iso(week.resets_at)) out.push(`resets=${iso(week.resets_at)}`);
 }
 process.stdout.write(`${out.join("\n")}\n`);

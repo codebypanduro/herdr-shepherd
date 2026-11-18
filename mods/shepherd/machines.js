@@ -94,61 +94,57 @@ export function probeMachines(m, cx) {
 /** Weekly usage: neither Claude Code nor Codex has a usage command, so workflow.json names one per
  *  tool (`"usage": {"claude": "<command>", "codex": "<command>"}`); without it in the person's
  *  file, the example's are used (shepherd/usage/*.mjs). A command runs in the shepherd/ folder, in
- *  a login shell: on this computer, and on each other machine that has the tool and a checkout
- *  there (shepherdOn). It prints a percent, then optionally a detail line, `resets=<ISO time>` and
- *  `part=<label> <pct>` lines (the bar's segments). Shared state keeps each machine's result; a
- *  failed run keeps the last one until its week resets, and shows its error otherwise. */
+ *  a login shell, on each machine that has the tool (this computer too before its tools are known)
+ *  and a checkout there (shepherdOn). It prints a percent, then optionally a detail line,
+ *  `resets=<ISO time>` and `part=<label> <pct>` lines (the bar's segments). Shared state keeps
+ *  each machine's result; a failed run keeps the last good one while it's live (see `live`) and
+ *  records its error. */
 export function probeUsage(m, cx) {
   if (m.usageBusy) return;
   m.usageBusy = true;
   cx.spawn(async () => {
     try {
       const h = await shepherdHome(m);
-      const { wf } = await readWorkflow(m);
-      let cmds = wf.usage;
+      let cmds = (await readWorkflow(m)).wf.usage;
       if (!cmds && h) cmds = await readTextFile(h.example).then((x) => JSON.parse(x).usage).catch(() => null);
       cmds ??= {};
-      const tools = ["claude", "codex"].filter((k) => typeof cmds[k] === "string" && cmds[k]);
+      const tools = TOOLS.map(([k]) => k).filter((k) => typeof cmds[k] === "string" && cmds[k]);
       const info = shared(MACHINE_INFO) ?? {};
-      const remote = machines().filter((x) => x.name && x.layout !== "unavailable"
-        && tools.some((k) => (info[x.name]?.tools ?? []).includes(k)));
-      const runs = [{ key: "", on: null, tools }, ...remote.map((x) => ({ key: x.name, on: x.name,
-        tools: tools.filter((k) => (info[x.name]?.tools ?? []).includes(k)) }))];
-      const got = {};
-      await Promise.all(runs.map(async (run) => {
-        got[run.key] = {};
-        let where = run.on ? (m.usageWhere ??= {})[run.on] : h && { dir: h.dir, path: null };
-        if (run.on && !where) {
-          const s = await shepherdOn(m, run.on);
-          where = s.dir ? s : null;
-          if (where || !s.unreachable) m.usageWhere[run.on] = where ?? { reason: s.reason };
-          if (!where) { for (const k of run.tools) got[run.key][k] = { error: s.reason }; return; }
-        }
-        if (!where?.dir) { for (const k of run.tools) got[run.key][k] = { error: where?.reason ?? "no shepherd/ folder" }; return; }
-        for (const k of run.tools) {
-          const r = await (run.on
-            ? exec("sh", ["-c", 'cd "$1" && PATH="$2:$PATH" && eval "$3"', "usage", where.dir, where.path, cmds[k]], { on: run.on, timeout: 30000 })
-            : exec("sh", ["-lc", cmds[k]], { cwd: where.dir, timeout: 30000 })).catch((e) => ({ code: -1, stderr: String(e) }));
-          got[run.key][k] = r.code === 0 ? parseUsage(r.stdout) : null;
-          if (!got[run.key][k]) got[run.key][k] = { error: (r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n")[0] || `exit ${r.code}` };
-        }
-      }));
-      // Merge with what's there now: a failure keeps the last good value while its week lasts.
-      const before = (shared(USAGE) ?? {}).by ?? {};
-      const by = {};
-      for (const [key, res] of Object.entries(got)) {
-        by[key] = {};
-        for (const [k, v] of Object.entries(res)) {
-          const old = before[key]?.[k];
-          const keep = v.error && old?.pct != null && (old.resets ? Date.parse(old.resets) > Date.now() : Date.now() - old.at < USAGE_MS * 3);
-          by[key][k] = keep ? { ...old, error: v.error } : { ...v, at: Date.now() };
-        }
-      }
-      setShared(USAGE, { at: Date.now(), by });
+      const toolsOn = (key) => (info[key]?.tools ? tools.filter((k) => info[key].tools.includes(k)) : key ? [] : tools);
+      const runs = [{ key: "", on: null }, ...machines().filter((x) => x.name && x.layout !== "unavailable").map((x) => ({ key: x.name, on: x.name }))]
+        .map((r) => ({ ...r, tools: toolsOn(r.key) })).filter((r) => r.tools.length);
+      const got = Object.fromEntries(await Promise.all(runs.map(async (r) => [r.key, await runUsage(m, r, cmds)])));
+      setShared(USAGE, { at: Date.now(), by: mergeUsage((shared(USAGE) ?? {}).by ?? {}, got) });
     } catch (e) {
-      setShared(USAGE, { ...(shared(USAGE) ?? {}), failed: String(e?.stack ?? e).slice(0, 400) });
+      setShared(USAGE, { ...(shared(USAGE) ?? {}), failed: String(e?.message ?? e).split("\n")[0] });
     } finally { m.usageBusy = false; }
   });
+}
+
+/** One machine's usage commands: { tool: parsed output | {error} }. Where the checkout is on that
+ *  machine is remembered only once found, so a checkout added later is picked up. */
+async function runUsage(m, run, cmds) {
+  const out = {};
+  const where = (m.usageWhere ??= {})[run.key] ?? await shepherdOn(m, run.on);
+  if (!where.dir) { for (const k of run.tools) out[k] = { error: where.reason }; return out; }
+  m.usageWhere[run.key] = where;
+  for (const k of run.tools) {
+    const r = await (run.on
+      ? exec("sh", ["-c", 'cd "$1" && PATH="$2:$PATH" && eval "$3"', "usage", where.dir, where.path, cmds[k]], { on: run.on, timeout: 30000 })
+      : exec("sh", ["-lc", cmds[k]], { cwd: where.dir, timeout: 30000 })).catch((e) => ({ code: -1, stderr: String(e) }));
+    out[k] = (r.code === 0 && parseUsage(r.stdout))
+      || { error: (r.stderr || r.stdout || "").trim().split("\n")[0] || `exit ${r.code}` };
+  }
+  return out;
+}
+
+/** New results over the old: a failed run keeps the last % while it's live, with the error. */
+function mergeUsage(before, got) {
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(got).map(([key, res]) => [key, Object.fromEntries(Object.entries(res).map(([k, v]) => {
+    const old = before[key]?.[k];
+    return [k, v.error && live(old) ? { ...old, error: v.error } : { ...v, at: now }];
+  }))]));
 }
 
 /** One usage command's output: percent, then detail / resets= / part= lines in any order. */
@@ -168,33 +164,49 @@ export function parseUsage(text) {
   return out;
 }
 
-/** A tool's weekly usage on one machine (key: "" for this computer), else on any machine. */
-export function usageOf(tool, key = null) {
+const TOOLS = [["claude", "Claude"], ["codex", "Codex"]];
+
+/** A reading still worth showing: it has a %, and its week hasn't reset since (without a reset
+ *  time, for three probe rounds). */
+const live = (v) => v?.pct != null && (v.resets ? Date.parse(v.resets) > Date.now() : Date.now() - (v.at ?? 0) < USAGE_MS * 3);
+
+/** A tool's weekly usage, account-wide: of every machine's live reading, the one in the newest
+ *  week (latest reset), the highest % within it (usage only grows in a week); a reading without a
+ *  reset time (e.g. Codex's "no run since it reset" 0) only when none has one, this computer's first. */
+export function usageOf(tool) {
   const by = (shared(USAGE) ?? {}).by ?? {};
-  const ok = (v) => v?.pct != null;
-  if (key != null && ok(by[key]?.[tool])) return by[key][tool];
-  return [by[""], ...Object.entries(by).filter(([k]) => k).map(([, v]) => v)].map((v) => v?.[tool]).find(ok) ?? null;
+  const all = [by[""], ...Object.entries(by).filter(([k]) => k).map(([, v]) => v)].map((v) => v?.[tool]).filter(live);
+  const dated = all.filter((v) => v.resets)
+    .sort((a, b) => Date.parse(b.resets) - Date.parse(a.resets) || b.pct - a.pct);
+  return dated[0] ?? all[0] ?? null;
 }
 
-/** Weekly usage rows the sidebar shows: tools some machine has, with a reported percent. */
+/** What one machine's popover shows for a tool: its own live reading, else its own run's error,
+ *  else (no run there) the account-wide one. */
+export function machineUsage(tool, key) {
+  const own = ((shared(USAGE) ?? {}).by ?? {})[key]?.[tool];
+  if (live(own)) return { pct: own.pct };
+  if (own?.error) return { error: own.error };
+  const u = usageOf(tool);
+  return u ? { pct: u.pct } : null;
+}
+
+const someMachineHas = (tool) => machineList().some((m) => (m.tools ?? []).includes(tool));
+
+/** Weekly usage rows the sidebar shows: tools some machine has, with a live reading. */
 export function usageRows() {
-  const list = machineList();
-  const have = (tool) => list.some((m) => (m.tools ?? []).includes(tool));
-  return [["claude", "Claude"], ["codex", "Codex"]].filter(([k]) => have(k) && usageOf(k))
-    .map(([k, name]) => ({ key: k, name, ...usageOf(k) }));
+  return TOOLS.filter(([k]) => someMachineHas(k) && usageOf(k)).map(([k, name]) => ({ key: k, name, ...usageOf(k) }));
 }
 
 /** Why a tool some machine has shows no usage: the first error a run reported. */
 export function usageErrors() {
   const by = (shared(USAGE) ?? {}).by ?? {};
-  const list = machineList();
-  return [["claude", "Claude"], ["codex", "Codex"]]
-    .filter(([k]) => list.some((m) => (m.tools ?? []).includes(k)) && !usageOf(k))
+  return TOOLS.filter(([k]) => someMachineHas(k) && !usageOf(k))
     .map(([k, name]) => ({ name, error: Object.values(by).map((v) => v?.[k]?.error).find(Boolean) ?? null }));
 }
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-/** "Mon", or "Mon 23" when it's more than 6 days off; "today" for today. */
+/** "Mon", or "Mon 23" when it's more than 6 days off; "today 13:00" for today. */
 export function resetDay(iso) {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return null;
@@ -239,8 +251,11 @@ export function renderMachinePop(m) {
       .children((mc.tools ?? []).map((tool) => h_flex().gap(6).items_center().text_size(12)
         .child(agentIcon(t, tool))
         .child(div().flex_1().child(tool === "claude" ? "Claude Code" : "Codex"))
-        .when(Boolean(usageOf(tool, mc.key)), (el) => el.child(div().font_family(MONO).text_size(10.5).text_color(t.dim)
-          .child(`${usageOf(tool, mc.key).pct}% this week`)))))
+        .when(Boolean(machineUsage(tool, mc.key)), (el) => {
+          const u = machineUsage(tool, mc.key);
+          return el.child(div().min_w(0).max_w(150).truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
+            .child(u.error ?? `${u.pct}% this week`));
+        })))
       .when(!mc.tools, (el) => el.child(div().text_size(11).text_color(t.dim).child("…")))
       .when(Array.isArray(mc.tools) && !mc.tools.length, (el) => el.child(div().text_size(11).text_color(t.dim).child("No Claude Code or Codex"))));
 }
@@ -260,35 +275,37 @@ export function bar(t, label, v, lim = null) {
       .when(lim != null, (el) => el.child(div().absolute().top(-2).h(8).w(1).bg(t.foreground).left(`${lim}%`))));
 }
 
-/** Usage this week: one row per tool with its detail, % and bar (split into the command's parts:
- *  Claude's model with its own weekly cap in the accent's second color). The header's reset day is
- *  the first row's; a row that resets on another day says so in its detail. */
+/** Usage this week: one row per tool with its detail, % and bar, split into the command's parts
+ *  (Claude: the rest muted, a model with its own weekly cap ansi5; Codex done green); the % turns
+ *  red from 80%, as in the footer. The header's reset day is the first row's; a row that resets on
+ *  another day says so in its detail. */
 export function renderUsagePop() {
   const t = palette();
   const rows = usageRows();
   const head = rows.find((r) => r.resets)?.resets ?? null;
-  const hot = (pct) => pct >= 80 ? t.ansi1 : pct >= 65 ? t.blocked : null;
   const segColors = (key) => key === "claude" ? [t.muted, t.ansi5, t.ansi6] : [t.done, t.ansi6, t.ansi5];
+  const failed = (shared(USAGE) ?? {}).failed;
   return v_flex().id("usage-pop").size_full().p(12).gap(10).bg(t.surface).text_color(t.foreground)
     .child(h_flex().justify_between().items_center()
       .child(div().text_size(13).font_semibold().child("Usage this week"))
       .when(Boolean(head), (el) => el.child(div().font_family(MONO).text_size(11).text_color(t.dim).child(`resets ${resetDay(head)}`))))
     .children(rows.map((r) => {
       const other = r.resets && head && resetDay(r.resets) !== resetDay(head) ? ` · resets ${resetDay(r.resets)}` : "";
-      const parts = r.parts?.length ? r.parts : [{ name: r.name, pct: r.pct }];
       const colors = segColors(r.key);
+      const parts = (r.parts?.length ? r.parts : [{ name: r.name, pct: r.pct }])
+        .map((p, i) => ({ ...p, color: colors[i % colors.length] })).filter((p) => p.pct > 0);
       return v_flex().gap(5)
         .child(h_flex().gap(6).items_center().text_size(12)
           .child(agentIcon(t, r.key))
           .child(div().child(r.name))
           .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(`${r.detail}${other}`))
-          .child(div().font_family(MONO).text_size(11).text_color(hot(r.pct) ?? t.muted).child(`${r.pct}%`)))
+          .child(div().font_family(MONO).text_size(11).text_color(r.pct >= 80 ? t.ansi1 : t.muted).child(`${r.pct}%`)))
         .child(h_flex().h(5).gap(1).rounded(3).overflow_hidden().bg(t.raised)
-          .children(parts.filter((p) => p.pct > 0).map((p, i) => div().h(5).flex_none().w(`${Math.min(100, p.pct)}%`)
-            .bg(hot(r.pct) ?? colors[i % colors.length]))));
+          .children(parts.map((p) => div().h(5).flex_none().w(`${Math.min(100, p.pct)}%`).bg(p.color))));
     }))
     .when(!rows.length, (el) => el.child(v_flex().gap(4).text_size(11.5).text_color(t.dim)
+      .when(Boolean(failed), (el) => el.child(`Usage check failed: ${failed}`))
       .children(usageErrors().map((e) => div().child(`${e.name}: ${e.error ?? "checking…"}`)))
-      .when(!usageErrors().length, (el) => el.child(
+      .when(!failed && !usageErrors().length, (el) => el.child(
         "No usage yet. workflow.json's \"usage\" commands (shepherd/usage/*.mjs by default) run every 5 minutes."))));
 }

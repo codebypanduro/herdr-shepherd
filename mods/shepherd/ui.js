@@ -9,7 +9,7 @@ import { MONO, machineOf } from "./common.js";
 
 export const MACHINE_INFO = "shepherd.machineInfo"; // { "<machine name, '' here>": {cpu, mem, disk, kind, model, tools, at, error} }
 export const MACHINE_KINDS = "shepherd.machineKinds"; // the person's pick in Add machine: { name: kind }
-export const USAGE = "shepherd.usage"; // { at, by: { "<machine, '' here>": { claude|codex: {pct, detail, resets, parts, at, error} } } }
+export const USAGE = "shepherd.usage"; // { at, by: { "<machine, '' here>": { claude|codex: {pct, detail, resets, parts, at, error} } }, failed? }
 export const FOLDERS = "shepherd.folders"; // sidebar folders: [{ id, name, open }]
 export const SPACE_FOLDERS = "shepherd.spaceFolders"; // { space id: folder id }
 export const NEW_SPACE = "shepherd.newSpace"; // New space's pending { folder, real, before, group, start, at }
