@@ -98,6 +98,11 @@ function allRows(m) {
   add("Actions", "Pause / resume focused task", cmd("pause"), { keys: ["P"] });
   add("Actions", "Create task (tell Shepherd)", cmd("focus-bar"), { keys: ["C"] });
   add("Actions", "Reply to next question", cmd("reply"), { keys: ["R"] });
+  const shownSp = m.shownSpace();
+  if (shownSp && m.shepherd(shownSp)) {
+    // Asks first; a fresh context with the current PROMPT.md and workflow, running tasks kept.
+    add("Actions", "Restart Shepherd", cmd("restart-shepherd", shownSp.id), { meta: m.isRestarting(shownSp) ? "restarting…" : "fresh context" });
+  }
   add("Actions", "Workflow settings", cmd("workflow"), { keys: letterChip("workflow") });
   add("Actions", "Weekly usage", cmd("usage"), { keys: letterChip("usage") });
 

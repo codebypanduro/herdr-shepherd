@@ -15,6 +15,7 @@ export const SPACE_FOLDERS = "shepherd.spaceFolders"; // { space id: folder id }
 export const NEW_SPACE = "shepherd.newSpace"; // New space's pending { folder, real, before, group, start, at }
 export const STARTABLE = "shepherd.startable"; // { "<machine, '' here>": { ...shepherdOn's answer, at } }: whether start.sh can run there
 export const STARTING = "shepherd.starting"; // { space id: ms }: a start asked for that space, until its Shepherd shows (any copy)
+export const RESTARTING = "shepherd.restarting"; // { space id: ms }: a Restart Shepherd running for that space (any copy), until start.sh --restart is done
 export const QUEUED = "shepherd.queued"; // [{ id, space, line, task, at, sending? }]: lines waiting for a Shepherd, sent once one is up
 export const QUEUE_MAX_MS = 3600000; // a queued line older than this is dropped (with a toast), never sent days later
 

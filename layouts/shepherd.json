@@ -152,7 +152,18 @@
                         "width": 1,
                         "color": "accent"
                       },
-                      "lone": true
+                      "lone": true,
+                      "header": {
+                        "content": {
+                          "mod": "shepherd",
+                          "props": {
+                            "panel": "termhead"
+                          }
+                        },
+                        "height": 26,
+                        "position": "top",
+                        "reveal": "hover"
+                      }
                     }
                   }
                 },

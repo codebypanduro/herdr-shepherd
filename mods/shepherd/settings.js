@@ -11,6 +11,7 @@ import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf, agentIcon, stageAg
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
 import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, checkStartable, openSetup } from "./ui.js";
+import { openRestart } from "./start.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 export const MODELS = ["opus", "sonnet", "haiku"];
@@ -276,6 +277,17 @@ function startButton(m, t, s) {
       .child(`Can't start here: ${st.reason}`)));
 }
 
+/** Restart Shepherd (asks first): a fresh Shepherd in the same terminal; "Restarting…" while it runs. */
+function restartButton(m, t, s) {
+  const busy = m.isRestarting(s);
+  return div().id("ss-restart").flex_none().px(10).h(26).flex().items_center().rounded(5).text_size(12)
+    .border(1).border_color(t.input).text_color(busy ? t.dim : t.foreground)
+    .when(!busy, (el) => el.cursor_pointer().hover((x) => x.bg(t.hover)))
+    .tooltip("A fresh Shepherd with the current instructions and workflow; running tasks keep going")
+    .on_click(() => { if (!busy) openRestart(m, s); })
+    .child(busy ? "Restarting…" : "Restart");
+}
+
 const ssSpace = () => spaces().find((x) => x.id === props()?.space) ?? null;
 
 function setOrchestra(m, cx, change) {
@@ -344,7 +356,9 @@ export function renderSpaceSettings(m) {
             .text_color(x.name === s.machine ? t.background : t.dim)
             .child(x.label).child(div().font_family(MONO).text_size(10.5).child(x.cpu != null ? `cpu ${x.cpu}%` : ""))))))
       .child(field("Shepherd", "One per space. It talks to you for this repo only.",
-        sh ? div().font_family(MONO).text_size(12).text_color(t.muted).child(`claude · ${d?.wf?.shepherd?.model ?? "opus"} · ${sh.address}`)
+        sh ? h_flex().gap(10).items_center()
+          .child(div().font_family(MONO).text_size(12).text_color(t.muted).child(`claude · ${d?.wf?.shepherd?.model ?? "opus"} · ${sh.address}`))
+          .child(restartButton(m, t, s))
           : startButton(m, t, s)))
       .child(field("Issue tracker", "Where triage reads and to-tickets writes.",
         div().text_size(12).text_color(t.muted).child(trackerName(d?.wf?.tracker))))

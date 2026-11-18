@@ -1,7 +1,7 @@
 // Shepherd: one mod, several roles. props.view picks the main view (board, pipeline, deps, needs;
 // the person's switch in shared "shepherd.view" wins), props.panel a side role (spaces, tabs,
 // detail, status, noshep) or an overlay (steer, digest, plus, machine, usage, newspace, addmachine,
-// workflow, spacesettings, palette, setup, newtab, closetab). What the work area shows (✻ Shepherd or
+// workflow, spacesettings, palette, setup, newtab, closetab, restart) or the ✻ area's pane header (termhead). What the work area shows (✻ Shepherd or
 // a tab) is mode.js.
 // Everything reads the shown space's <repo>/.herdr/shepherd/tasks.json, written by Shepherd
 // through shepherd/bin/shep.mjs. The repo is the `shepherd.dir` label on the space's Shepherd
@@ -45,10 +45,10 @@ import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings, w
 import { PALETTE_OPEN, paletteSpec, initPalette, renderPalette } from "./palette.js";
 import {
   openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, openSetup, readWorkflow,
-  execSafe, failLine, STARTING, QUEUED, QUEUE_MAX_MS, checkStartable, startStale,
+  execSafe, failLine, STARTING, RESTARTING, QUEUED, QUEUE_MAX_MS, checkStartable, startStale,
   machineStartState, spaceByArg, waitsText,
 } from "./ui.js";
-import { renderSetup, renderNewTab, initSetup, renderNoShepherd } from "./start.js";
+import { renderSetup, renderNewTab, initSetup, renderNoShepherd, renderRestart, openRestart, renderTermHead } from "./start.js";
 import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } from "./toast.js";
 
 const REFRESH_MS = 5000;
@@ -67,6 +67,7 @@ const PROOF_STALE_MS = 15000;
 const LOAD_MS = 15000; // the status bar's machine load
 const CHAT_MAX = 500; // the chat keeps the newest lines (Comments, the digest)
 const QINDEX = new WeakMap(); // questions array → questionIndex(), so it is worked out once per load
+const RESTART_STALE_MS = 180000; // a "restarting" mark older than this (its copy went away mid-restart) is dropped
 const START_STALE_MS = 120000; // a "starting" mark older than this (start.sh done, no Shepherd showed) is dropped
 const QUEUE_IDLE_MS = 5000; // queued lines go once Shepherd has been idle (or done) this long
 const QUEUE_FALLBACK_MS = 90000; // a Shepherd that never reports a status gets queued lines after this
@@ -146,6 +147,8 @@ export default class Shepherd extends View {
       if (s?.key) cx.timer.every(1000, () => { if ((shared(ANSWERED) ?? []).includes(pendingId(s.key, s.q))) closeOverlay(props().overlay); });
       return;
     }
+    // The ✻ Shepherd area's pane header (one copy per pane shown there): a line of live data, nothing to load.
+    if (props()?.panel === "termhead") return;
     this.since = {}; // address -> { stage, since }: label-only cards' time in stage
     this.data = {}; // repo key -> { tasks, questions, alerts, error? }
     this.watching = new Set();
@@ -239,6 +242,7 @@ export default class Shepherd extends View {
   async close() {
     const p = props() ?? {};
     if (isToast(p)) { untrackToast(p.overlay); return; }
+    if (p.panel === "termhead") return;
     if (p.panel === "digest" && shared(DIGEST_OPEN) === p.overlay) setShared(DIGEST_OPEN, null);
     if (p.panel === "steer" && shared(STEER_OPEN) === p.overlay) setShared(STEER_OPEN, null);
     if (p.panel === "palette" && shared(PALETTE_OPEN) === p.overlay) setShared(PALETTE_OPEN, null);
@@ -872,6 +876,53 @@ export default class Shepherd extends View {
       .then((ok) => { if (ok !== true) this.markStarting(space.id, false); });
   }
 
+  /** Restart Shepherd (RECIPE "Restart Shepherd"; asked first by the "restart" dialog): start.sh
+   *  --restart on the space's machine stops the running Shepherd's Claude and starts a fresh one (the
+   *  current PROMPT.md and workflow) in the same terminal, so its address, tab and sub-agents stay and
+   *  the new one re-adopts the running work. Shared RESTARTING marks it from here until start.sh is
+   *  done: lines to Shepherd queue meanwhile (tell), and flushQueue sends them once the new one has
+   *  been idle QUEUE_IDLE_MS. With no Shepherd, it starts one. Resolves when start.sh is done. */
+  restartShepherd(space) {
+    if (!space) return Promise.resolve();
+    const sh = this.shepherd(space);
+    if (!sh) return this.startShepherd(space);
+    if (this.isRestarting(space)) return Promise.resolve();
+    const machine = space.machine ?? null;
+    const again = { action: { name: `shepherd.restart-shepherd:${space.id}` } };
+    const fail = (body) => notify({ title: "Shepherd didn't restart", body: `${body}. Click to try again.`, level: "error", ...again });
+    const dir = this.repo(space)?.dir;
+    if (!dir) { fail(`${space.name} has no folder for Shepherd`); return Promise.resolve(); }
+    this.markRestarting(space.id, true);
+    return (async () => {
+      const s = await checkStartable(this, machine);
+      if (!s.dir) return fail(`${machine ? `${machine}: ` : ""}${s.reason}`);
+      const args = [`${s.dir}/start.sh`, "--restart", "--space", localId(space), dir];
+      const r = machine ? await execSafe("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 120000 })
+        : await execSafe("sh", args, { timeout: 120000 });
+      if (r.code !== 0) return fail(r.code === -1 ? failLine(r) : (r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop());
+      notify({ title: "Shepherd restarted", body: `${space.name}: a fresh Shepherd in ${sh.address} takes over the running work.`, level: "info" });
+    })().catch((e) => fail(String(e?.message ?? e)))
+      .finally(() => {
+        // The old Shepherd's idle time isn't the new one's: queued lines wait for its own first turn.
+        delete (this.idleSince ?? {})[sh.address];
+        delete (this.shepSeen ?? {})[sh.address];
+        this.markRestarting(space.id, false);
+      });
+  }
+
+  /** Sets or clears a space's shared "restarting" mark. */
+  markRestarting(id, on) {
+    const now = { ...(shared(RESTARTING) ?? {}) };
+    if (on) now[id] = Date.now(); else delete now[id];
+    setShared(RESTARTING, now);
+  }
+
+  /** Whether a Restart Shepherd runs for the space (from any copy). */
+  isRestarting(space) {
+    const at = space ? (shared(RESTARTING) ?? {})[space.id] : null;
+    return Boolean(at) && Date.now() - at < RESTART_STALE_MS;
+  }
+
   /** Sets or clears a space's shared "starting" mark. */
   markStarting(id, on) {
     const now = { ...(shared(STARTING) ?? {}) };
@@ -932,7 +983,8 @@ export default class Shepherd extends View {
    *  Claude's folder trust, is blocked and waits), or QUEUE_FALLBACK_MS after it shows if it reports
    *  no status. Each line is claimed in QUEUED first (so another copy never sends it too), removed
    *  once sent and recorded in that space's chat. Lines older than QUEUE_MAX_MS, or whose space is
-   *  gone, are dropped with a toast. The tab bar runs it every 2 s, with pruneStarting. */
+   *  gone, are dropped with a toast. A space whose Shepherd is being restarted waits (its idle clock
+   *  starts again after). The tab bar runs it every 2 s, with pruneStarting. */
   flushQueue(cx) {
     this.pruneStarting();
     const now = Date.now();
@@ -959,6 +1011,7 @@ export default class Shepherd extends View {
       const space = spaces().find((x) => x.id === id);
       const sh = space && this.shepherd(space, all);
       if (!sh) continue;
+      if (this.isRestarting(space)) { delete idle[sh.address]; delete seen[sh.address]; continue; }
       seen[sh.address] ??= now;
       if (["idle", "done"].includes(sh.status)) idle[sh.address] ??= now; else delete idle[sh.address];
       const go = (idle[sh.address] != null && now - idle[sh.address] >= QUEUE_IDLE_MS)
@@ -1025,13 +1078,14 @@ export default class Shepherd extends View {
   }
 
   /** A line to this space's Shepherd (CONVENTIONS.md "Talking to Shepherd"), kept in the chat.
-   *  "sent"; or "queued" when it waits in QUEUED: there's no Shepherd (one is started, with a toast)
-   *  or earlier lines still wait (it goes after them, never ahead); null for an empty line or no space. */
+   *  "sent"; or "queued" when it waits in QUEUED: there's no Shepherd (one is started, with a toast),
+   *  it's being restarted, or earlier lines still wait (it goes after them, never ahead); null for an
+   *  empty line or no space. */
   tell(line, task = null, space = this.space()) {
     const text = String(line ?? "").trim();
     if (!text || !space) return null;
     const sh = this.shepherd(space);
-    if (sh && !this.queued(space).length) {
+    if (sh && !this.queued(space).length && !this.isRestarting(space)) {
       hc(["send", sh.address, text]);
       this.record("you", text, task, space);
       return "sent";
@@ -1316,6 +1370,15 @@ export default class Shepherd extends View {
         const s = arg ? spaceByArg(arg) : this.space();
         if (s) this.startShepherd(s);
       },
+      // Asks first ("Running tasks keep going"); the dialog's Restart runs restart-shepherd-now.
+      "restart-shepherd": () => {
+        const s = arg ? spaceByArg(arg) : this.shownSpace();
+        if (s) openRestart(this, s);
+      },
+      "restart-shepherd-now": () => {
+        const s = arg ? spaceByArg(arg) : this.shownSpace();
+        if (s) this.restartShepherd(s);
+      },
       "setup-shepherd": () => {
         const s = arg ? spaceByArg(arg) : this.space();
         if (s?.machine) openSetup(s.machine, s.id);
@@ -1523,6 +1586,7 @@ export default class Shepherd extends View {
   render(cx) {
     const p = props() ?? {};
     if (isToast(p)) return renderToast(this);
+    if (p.panel === "termhead") return renderTermHead(this);
     // A space switch or All spaces shows another repo: load it now rather than on the next tick.
     this.ensureLoaded(cx);
     if (!p.panel) this.dropStaleSelection(cx);
@@ -1532,6 +1596,7 @@ export default class Shepherd extends View {
     if (p.panel === "setup") return renderSetup(this);
     if (p.panel === "newtab") return renderNewTab(this);
     if (p.panel === "closetab") return renderCloseTab();
+    if (p.panel === "restart") return renderRestart(this);
     if (p.panel === "machine") return renderMachinePop(this);
     if (p.panel === "usage") return renderUsagePop();
     if (p.panel === "addmachine") return renderAddMachine(this);

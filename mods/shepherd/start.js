@@ -2,13 +2,14 @@
 // Shepherd, panel "noshep"; the sidebar), the
 // "Set up Shepherd on <machine>" dialog (panel "setup": confirm, clone, check) and the tab bar's +
 // menu (panel "newtab": Shepherd, Terminal and each agent installed on the space's machine).
-// Every start goes through m.startShepherd().
+// Every start goes through m.startShepherd(). Restart Shepherd asks first (panel "restart"), then
+// m.restartShepherd().
 
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, run, props, closeOverlay } from "herdr";
-import { MONO, palette } from "./common.js";
-import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup, button } from "./ui.js";
+import { spaces, terminals, run, props, openOverlay, closeOverlay } from "herdr";
+import { MONO, palette, localId, machineOf } from "./common.js";
+import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup, button, spaceByArg } from "./ui.js";
 
 /** The ✻ Shepherd mark on an `accent` tile. */
 export const shepherdMark = (t, size = 16) => div().size(size).flex_none().rounded(Math.round(size / 4)).bg(t.accent)
@@ -67,6 +68,62 @@ export function renderNoShepherd(m) {
       .child(div().text_color(t.blocked).child(`${waiting} message${waiting === 1 ? "" : "s"} wait for it`))
       .child(div().id("noshep-discard").text_color(t.accent).cursor_pointer().hover((s) => s.text_color(t.foreground))
         .on_click((_e, cx) => { m.discardQueued(space); cx.notify(); }).child("Discard"))));
+}
+
+// ---- Restart Shepherd ---------------------------------------------------------------------------
+
+/** "Restart Shepherd in <space>?": the one question before a restart (the palette, Space settings and
+ *  the ✻ Shepherd area's Restart all come here, through shepherd.restart-shepherd). With no Shepherd
+ *  there's nothing to keep: it starts one at once. */
+export function openRestart(m, space) {
+  if (!m.shepherd(space)) { m.startShepherd(space); return; }
+  if (m.isRestarting(space)) return;
+  openOverlay({ mod: "shepherd", kind: "dialog", width: 420, height: 176, props: { panel: "restart", space: space.id } });
+}
+
+export function renderRestart(m) {
+  const t = palette();
+  const p = props() ?? {};
+  const space = spaceByArg(p.space);
+  const close = () => closeOverlay(p.overlay);
+  const sh = space ? m.shepherd(space) : null;
+  return v_flex().id("shepherd-restart").size_full().p(16).gap(8).bg(t.background).text_color(t.foreground)
+    .child(h_flex().gap(8).items_center().child(shepherdMark(t, 16))
+      .child(div().text_size(14).font_semibold().child(`Restart Shepherd${space ? ` in ${space.name}` : ""}?`)))
+    .child(div().flex_1().text_size(12).text_color(t.muted).line_height(1.45)
+      .child(sh ? `A fresh Shepherd starts in its terminal${sh.address ? ` (${sh.address})` : ""} with the current instructions and workflow, and picks up where this one left off. Running tasks keep going.`
+        : "This space has no Shepherd any more."))
+    .child(h_flex().gap(8).justify_end()
+      .child(button(t, "rs-cancel", "Cancel", close))
+      .when(Boolean(sh), (el) => el.child(button(t, "rs-go", "Restart", () => {
+        run(`shepherd.restart-shepherd-now:${space.id}`);
+        close();
+      }, { primary: true }))));
+}
+
+/** Panel "termhead": the pane header of the ✻ Shepherd area's terminal block (layout `term`, shown on
+ *  hover over the terminal). On Shepherd's own pane: "✻ Shepherd · <address>" and Restart Shepherd
+ *  (or "Restarting…"); on any other pane (a pill's tab shows in the same block) nothing. A light copy:
+ *  init skips the board's loading and timers for it. */
+export function renderTermHead(m) {
+  const t = palette();
+  const p = props() ?? {};
+  const term = p.terminal ? terminals().find((x) => x.address === p.terminal) : null;
+  if (term?.state !== "live" || term.labels?.["herdr.role"] !== "shepherd") return div();
+  const space = spaces().find((s) => localId(s) === term.labels?.["herdr.space"] && (s.machine ?? null) === machineOf(term)) ?? null;
+  if (!space) return div();
+  const busy = m.isRestarting(space);
+  return h_flex().id("shepherd-termhead").size_full().px(10).gap(8).items_center().bg(t.surface)
+    .border_b(1).border_color(t.border).text_size(11.5).text_color(t.muted)
+    .child(shepherdMark(t, 13))
+    .child(div().text_color(t.foreground).child("Shepherd"))
+    .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(term.address))
+    .child(busy ? div().flex_none().text_color(t.dim).child("Restarting…")
+      : div().id("termhead-restart").flex_none().text_color(t.accent).cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .tooltip("A fresh Shepherd with the current instructions; running tasks keep going")
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); openRestart(m, space); })
+        .child("↻ Restart Shepherd"));
 }
 
 // ---- Set up Shepherd on <machine> ---------------------------------------------------------------
