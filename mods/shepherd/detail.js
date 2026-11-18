@@ -209,9 +209,11 @@ function overview(m, task, t, where) {
         .when(Boolean(file), (el) => el.child(fileChip(m, task, t, file, line, chipId)))
         .child(div().text_size(13).line_height(1.5).text_color(fg).child(text)));
   };
-  const modelSub = (role, stage, model) => {
+  // A Codex run names its skill as Codex does, "$code-review" (PROMPT, Codex agents).
+  const modelSub = (role, stage, model, run = null) => {
     const skill = role === "implementer" ? "" : m.skillOf(stage);
-    return [model, skill.startsWith("/") ? skill : ""].filter(Boolean).join(" · ") || null;
+    const shown = !skill.startsWith("/") ? "" : agentOf(run) === "codex" ? "$" + skill.slice(1) : skill;
+    return [model, shown].filter(Boolean).join(" · ") || null;
   };
 
   const comments = [
@@ -222,7 +224,7 @@ function overview(m, task, t, where) {
       const state = r.result === "pass" && r.stage === "review" ? "approved" : null;
       return {
         at: Date.parse(r.end ?? r.start ?? "") || 0,
-        el: comment({ role, run: r, sub: modelSub(role, r.stage, r.model),
+        el: comment({ role, run: r, sub: modelSub(role, r.stage, r.model, r),
           loop: stageGroup(r.stage) === "plan" ? null : r.loop ?? 1, state, text: r.note }),
       };
     }),
@@ -237,7 +239,7 @@ function overview(m, task, t, where) {
       const rev = runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0];
       return {
         at: (Date.parse(rev?.end ?? "") || 0) + 1,
-        el: comment({ role: "reviewer", run: rev, sub: modelSub("reviewer", "review", rev?.model),
+        el: comment({ role: "reviewer", run: rev, sub: modelSub("reviewer", "review", rev?.model, rev),
           loop: f.loop ?? 1, state: f.state, file: f.file, line: f.line, chipId: `fchip-${f.id ?? i}`, text: f.text }),
       };
     }),

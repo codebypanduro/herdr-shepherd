@@ -238,15 +238,19 @@ async function codexRollouts(from, to) {
   return out;
 }
 
-async function codexSession(run, cwd) {
+async function codexSession(run, cwd, taken = new Set()) {
   const start = Date.parse(run.start) || 0;
   const end = Date.parse(run.end ?? "") || Date.now();
-  // The agent starts a little before `shep start` (hc run first), and its first turn may come later.
+  // The agent starts a little before `shep start` (hc run first). Codex writes the rollout only when its first
+  // prompt goes in, which can be minutes later (behind a first-run screen), so a session that began after the run
+  // did wins over one before it; sessions other runs of the task already have are never this one.
   const all = await codexRollouts(start - 300000, end);
   const want = realDir(cwd);
-  const roots = all.filter((r) => !r.meta.parent_thread_id && !r.meta.source?.subagent && r.meta.cwd && realDir(r.meta.cwd) === want);
+  const roots = all.filter((r) => !r.meta.parent_thread_id && !r.meta.source?.subagent && r.meta.cwd
+    && realDir(r.meta.cwd) === want && !taken.has(String(r.meta.id)));
   if (!roots.length) return null;
-  const root = roots.sort((a, b) => Math.abs(a.at - start) - Math.abs(b.at - start))[0];
+  const after = roots.filter((r) => r.at >= start - 60000).sort((a, b) => a.at - b.at);
+  const root = after[0] ?? roots.sort((a, b) => b.at - a.at)[0];
   const id = root.meta.session_id ?? root.meta.id;
   return { id: String(root.meta.id), cwd: root.meta.cwd, agent: "codex",
     files: all.filter((r) => r === root || (r.meta.session_id === id && r.meta.parent_thread_id)).map((r) => r.file) };
@@ -320,7 +324,7 @@ async function codexTokens(t, run) {
     const root = all.find((r) => r.meta.id === known.session.id);
     if (root) session = { ...known.session, files: [root.file, ...all.filter((r) => r !== root && r.meta.session_id === known.session.id && r.meta.parent_thread_id).map((r) => r.file)] };
   }
-  session ??= await codexSession(run, cwd);
+  session ??= await codexSession(run, cwd, new Set(t.history.filter((r) => r !== run && r.session?.agent === "codex").map((r) => String(r.session.id))));
   if (!session) return { why: `no Codex session in ${cwd} since the run began` };
   const after = t.history.filter((r) => r !== run && r.session?.id === session.id && r.end)
     .reduce((n, r) => Math.max(n, Date.parse(r.end) || 0), 0);
