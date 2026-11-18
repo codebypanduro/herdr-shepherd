@@ -36,7 +36,7 @@ export function historyItems(m) {
 export function renderHistory(m) {
   const t = palette();
   const p = props() ?? {};
-  const items = historyItems(m);
+  const items = m.memo("historyItems", () => historyItems(m));
   const sh = m.shepherd();
   const waiting = m.questions().length;
   const close = () => closeOverlay(p.overlay);
@@ -46,7 +46,7 @@ export function renderHistory(m) {
   const mono = (el) => el.font_family(MONO).text_size(12.5).line_height(1.55);
   // All spaces: each line's space, dim, before it (the design's spaceTag).
   const isAll = m.isAll();
-  const tagOf = (it) => m.spaceTag(it);
+  const tagOf = (it) => (isAll ? m.spaceTag(it) : null);
   const line = (it, i) => {
     if (it.kind === "you") {
       return mono(h_flex().id(`h-${i}`).gap(8).px(10).py(8).rounded(5).bg(t.raised).items_start())

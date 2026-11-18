@@ -273,7 +273,8 @@ export default class Shepherd extends View {
     return spaces().find((s) => s.id === id) ?? spaces().find((s) => s.active) ?? null;
   }
 
-  spaceById(id) { return id ? spaces().find((s) => s.id === id) ?? null : null; }
+  // Once per turn: History and the board call this per line/card, and spaces() copies every space.
+  spaceById(id) { return id ? this.memo("spacesById", () => new Map(spaces().map((s) => [s.id, s]))).get(id) ?? null : null; }
 
   /** A task's, question's, card's, event's or chat line's space (each carries it as `_sid`), else this copy's. */
   spaceOf(x) { return x?._sid ? this.spaceById(x._sid) : this.space(); }
@@ -600,7 +601,8 @@ export default class Shepherd extends View {
 
   /** The answer sent from here for a question tasks.json hasn't recorded yet, else null. */
   sentAnswer(q, space = this.spaceOf(q)) {
-    const repo = this.repo(space);
+    // repo() reads every terminal: once per space per turn (History asks it for each question).
+    const repo = space ? this.memo(`repo:${space.id}`, () => this.repo(space)) : null;
     if (!repo || q.answer != null || !(shared(PENDING) ?? []).includes(pendingId(repo.key, q.id))) return null;
     return (shared(SENT_TEXT) ?? {})[pendingId(repo.key, q.id)] ?? "…";
   }
