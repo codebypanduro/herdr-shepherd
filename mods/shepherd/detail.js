@@ -232,7 +232,7 @@ function overview(m, task, t, where) {
     }),
     // The task's chat (chat.jsonl lines with this task): your `re <id>: …` lines as your text, the
     // board's other lines (pause, steer, status, answers) as short events, and Shepherd's replies.
-    ...m.taskChat(task.id).map((c) => ({
+    ...m.taskChat(task).map((c) => ({
       at: Date.parse(c.at) || now,
       el: chatComment(c, task.id, now),
     })),

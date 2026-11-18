@@ -68,20 +68,36 @@ const EMPTY = Object.freeze({ tasks: [], questions: [], chat: [], alerts: {} });
 const ALL_PANELS = ["bar", "tabs", "history", "digest"];
 
 // Module code is shared by every copy of the mod (AGENTS.md), so these are too:
-// - READS: reads of another machine's repo, { at, p } by repo key. A copy that wants one younger than
-//   its maxAge gets the one in flight or just done, so the board, bar, tab bar and sidebar make one
-//   ssh read per space per period between them, not one each.
+// - READS: reads of another machine's repo (4-5 ssh file reads each), by repo key:
+//   { p, pending, at, failed, fails }. A read in flight is everyone's; a done one is reused while it's
+//   younger than the asker's maxAge, a failed one while its backoff runs (30 s, doubling to 5 min).
+//   Only the layout's own copies (READ_PANELS) start reads: a dialog or popup closing cancels its
+//   calls, so those only reuse the last one (or read privately when there's none).
 // - TAGGED: a space's data with every task, question and chat line marked with its space (`_sid`,
 //   tasks also `_ref`), per data object and space id, made once per load.
 const READS = new Map();
 const TAGGED = new WeakMap();
 
-function sharedRead(key, maxAge, read) {
-  const r = READS.get(key);
-  if (r && Date.now() - r.at < maxAge) return r.p;
-  const p = read();
-  READS.set(key, { at: Date.now(), p });
-  return p;
+const READ_PANELS = [undefined, "bar", "spaces", "tabs", "status", "detail"];
+const PENDING_MAX_MS = 120000; // a read still pending after this was cut off (its copy closed): start another
+const backoffMs = (fails) => Math.min(300000, 30000 * 2 ** Math.max(0, fails - 1));
+
+function sharedRead(key, maxAge, read, canStart) {
+  const now = Date.now(), r = READS.get(key);
+  if (r) {
+    if (r.pending && now - r.at < PENDING_MAX_MS) return r.p;
+    const fresh = !r.pending && now - r.at < (r.failed ? backoffMs(r.fails) : maxAge);
+    if (fresh || (!canStart && !r.pending)) return r.p;
+  }
+  if (!canStart) return read();
+  const e = { pending: true, at: now, failed: false, fails: r?.fails ?? 0 };
+  // readRepo never rejects: a failure comes back as { failed: true, error }.
+  e.p = read().then((out) => {
+    e.pending = false; e.at = Date.now(); e.failed = Boolean(out.failed); e.fails = e.failed ? e.fails + 1 : 0;
+    return out;
+  });
+  READS.set(key, e);
+  return e.p;
 }
 
 function tagged(d, sid) {
@@ -382,48 +398,52 @@ export default class Shepherd extends View {
   }
 
   /** The files load() needs, as read: { s: tasks.json, chat, wf, orch } or { error, wf, orch }. Never throws. */
+  /** The files load() needs: { tasksFile, chat, wf, orch }. A file that isn't there reads as empty;
+   *  a tasks.json that doesn't parse gives `error` (load keeps the last good tasks); a read that fails
+   *  (ssh, the machine, a cancelled call) gives `failed` and `error`, and load keeps everything it had.
+   *  Never rejects. */
   async readRepo(repo) {
-    const out = { s: {}, chat: null, wf: {}, orch: {} };
+    const out = { tasksFile: {}, chat: null, wf: {}, orch: {} };
+    const on = repo.machine;
+    const parse = (text, fallback) => { try { return text == null ? fallback : JSON.parse(text); } catch { return fallback; } };
     try {
-      out.s = (await this.readJson(`${repo.dir}/${TASKS}`, repo.machine)) ?? {};
-      out.chat = await readTextFile(`${repo.dir}/${CHAT}`, { on: repo.machine }).catch(() => null);
-    } catch (e) {
-      out.error = `tasks.json: ${e.message ?? e}`;
-    }
-    // Settings: the person's workflow, then the space's orchestra.json on top. Here that's the one
-    // workflow.json Workflow settings writes (ui.js readWorkflow); on another machine, workflow.json
-    // beside the file Shepherd's label names there, else that file.
-    try {
-      if (!repo.machine) out.wf = (await readWorkflow(this)).wf;
+      const tasks = await readTextFile(`${repo.dir}/${TASKS}`, { on }); // null: absent; rejects: couldn't read
+      try { out.tasksFile = tasks == null ? {} : JSON.parse(tasks); } catch (e) { out.error = `tasks.json: ${e.message ?? e}`; }
+      out.chat = await readTextFile(`${repo.dir}/${CHAT}`, { on });
+      // Settings: the person's workflow, then the space's orchestra.json on top. Here that's the one
+      // workflow.json Workflow settings writes (ui.js readWorkflow); on another machine, workflow.json
+      // beside the file Shepherd's label names there, else that file. Unparsable settings: defaults.
+      if (!on) out.wf = (await readWorkflow(this).catch(() => ({ wf: {} }))).wf ?? {};
       else if (repo.workflow) {
         const mine = repo.workflow.replace(/workflow\.example\.json$/, "workflow.json");
-        out.wf = (await this.readJson(mine, repo.machine)) ?? (await this.readJson(repo.workflow, repo.machine)) ?? {};
+        out.wf = parse(await readTextFile(mine, { on }), null) ?? parse(await readTextFile(repo.workflow, { on }), {});
       }
-    } catch { /* defaults */ }
-    try { out.orch = (await this.readJson(`${repo.dir}/.herdr/orchestra.json`, repo.machine)) ?? {}; } catch { /* defaults */ }
+      out.orch = parse(await readTextFile(`${repo.dir}/.herdr/orchestra.json`, { on }), {});
+    } catch (e) {
+      out.failed = true;
+      out.error = `couldn't read ${on ? `${on}:` : ""}${repo.dir}: ${String(e?.message ?? e).split("\n")[0]}`;
+    }
     return out;
-  }
-
-  async readJson(path, machine) {
-    const text = await readTextFile(path, { on: machine }).catch(() => null);
-    if (text == null) return null;
-    return JSON.parse(text);
   }
 
   /** Reads a repo's tasks.json, chat and settings. `maxAge`: on another machine, a read another copy
    *  made less than this long ago is used instead (sharedRead). */
   async load(repo, maxAge = 0) {
     const prev = this.data[repo.key] ?? { tasks: [], questions: [], alerts: {} };
-    const raw = repo.machine ? await sharedRead(repo.key, maxAge, () => this.readRepo(repo)) : await this.readRepo(repo);
+    const raw = repo.machine
+      ? await sharedRead(repo.key, maxAge, () => this.readRepo(repo), READ_PANELS.includes(props()?.panel))
+      : await this.readRepo(repo);
+    // A read that failed keeps all it had (tasks, chat, settings), with the error in the header.
+    if (raw.failed) { this.data[repo.key] = { ...prev, error: raw.error }; return; }
     let next;
     if (raw.error) {
       // Keep the last good state; shep writes atomically, so this is a hand edit gone wrong.
       next = { ...prev, error: raw.error };
     } else {
-      next = { tasks: raw.s.tasks ?? [], questions: raw.s.questions ?? [] };
+      next = { tasks: raw.tasksFile.tasks ?? [], questions: raw.tasksFile.questions ?? [] };
       // The chat (History): JSON lines; a half-written last line is skipped until it's whole.
       next.chat = (raw.chat ?? "").split("\n").slice(-CHAT_MAX).flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } });
-      this.prunePending(next.chat);
+      this.prunePending(next.chat, repo.key);
     }
     const { wf, orch } = raw;
     const alerts = { toast: true, sound: true, phone: false, ntfy: "", ...wf.alerts, ...orch.alerts };
@@ -537,50 +557,55 @@ export default class Shepherd extends View {
     if (line && this.tell(line)) this.barInput.set_value("");
   }
 
-  /** The Overview's field: `re <id>: <text>` to Shepherd about the task the field's text is for. */
+  /** The Overview's field: `re <id>: <text>` to the Shepherd of the task the field's text is for
+   *  (`askTask`, a ref: ids repeat across spaces), in that task's own space. */
   askAbout(cx) {
-    const id = this.askTask;
+    const ref = this.askTask;
+    const task = this.taskById(ref);
     const text = String(this.askInput.value() ?? "").trim();
-    if (!id || !text) return;
-    const line = `re ${id}: ${text}`;
-    const told = this.tell(line, id);
+    if (!task || !text) return;
+    const space = this.spaceOf(task);
+    const line = `re ${task.id}: ${text}`;
+    const told = this.tell(line, task.id, space);
     if (!told) return;
-    if (told === "queued") { this.askInput.set_value(""); delete this.askDrafts[id]; cx.notify(); return; } // shown from QUEUED
-    // Shown at once; chat.jsonl's copy replaces it (prunePending), or it's marked when recording failed.
-    const p = { at: new Date().toISOString(), from: "you", text: line, task: id, pending: true };
+    if (told === "queued") { this.askInput.set_value(""); delete this.askDrafts[ref]; cx.notify(); return; } // shown from QUEUED
+    // Shown at once; chat.jsonl's copy replaces it (prunePending, for that repo), or it's marked when recording failed.
+    const p = { at: new Date().toISOString(), from: "you", text: line, task: task.id, ref, repo: this.repo(space)?.key ?? null, pending: true };
     this.askPending.push(p);
     this.lastRecord?.then((err) => { if (err) { p.failed = err; cx.notify(); } });
     this.askInput.set_value("");
-    delete this.askDrafts[id];
+    delete this.askDrafts[ref];
     cx.notify();
   }
 
-  /** The field's text belongs to one task: opening another keeps it as a draft and shows that one's.
-   *  Called outside render (render only notices the switch and spawns this). */
-  askFor(id) {
-    if (!this.askInput || this.askTask === id) return;
+  /** The field's text belongs to one task (by ref): opening another keeps it as a draft and shows
+   *  that one's. Called outside render (render only notices the switch and spawns this). */
+  askFor(ref) {
+    if (!this.askInput || this.askTask === ref) return;
     if (this.askTask) this.askDrafts[this.askTask] = this.askInput.value();
-    this.askTask = id;
+    this.askTask = ref;
     this.askFocused = false; // a hidden or switched field may never send blur
-    this.askInput.set_value(id ? this.askDrafts[id] ?? "" : "");
+    this.askInput.set_value(ref ? this.askDrafts[ref] ?? "" : "");
   }
 
   /** Drops lines sent here once chat.jsonl holds them (a line with that text and task, written at or
    *  after the send, give or take 5 s of clock skew); a line not seen within a minute goes too,
    *  unless recording it failed, which stays shown as failed. */
-  prunePending(chat) {
+  prunePending(chat, repoKey) {
     if (!this.askPending?.length) return;
     this.askPending = this.askPending.filter((p) => {
       const sent = Date.parse(p.at);
-      if (chat.some((c) => c.from === "you" && c.task === p.task && c.text === p.text && Date.parse(c.at) >= sent - 5000)) return false;
+      if (p.repo === repoKey && chat.some((c) => c.from === "you" && c.task === p.task && c.text === p.text && Date.parse(c.at) >= sent - 5000)) return false;
       return p.failed || Date.now() - sent < 60000;
     });
   }
 
-  /** chat.jsonl's lines about a task, plus what this copy sent that the file doesn't hold yet. */
-  taskChat(id) {
-    return [...(this.state().chat ?? []).filter((c) => c.task === id), ...(this.askPending ?? []).filter((p) => p.task === id),
-      ...this.queuedChat().filter((c) => c.task === id)];
+  /** chat.jsonl's lines about a task (in its own space), plus what this copy sent that the file doesn't hold yet. */
+  taskChat(task) {
+    const space = this.spaceOf(task);
+    const mine = (c) => c.task === task.id && (c._sid ?? null) === (space?.id ?? null);
+    return [...this.spaceState(space).chat.filter(mine), ...(this.askPending ?? []).filter((p) => p.ref === task._ref),
+      ...(space ? this.queuedChat(space) : []).filter(mine)];
   }
 
   /** A space's queued lines as chat lines (`queued`: shown as waiting for Shepherd); with no space
@@ -1446,7 +1471,7 @@ export default class Shepherd extends View {
       // The Ask field follows the open task; its value is switched outside render.
       // The task's body starts at once, still inside render, where cx.notify() is refused: let the
       // foreground executor run it after this frame (cx.sleep), then switch and redraw.
-      if ((task?.id ?? null) !== this.askTask) cx.spawn(async (cx) => { await cx.sleep(0); this.askFor(this.selectedTask()?.id ?? null); cx.notify(); });
+      if ((task?._ref ?? null) !== this.askTask) cx.spawn(async (cx) => { await cx.sleep(0); this.askFor(this.selectedTask()?._ref ?? null); cx.notify(); });
       // The Terminal tab reads the agent's screen only while it's shown (term.js).
       syncTerm(this, task, cx);
       // 1–6 switch tabs while the detail pane holds the keyboard (the board handles them too), never

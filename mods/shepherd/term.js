@@ -57,8 +57,11 @@ export const termBlocked = (m, task) => {
   return x?.state === "live" && x.status === "blocked";
 };
 
+/** A task as the tab keys it: its ref (`<space id>/<id>`), since ids repeat across spaces in All spaces. */
+const keyOf = (task) => task?._ref ?? task?.id ?? null;
+
 /** What should be mirrored: the open task's terminal while its Terminal tab shows, else nothing. */
-const wantOf = (m, task) => (currentTab() === "terminal" && task ? `${task.id}@${termAddress(m, task) ?? ""}` : null);
+const wantOf = (m, task) => (currentTab() === "terminal" && task ? `${keyOf(task)}@${termAddress(m, task) ?? ""}` : null);
 
 /** One hc call: { ok, code, stdout, error } (error: the first line hc wrote, or why it didn't run). */
 async function hcRun(args) {
@@ -88,7 +91,7 @@ export function syncTerm(m, task, cx) {
     if ((tt.mirror?.want ?? null) === now) return;
     stopTerm(m);
     // The field's text was for that task's agent: another task starts empty.
-    if (task2?.id !== tt.inputTask) { tt.input.set_value(""); tt.inputTask = task2?.id ?? null; }
+    if (keyOf(task2) !== tt.inputTask) { tt.input.set_value(""); tt.inputTask = keyOf(task2); }
     if (now) startTerm(m, task2, now, cx);
     cx.notify();
   });
@@ -100,7 +103,7 @@ function startTerm(m, task, want, cx) {
   const tt = m.termTab;
   const address = termAddress(m, task);
   if (tt.last && tt.last.address !== address) tt.last = null;
-  const term = { want, address, taskId: task.id, lines: tt.last?.lines ?? null, error: null,
+  const term = { want, address, taskId: keyOf(task), lines: tt.last?.lines ?? null, error: null,
     reading: false, again: false, rendered: true, quiet: 0, tick: null, sending: false, scrollTo: false };
   tt.mirror = term;
   if (!address) return;
@@ -206,7 +209,7 @@ function sendTerm(m, taskId, cx) {
 
 export function renderTerm(m, task, t) {
   const tt = m.termTab;
-  const term = tt?.mirror?.taskId === task.id ? tt.mirror : null;
+  const term = tt?.mirror?.taskId === keyOf(task) ? tt.mirror : null;
   const { address, state } = termState(m, task);
   const lines = term?.lines ?? (tt?.last?.address === address ? tt.last.lines : null);
   const root = v_flex().id("term-tab").flex_1().min_h(0).p(14).gap(8);
@@ -239,7 +242,7 @@ export function renderTerm(m, task, t) {
   const keyBtn = ([label, key]) => div().id(`term-key-${key}`).px(9).h(24).flex().items_center().rounded(5)
     .bg(t.raised).cursor_pointer().font_family(MONO).text_size(11).text_color(t.foreground)
     .hover((s) => s.bg(t.hover))
-    .on_click((_e, cx) => pressKey(m, task.id, key, cx))
+    .on_click((_e, cx) => pressKey(m, keyOf(task), key, cx))
     .child(label);
   const keys = h_flex().flex_none().gap(4).items_center()
     .children(KEYS.map(keyBtn))
@@ -261,7 +264,7 @@ export function renderTerm(m, task, t) {
     .child(div().id("term-send").px(10).py(3).rounded(4).bg(t.raised).cursor_pointer()
       .text_size(11).text_color(draft || term?.sending ? t.dim : t.foreground)
       .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => sendTerm(m, task.id, cx))
+      .on_click((_e, cx) => sendTerm(m, keyOf(task), cx))
       .child(term?.sending ? "Sending…" : "Send"));
 
   return root.child(shown).child(keys).child(field);
