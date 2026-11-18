@@ -15,7 +15,7 @@ import { v_flex, h_flex, Input, ScrollHandle } from "gpui-base";
 import { props, run, setShared, closeOverlay, spaces } from "herdr";
 import { MONO, STAGES, VIEW_LIST, TABS, TAB, MAX_LOOPS, GO_KEYS, LETTER_KEYS, recAnswer, refOf, palette as colors } from "./common.js";
 import { machineList } from "./machines.js";
-import { MODELS } from "./settings.js";
+import { MODELS, CODEX_SHOWN, codexModels } from "./settings.js";
 import { readWorkflow } from "./ui.js";
 
 export const PALETTE_OPEN = "shepherd.paletteOpen"; // the open palette's overlay id (⌘K toggles)
@@ -54,7 +54,12 @@ export function initPalette(m, cx, InputState) {
   bindKeys(cx);
   cx.spawn(async () => { m.pal.input.focus(); });
   // The person's workflow.json, which the Workflow rows write: their "current" (Workflow settings' too).
-  cx.spawn(async (cx) => { m.pal.wf = (await readWorkflow(m).catch(() => null))?.wf ?? {}; cx.notify(); });
+  cx.spawn(async (cx) => {
+    const [r, codex] = await Promise.all([readWorkflow(m).catch(() => null), codexModels()]);
+    m.pal.codex = codex.slice(0, CODEX_SHOWN);
+    m.pal.wf = r?.wf ?? {};
+    cx.notify();
+  });
 }
 
 const rowKey = (r) => `${r.g}|${r.tag ?? ""}|${r.label}`;
@@ -134,9 +139,15 @@ function allRows(m) {
     const set = (path, value) => cmd("workflow-set", JSON.stringify({ path, value }));
     const loops = wf.maxLoops ?? MAX_LOOPS;
     for (let n = 1; n <= 5; n++) add("Workflow", `Max loops: ${n}`, set(["maxLoops"], n), { meta: meta(loops, s.maxLoops ?? loops, n) });
+    // A model sets the stage's agent with it (Workflow settings does the same), so "Review with sonnet"
+    // after a Codex review runs Claude again.
     for (const [stage, verb] of [["implement", "Implement"], ["review", "Review"]]) {
-      const cur = wf.stages?.[stage]?.model ?? null;
-      for (const mo of MODELS) add("Workflow", `${verb} with ${mo}`, set(["stages", stage, "model"], mo), { meta: meta(cur, s.stages?.[stage]?.model ?? cur, mo) });
+      const cfg = wf.stages?.[stage] ?? {};
+      const cur = cfg.model ?? null;
+      const rows = [...MODELS.map((mo) => ["claude", mo, mo]), ...(m.pal.codex ?? []).map((mo) => ["codex", mo, `${mo} (Codex)`])];
+      for (const [agent, mo, label] of rows) {
+        add("Workflow", `${verb} with ${label}`, set(["stages", stage], { ...cfg, agent, model: mo }), { meta: meta(cur, s.stages?.[stage]?.model ?? cur, mo) });
+      }
     }
   }
   return out;

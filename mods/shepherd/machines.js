@@ -3,10 +3,12 @@
 // sidebar copy probes every machine and keeps the results in shared state, so popovers and
 // settings dialogs (other copies) read the same numbers.
 
-import { div, svg, image } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { machines, terminals, shared, setShared, exec, knownAgents, readTextFile, appHome, props } from "herdr";
-import { MONO, palette, machineOf } from "./common.js";
+import { MONO, palette, machineOf, agentIcon } from "./common.js";
+
+export { agentIcon };
 import { MACHINE_INFO, MACHINE_KINDS, USAGE, readWorkflow, shepherdHome, shepherdOn } from "./ui.js";
 
 export const KINDS = [["server", "Server"], ["laptop", "MacBook"], ["mini", "Mac mini"], ["tower", "Desktop"]];
@@ -225,12 +227,6 @@ export function machineIcon(t, mc, { size = 1, dotRing = t.chrome } = {}) {
     .child(div().absolute().right(-2).bottom(-1).size(6).rounded(3).bg(dot).border(1.5).border_color(dotRing));
 }
 
-export function agentIcon(t, tool, size = 13) {
-  return tool === "claude"
-    ? image("icons/claude.svg").size(size).flex_none()
-    : div().size(size).flex_none().rounded(3).bg(t.foreground).text_color(t.background).font_family(MONO)
-      .text_size(7).font_semibold().flex().items_center().justify_center().child(">_");
-}
 
 /** The machine popover (sidebar footer or a space row's machine): model, agents, meters, installed. */
 export function renderMachinePop(m) {

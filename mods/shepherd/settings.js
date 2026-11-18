@@ -6,14 +6,16 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { spaces, terminals, run, closeOverlay, props } from "herdr";
-import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf } from "./common.js";
+import { spaces, terminals, run, closeOverlay, props, exec } from "herdr";
+import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf, agentIcon, stageAgent } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
 import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, checkStartable, openSetup } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 export const MODELS = ["opus", "sonnet", "haiku"];
+/** How many of Codex's own models to offer per stage: its newest, as its models cache lists them. */
+export const CODEX_SHOWN = 3;
 /** The Grill stage's skills: the default (common.js, /grill-with-docs, which also keeps a glossary and
  *  decisions) and /grill-me. */
 const GRILL_SKILLS = [STAGES.grill.skill, "/grill-me"];
@@ -55,8 +57,19 @@ const title = (t, text, skill) => h_flex().gap(6).items_center().text_size(13)
 // ---- Workflow settings -----------------------------------------------------------------------
 
 export function initWorkflow(m, cx) {
-  m.wf = { error: null, doc: null, file: null };
+  m.wf = { error: null, doc: null, file: null, codex: [] };
   cx.spawn(async (cx) => { await reloadWorkflow(m); const repo = m.repo(); if (repo) await m.load(repo); cx.notify(); });
+  cx.spawn(async (cx) => { m.wf.codex = await codexModels(); cx.notify(); });
+}
+
+/** Codex's models on this computer, from the cache Codex keeps of its model list (the ones it shows
+ *  in its own picker), newest first; [] without Codex. */
+export async function codexModels() {
+  const code = 'try{const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));'
+    + 'process.stdout.write((d.models??[]).filter((x)=>x.visibility==="list"&&x.slug).map((x)=>x.slug).join("\\n"))}catch{}';
+  const r = await exec("sh", ["-c", 'node -e "$1" "${CODEX_HOME:-$HOME/.codex}/models_cache.json"', "codex", code], { timeout: 10000 })
+    .catch(() => null);
+  return (r?.stdout ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
 }
 
 async function reloadWorkflow(m) {
@@ -99,8 +112,24 @@ export function renderWorkflow(m) {
   const s = m.settings();
   const st = wf.stages ?? {};
   const set = (path, v) => (_e, cx) => setWorkflow(m, cx, path, v);
-  const models = (stage, cur) => h_flex().gap(4).children(withValue(MODELS, cur).map((mo) =>
-    chip(t, `wf-${stage}-${mo}`, mo, mo === cur, stage === "shepherd" ? set(["shepherd", "model"], mo) : set(["stages", stage, "model"], mo))));
+  // Per stage: Claude's models, and under them Codex's (with its mark); picking one sets the stage's
+  // agent with its model. Shepherd itself stays on Claude Code (start.sh starts claude).
+  const models = (stage) => {
+    if (stage === "shepherd") {
+      const cur = wf.shepherd?.model;
+      return h_flex().gap(4).children(withValue(MODELS, cur).map((mo) => chip(t, `wf-shepherd-${mo}`, mo, mo === cur, set(["shepherd", "model"], mo))));
+    }
+    const cfg = st[stage] ?? {};
+    const agent = stageAgent(cfg);
+    const pick = (a, mo) => set(["stages", stage], { ...cfg, agent: a, model: mo });
+    const line = (a, list) => h_flex().gap(4).items_center()
+      .child(div().w(16).flex().justify_center().child(agentIcon(t, a, 13)))
+      .children(list.map((mo) => chip(t, `wf-${stage}-${a}-${mo.replace(/[^a-z0-9-]/gi, "")}`, mo, agent === a && mo === cfg.model, pick(a, mo))));
+    const codex = m.wf.codex.slice(0, CODEX_SHOWN);
+    return v_flex().gap(4).items_end()
+      .child(line("claude", agent === "claude" ? withValue(MODELS, cfg.model) : MODELS))
+      .when(codex.length > 0 || agent === "codex", (el) => el.child(line("codex", agent === "codex" ? withValue(codex, cfg.model) : codex)));
+  };
   const lim = { ...LIMITS, ...wf.limits };
   const alerts = { toast: true, sound: true, phone: false, ...wf.alerts };
   const proof = st.proof ?? {};
@@ -118,19 +147,19 @@ export function renderWorkflow(m) {
         .child(div().text_color(t.dim).child("$"))
         .child(div().flex_1().child(`npx skills add ${wf.skills ?? "mattpocock/skills"}`))
         .child(div().text_color(t.dim).child(`tracker: ${trackerName(wf.tracker)}`)))
-      .child(row(t, "✳", title(t, "Shepherd"), "The agent you talk to. It plans the flow, hands out work and asks you questions. A new model takes effect when Shepherd restarts.", models("shepherd", wf.shepherd?.model)))
-      .child(row(t, "01", title(t, "Triage", "/triage"), "Only for issues from other people. Your own work skips it.", models("triage", st.triage?.model)))
+      .child(row(t, "✳", title(t, "Shepherd"), "The agent you talk to. It plans the flow, hands out work and asks you questions. A new model takes effect when Shepherd restarts.", models("shepherd")))
+      .child(row(t, "01", title(t, "Triage", "/triage"), "Only for issues from other people. Your own work skips it.", models("triage")))
       .child(row(t, "02", title(t, "Grill", grillSkill), "Grills you until you agree. No limit.",
         v_flex().gap(4).items_end()
           .child(h_flex().gap(4).children(withValue(GRILL_SKILLS, grillSkill).map((k) =>
             // Element ids without the skill's "/".
             chip(t, `wf-grill-${k.replace(/[^a-z0-9-]/gi, "")}`, k, k === grillSkill, set(["stages", "grill", "skill"], k)))))
-          .child(models("grill", st.grill?.model))))
+          .child(models("grill"))))
       .child(row(t, "03", title(t, "Spec / wayfinder", "/to-spec · /wayfinder"), "Writes the spec from the grilling."))
       .child(row(t, "04", title(t, "To tickets", "/to-tickets"), "Vertical slices with blocking edges. You approve the breakdown.",
         div().text_size(12).text_color(t.muted).child("Asks you to approve")))
-      .child(row(t, "05", title(t, "Implement", "/implement"), "Builds one ticket and fixes review notes.", models("implement", st.implement?.model)))
-      .child(row(t, "06", title(t, "Code review", "/code-review"), "Findings send the ticket back to Implement.", models("review", st.review?.model)))
+      .child(row(t, "05", title(t, "Implement", "/implement"), "Builds one ticket and fixes review notes.", models("implement")))
+      .child(row(t, "06", title(t, "Code review", "/code-review"), "Findings send the ticket back to Implement.", models("review")))
       .child(row(t, "07", title(t, "CI checks"), "Runs on the ticket's PR. A failing check counts as a loop.",
         h_flex().gap(6).items_center().text_size(12).text_color(t.muted).child("Set per space:")
           .child(svg("mods/shepherd/icons/gear.svg").size(12).text_color(t.dim)).child("on each space")))

@@ -2,10 +2,10 @@
 // Changes and Files come from git in the task's worktree (see git.js), Terminal mirrors the task's
 // agent (term.js); the rest is tasks.json.
 
-import { div, image } from "gpui-kit";
+import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { run, setShared } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens, stateColor, sectionHeading } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens, stateColor, sectionHeading, agentOf, agentIcon } from "./common.js";
 import { renderChanges, renderFiles, fileIcon, worktreeOf } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
@@ -142,16 +142,12 @@ const ROLES = (t) => ({
   ci: ["CI", t.muted], qa: ["QA", t.ansi6],
 });
 
-/** Which agent a model runs in: Codex for codex/gpt models, else Claude Code; null with no model. */
-const agentOf = (model) => (!model ? null : /codex|gpt/i.test(model) ? "codex" : "claude");
-
 /** A comment's 22px avatar: the agent's icon (Claude Code, Codex, or the Shepherd terminal's own
  *  program) with a corner in the role's color, else the role's initial on its color. */
-function avatar(t, role, { model = null, program = null } = {}) {
+function avatar(t, role, { run = null, program = null } = {}) {
   const [name, color] = ROLES(t)[role] ?? [role, t.muted];
-  const agent = agentOf(model);
-  const icon = program?.icon ? programIcon(t, program, 14)
-    : agent ? image(`icons/${agent}.svg`).size(14).flex_none() : null;
+  const agent = agentOf(run);
+  const icon = program?.icon ? programIcon(t, program, 14) : agent ? agentIcon(t, agent, 14) : null;
   const tile = div().size(22).rounded(5).flex().items_center().justify_center();
   return div().relative().size(22).flex_none()
     .tooltip(icon ? `${program?.name ?? (agent === "codex" ? "Codex" : "Claude Code")} · ${name}` : name)
@@ -198,10 +194,10 @@ function overview(m, task, t, where) {
     .font_family(MONO).text_size(10).text_color(t.muted).child(div().min_w(0).whitespace_nowrap().child(s.mark))));
 
   // One comment: avatar, who, "model · skill", "loop n", a state chip, a file:line chip, the text.
-  const comment = ({ role, model = null, program = null, sub = null, loop = null, state = null, file = null, line = null, chipId = null, text, fg = t.foreground, subColor = t.dim }) => {
+  const comment = ({ role, run = null, program = null, sub = null, loop = null, state = null, file = null, line = null, chipId = null, text, fg = t.foreground, subColor = t.dim }) => {
     const [name] = ROLES(t)[role] ?? [role];
     return h_flex().gap(10).py(10).items_start().border_t(1).border_color(t.border)
-      .child(avatar(t, role, { model, program }))
+      .child(avatar(t, role, { run, program }))
       .child(v_flex().flex_1().min_w(0).gap(5)
         .child(h_flex().gap(8).items_center().flex_wrap()
           .child(div().text_size(12).font_semibold().child(name))
@@ -226,7 +222,7 @@ function overview(m, task, t, where) {
       const state = r.result === "pass" && r.stage === "review" ? "approved" : null;
       return {
         at: Date.parse(r.end ?? r.start ?? "") || 0,
-        el: comment({ role, model: r.model, sub: modelSub(role, r.stage, r.model),
+        el: comment({ role, run: r, sub: modelSub(role, r.stage, r.model),
           loop: stageGroup(r.stage) === "plan" ? null : r.loop ?? 1, state, text: r.note }),
       };
     }),
@@ -241,7 +237,7 @@ function overview(m, task, t, where) {
       const rev = runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0];
       return {
         at: (Date.parse(rev?.end ?? "") || 0) + 1,
-        el: comment({ role: "reviewer", model: rev?.model, sub: modelSub("reviewer", "review", rev?.model),
+        el: comment({ role: "reviewer", run: rev, sub: modelSub("reviewer", "review", rev?.model),
           loop: f.loop ?? 1, state: f.state, file: f.file, line: f.line, chipId: `fchip-${f.id ?? i}`, text: f.text }),
       };
     }),

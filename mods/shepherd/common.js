@@ -1,6 +1,6 @@
 // Shared by every Shepherd view: stages, colors and small helpers.
 
-import { div, svg } from "gpui-kit";
+import { div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { theme, shared, setShared } from "herdr";
 
@@ -234,3 +234,19 @@ export function statusFilters(m, t, all, header) {
 /** What runs Proof, for its heading and the PR card's row: nothing by hand when the workflow's
  *  `stages.proof.headless` is off, else its browser, else "headless browser". */
 export const proofBrowser = (proof) => (proof?.headless === false ? "run by hand" : String(proof?.browser || "headless browser"));
+
+/** The program a stage run's agent is: what shep recorded (`start --agent`), else Codex for a gpt or
+ *  codex model, else Claude Code; null with neither. shep.mjs (agentOfRun) guesses the same way. */
+export const agentOf = (run) => (run?.agent === "claude" || run?.agent === "codex" ? run.agent
+  : !run?.model ? null : /codex|gpt/i.test(run.model) ? "codex" : "claude");
+
+/** A workflow stage's agent: its `agent`, else by its model as agentOf. */
+export const stageAgent = (st) => agentOf({ agent: st?.agent, model: st?.model }) ?? "claude";
+
+/** Claude Code's or Codex's mark, as the design draws them: Claude's icon, Codex's ">_" tile. */
+export function agentIcon(t, tool, size = 13) {
+  return tool === "claude"
+    ? image("icons/claude.svg").size(size).flex_none()
+    : div().size(size).flex_none().rounded(3).bg(t.foreground).text_color(t.background).font_family(MONO)
+      .text_size(Math.max(7, Math.round(size * 0.55))).font_semibold().flex().items_center().justify_center().child(">_");
+}
