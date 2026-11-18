@@ -20,8 +20,8 @@ import { renderBoard } from "./board.js";
 import { peekedKey, closePeek } from "./peek.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
-import { renderDetail, TAB, TABS, currentTab } from "./detail.js";
-import { syncTerm, stopTerm, sendTerm } from "./term.js";
+import { renderDetail, TAB, TABS } from "./detail.js";
+import { initTerm, syncTerm, stopTerm } from "./term.js";
 import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
 import { loadPr, loadProof } from "./ship.js";
 import { renderTabBar, renderCloseTab } from "./tabbar.js";
@@ -113,13 +113,7 @@ export default class Shepherd extends View {
       this.askTask = null; // the task the field's text is for
       this.askDrafts = {}; // task id -> unsent text, kept when another task is opened
       this.askPending = []; // lines sent here that chat.jsonl doesn't hold yet, shown at once
-      // The Terminal tab (term.js): its scroll, kept at the bottom, and "Type to <address>…".
-      this.termScroll = ScrollHandle.new();
-      this.termInput = InputState.new({ placeholder: "" });
-      this.termInput.on("submit", (_e, cx) => sendTerm(this, cx));
-      this.termInput.on("change", (_e, cx) => cx.notify());
-      this.termInput.on("focus", () => { this.termFocused = true; });
-      this.termInput.on("blur", () => { this.termFocused = false; });
+      initTerm(this); // the Terminal tab's state (term.js): this.termTab
     }
     if (p.panel === "spaces") initSidebar(this, cx, InputState);
     if (p.panel === "addmachine") initAddMachine(this, cx, InputState);
@@ -1181,14 +1175,14 @@ export default class Shepherd extends View {
       // foreground executor run it after this frame (cx.sleep), then switch and redraw.
       if ((task?.id ?? null) !== this.askTask) cx.spawn(async (cx) => { await cx.sleep(0); this.askFor(this.selectedTask()?.id ?? null); cx.notify(); });
       // The Terminal tab reads the agent's screen only while it's shown (term.js).
-      syncTerm(this, task, currentTab(), cx, currentTab);
-      // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too), never
-      // while typing in the Ask field: its keys bubble up here. A click in the field stops there
-      // (detail.js), so this one doesn't take the keyboard from it.
+      syncTerm(this, task, cx);
+      // 1–6 switch tabs while the detail pane holds the keyboard (the board handles them too), never
+      // while typing in the Ask field or the Terminal tab's field: their keys bubble up here. A click
+      // in either field stops there (detail.js, term.js), so this one doesn't take the keyboard from it.
       return renderDetail(this).track_focus(this.keys)
         .on_mouse_down("left", () => this.keys.focus())
         .on_key_down((e, cx) => {
-          if (this.askFocused || this.termFocused) return;
+          if (this.askFocused || this.termTab?.focused) return;
           if (!e.modifiers?.platform && !e.modifiers?.control && this.detailTab(e.key)) cx.stop_propagation();
         });
     }

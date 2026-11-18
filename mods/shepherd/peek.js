@@ -6,7 +6,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Popup } from "gpui-base";
 import { hc, shared } from "herdr";
-import { ROLE, MONO, STEER_OPEN, age, kTokens, statusColor, taskTokens } from "./common.js";
+import { ROLE, MONO, STEER_OPEN, screenLines, age, kTokens, statusColor, taskTokens } from "./common.js";
 
 export const PEEK_MS = 380;
 const PEEK_REFRESH_MS = 1500;
@@ -71,7 +71,7 @@ export function trackPeek(m, c, e) {
 /** The last lines of a terminal screen, without Claude Code's input box and status line under it
  *  (between the last two rules) and without blank or right-aligned notice lines. */
 export function screenTail(text, n = PEEK_LINES) {
-  let lines = String(text ?? "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").split("\n").map((l) => l.replace(/\s+$/, ""));
+  let lines = screenLines(text);
   const rule = (l) => /^\s*[─━═]{8,}\s*$/.test(l);
   const last = lines.findLastIndex(rule);
   if (last >= 0) {

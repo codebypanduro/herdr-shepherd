@@ -2,7 +2,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { theme } from "herdr";
+import { theme, shared } from "herdr";
 
 /** The theme, with the board's status colors on the design's hues: working blue, needs-you amber,
  *  done green. Herdr's own status colors differ by theme (graphite: working yellow, blocked red,
@@ -21,6 +21,26 @@ export const SELECTED = "shepherd.selected";
 export const DIGEST_OPEN = "shepherd.digestOpen"; // the open digest's overlay id
 export const HISTORY_OPEN = "shepherd.historyOpen"; // the open History's overlay id
 export const STEER_OPEN = "shepherd.steerOpen"; // the open steer menu's overlay id (no peek over it)
+export const TAB = "shepherd.detailTab"; // the task detail's open tab
+
+/** The task detail's tabs, in order (1–6 switch them). */
+export const TABS = ["overview", "review", "changes", "files", "proof", "terminal"];
+/** The open task's tab (shared, so the board's 1–6 keys switch it too). */
+export const currentTab = () => (TABS.includes(shared(TAB)) ? shared(TAB) : "overview");
+
+/** A terminal screen as lines: ANSI (CSI, OSC, charset selects, 2-byte escapes) and \r stripped,
+ *  trailing spaces and the blank rows under the last text gone. */
+export function screenLines(text) {
+  const lines = String(text ?? "")
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[()*+][0-9A-Za-z]/g, "")
+    .replace(/\x1b[@-Z\\-_]/g, "")
+    .replace(/\r/g, "")
+    .split("\n").map((l) => l.replace(/\s+$/, ""));
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  return lines;
+}
 
 /** The main views, in the tab bar's order. */
 export const VIEW_LIST = [["board", "Board"], ["pipeline", "Pipeline"], ["deps", "Dependencies"], ["needs", "Needs you"]];

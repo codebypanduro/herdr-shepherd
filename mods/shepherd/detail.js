@@ -5,17 +5,14 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
 import { renderTerm, termBlocked } from "./term.js";
 
-export const TAB = "shepherd.detailTab";
-export const TABS = ["overview", "review", "changes", "files", "proof", "terminal"];
+export { TAB, TABS, currentTab };
 const TAB_TITLES = { overview: "Overview", review: "Review", changes: "Changes", files: "Files", proof: "Proof", terminal: "Terminal" };
-/** The open task's tab (shared, so the board's 1–6 keys switch it too). */
-export const currentTab = () => (TABS.includes(shared(TAB)) ? shared(TAB) : "overview");
 const BUILD = ["implement", "review", "ci", "proof"];
 
 export { tint };
