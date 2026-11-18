@@ -34,6 +34,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendF
 import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 
 const STAGES = ["triage", "grill", "spec", "tickets", "implement", "review", "ci", "proof", "merge", "done"];
 const STATUSES = ["working", "blocked", "queued", "paused", "parked", "done"];
@@ -324,6 +325,36 @@ switch (cmd) {
     const line = { at: now(), from, text, ...(typeof opt.task === "string" ? { task: opt.task } : {}) };
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(join(dirname(file), "chat.jsonl"), JSON.stringify(line) + "\n");
+    break;
+  }
+  case "trust": {
+    // trust <worktree>: mark a task worktree trusted in Claude Code (~/.claude.json) before its agent
+    // starts, so it doesn't stop at "Do you trust this folder?". Only when the person already trusts
+    // its repo, or another worktree of that repo under the same folder: never anything else.
+    const wt = args[0];
+    if (!wt || !existsSync(wt)) die("trust <worktree folder>");
+    const real = (d) => { try { return execFileSync("realpath", [d], { encoding: "utf8" }).trim(); } catch { return d; } };
+    const dir = real(wt);
+    let repo;
+    try {
+      repo = dirname(execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim());
+    } catch { die(`trust: ${wt} isn't a git worktree`); }
+    const cfg = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
+    let c;
+    try { c = JSON.parse(readFileSync(cfg, "utf8")); } catch (e) { die(`trust: can't read ${cfg}: ${e.message}`); }
+    const projects = c.projects ?? {};
+    const ok = (k) => projects[k]?.hasTrustDialogAccepted === true;
+    if (ok(dir)) { console.log(`trusted already: ${dir}`); break; }
+    const siblings = dirname(dir);
+    const why = ok(repo) || ok(real(repo)) ? `its repo ${repo} is trusted`
+      : Object.keys(projects).find((k) => dirname(k) === siblings && ok(k) && k !== dir) ? `another worktree in ${siblings} is trusted` : null;
+    if (!why) { console.log(`not trusted: ${repo} isn't trusted in Claude; the agent will ask`); break; }
+    // Claude Code rewrites this file itself: read, change one key, replace atomically.
+    c.projects = { ...projects, [dir]: { ...(projects[dir] ?? {}), hasTrustDialogAccepted: true } };
+    const tmp = `${cfg}.shep-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(c, null, 2));
+    renameSync(tmp, cfg);
+    console.log(`trusted ${dir}: ${why}`);
     break;
   }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;

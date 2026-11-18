@@ -92,7 +92,7 @@ Send the planner: "/to-tickets <id>: on the spec in `.herdr/shepherd/plans/<id>/
 
 ### Starting a ticket
 
-A ticket starts when `{{SHEP}} ready` lists it (all blockers done). Make its worktree (branch `<id lowercased>-<slug of title>`, folder `~/.herdr/worktrees/<repo name>/<branch>`: `git -C {{REPO}} worktree add -b <branch> <folder>`, then `set <id> branch=… worktree=…`) and run the build loop with its brief. Whenever a task reaches `done`, run `ready` again and start what it frees.
+A ticket starts when `{{SHEP}} ready` lists it (all blockers done). Make its worktree (branch `<id lowercased>-<slug of title>`, folder `~/.herdr/worktrees/<repo name>/<branch>`: `git -C {{REPO}} worktree add -b <branch> <folder>`, then `{{SHEP}} trust <folder>` so its agents don't stop at Claude's folder-trust prompt (it only trusts it when the person already trusts the repo or another of its worktrees; otherwise the agent asks them, and you tell them in one `say --task` line to open the task's Terminal tab and pick "Yes, I trust this folder"), then `set <id> branch=… worktree=…`) and run the build loop with its brief. Whenever a task reaches `done`, run `ready` again and start what it frees.
 
 **The grilling's docs.** When you make the worktree of a plan's first ticket and `{{REPO}}/.herdr/shepherd/plans/<parent>/docs/` has files, bring them in before Implement: copy `docs/CONTEXT.md` to `<worktree>/CONTEXT.md` and `docs/adr/*` to `<worktree>/docs/adr/`, then `git -C <worktree> add CONTEXT.md docs/adr` and `git -C <worktree> commit -m "<parent>: glossary and decisions from grilling"`. They reach main with that ticket's PR or squash merge; nothing goes straight to main. If the copy changes nothing (the docs are already in), skip the commit.
 
