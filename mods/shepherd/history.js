@@ -32,7 +32,7 @@ export function historyItems(m) {
   return items.sort((a, b) => a.at - b.at);
 }
 
-export function renderHistory(m, cx) {
+export function renderHistory(m) {
   const t = palette();
   const p = props() ?? {};
   const items = historyItems(m);
@@ -92,8 +92,9 @@ export function renderHistory(m, cx) {
       .child(div().font_semibold().child(`Shepherd · ${m.space()?.name ?? "—"}`))
       .when(Boolean(sh), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${sh.address} · ${items.length} messages`)))
       .when(!sh, (el) => el.child(h_flex().flex_1().min_w(0).gap(6).items_center().text_color(t.dim)
-        .child(div().flex_none().child(m.isStarting(m.space()) ? "starting ·" : "not running ·"))
-        .child(startAction(m, cx, t, m.space(), "h-shep"))))
+        .when(m.isStarting(m.space()), (el) => el.child(div().flex_none().child("starting…")))
+        .when(!m.isStarting(m.space()), (el) => el.child(div().flex_none().child("not running ·"))
+          .child(startAction(m, t, m.space(), "h-shep")))))
       .when(waiting > 0, (el) => el.child(div().id("h-waiting").px(8).py(2).rounded(10).cursor_pointer()
         .bg(tint(t.blocked, 0.14)).text_color(t.blocked).text_size(11)
         .on_click(() => { setShared(VIEW, "needs"); close(); })

@@ -7,7 +7,7 @@ import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, run, props, closeOverlay } from "herdr";
 import { MONO, palette } from "./common.js";
-import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup } from "./ui.js";
+import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup, button } from "./ui.js";
 
 /** The ✻ Shepherd mark on an `accent` tile (the bar's avatar, small). */
 export const shepherdMark = (t, size = 16) => div().size(size).flex_none().rounded(Math.round(size / 4)).bg(t.accent)
@@ -24,13 +24,13 @@ export function programIcon(t, program, size = 13) {
 /** Start Shepherd for a space, inline (one short line): "Start Shepherd", "Starting…", "Checking…",
  *  "Set up Shepherd on <machine>" when that machine has no herdr-shepherd checkout, or the reason it
  *  can't, greyed (whole on hover), with Retry when the machine didn't answer. Nothing when it runs. */
-export function startAction(m, cx, t, space, idp, { size = 12 } = {}) {
-  const st = m.startState(space, cx);
+export function startAction(m, t, space, idp, { size = 12 } = {}) {
+  const st = m.startState(space);
   const stop = (_e, cx) => cx.stop_propagation();
   const link = (id, label, onClick) => div().id(id).flex_none().text_size(size).text_color(t.accent).cursor_pointer()
     .hover((s) => s.text_color(t.foreground))
     .on_mouse_down("left", stop)
-    .on_click((_e, cx) => { cx.stop_propagation(); onClick(); cx.notify(); })
+    .on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); cx.notify(); })
     .child(label);
   const dim = (text) => div().flex_none().text_size(size).text_color(t.dim).child(text);
   if (st.state === "running") return div();
@@ -44,8 +44,10 @@ export function startAction(m, cx, t, space, idp, { size = 12 } = {}) {
   return h_flex().min_w(0).gap(6).items_center()
     .child(div().id(`${idp}-why`).min_w(0).max_w(320).truncate().text_size(size).text_color(t.dim)
       .tooltip(`Can't start here: ${st.reason}`).child(`Can't start here: ${st.reason}`))
-    .when(st.state === "unreachable", (el) => el.child(link(`${idp}-retry`, "Retry",
-      () => cx.spawn(async (cx) => { await checkStartable(m, space.machine ?? null, true); cx.notify(); }))));
+    .when(st.state === "unreachable", (el) => el.child(link(`${idp}-retry`, "Retry", (cx) => {
+      const asked = checkStartable(m, space.machine ?? null, true);
+      cx.spawn(async (cx) => { await asked; cx.notify(); });
+    })));
 }
 
 // ---- Set up Shepherd on <machine> ---------------------------------------------------------------
@@ -80,11 +82,6 @@ export function renderSetup(m) {
 
   const go = (cx) => runSetup(m, cx, machine);
 
-  const button = (id, label, primary, onClick) => div().id(id).px(12).h(28).flex().items_center().rounded(5).cursor_pointer()
-    .text_size(12).font_semibold()
-    .when(primary, (el) => el.bg(t.solid).text_color(t.solid_foreground))
-    .when(!primary, (el) => el.border(1).border_color(t.input).text_color(t.foreground).hover((s) => s.bg(t.hover)))
-    .on_click(onClick).child(label);
   const step = (mark, color, text, sub) => h_flex().gap(10).items_start()
     .child(div().w(14).flex_none().font_family(MONO).text_size(12).text_color(color).child(mark))
     .child(v_flex().flex_1().min_w(0).gap(2)
@@ -107,7 +104,7 @@ export function renderSetup(m) {
       .child(div().px(10).py(8).rounded(5).border(1).border_color(t.border).bg(t.surface).font_family(MONO).text_size(11.5)
         .text_color(t.foreground).child(`git clone ${SETUP_REPO} ${SETUP_DIR}`))
       .child(div().text_size(11.5).text_color(t.dim).line_height(1.45)
-        .child(`Nothing else changes on ${machine}: no links in ~/.config/herdr-app, no settings. Start Shepherd then finds it in ${SETUP_DIR}. Shepherd also needs node, hc and claude there. If ${SETUP_DIR} is already there, it's used as it is.`))
+        .child(`Nothing else changes on ${machine}: no links in ~/.config/herdr-app, no settings. Start Shepherd then finds it in ${SETUP_DIR}. Shepherd also needs node, hc and claude there. If ${SETUP_DIR} already holds a herdr-shepherd checkout, that's used and nothing is cloned; anything else there stops the setup.`))
       .when(ph !== "confirm", (el) => el.child(v_flex().gap(8).pt(4)
         .child(step(cloneMark, cloneColor, `Cloning into ${SETUP_DIR} on ${machine}`,
           ph === "error" && cloneMark === "✕" ? st.error : null))
@@ -116,16 +113,16 @@ export function renderSetup(m) {
         .when(ph === "cloning" || ph === "checking", (el) => el.child(spin(div().text_size(11).text_color(t.dim).child(ph === "cloning" ? "Cloning… (up to a few minutes)" : "Checking…"))))))
     .child(h_flex().flex_none().px(18).py(12).gap(8).items_center().border_t(1).border_color(t.border)
       .child(div().flex_1().font_family(MONO).text_size(10.5).text_color(t.dim).child(`${machine}:${SETUP_DIR}`))
-      .when(ph === "confirm", (el) => el.child(button("setup-cancel", "Cancel", false, close))
-        .child(button("setup-go", `Set up on ${machine}`, true, (_e, cx) => go(cx))))
-      .when(ph === "cloning" || ph === "checking", (el) => el.child(button("setup-close", "Close", false, close)))
-      .when(ph === "error", (el) => el.child(button("setup-close", "Close", false, close))
-        .child(button("setup-retry", "Retry", true, (_e, cx) => go(cx))))
-      .when(ph === "done", (el) => el.child(button("setup-done", "Done", !space || Boolean(m.shepherd(space)), close))
-        .when(Boolean(space) && !m.shepherd(space), (el) => el.child(button("setup-start", `Start Shepherd in ${space.name}`, true, () => {
+      .when(ph === "confirm", (el) => el.child(button(t, "setup-cancel", "Cancel", close))
+        .child(button(t, "setup-go", `Set up on ${machine}`, (_e, cx) => go(cx), { primary: true })))
+      .when(ph === "cloning" || ph === "checking", (el) => el.child(button(t, "setup-close", "Close", close)))
+      .when(ph === "error", (el) => el.child(button(t, "setup-close", "Close", close))
+        .child(button(t, "setup-retry", "Retry", (_e, cx) => go(cx), { primary: true })))
+      .when(ph === "done", (el) => el.child(button(t, "setup-done", "Done", close, { primary: !space || Boolean(m.shepherd(space)) }))
+        .when(Boolean(space) && !m.shepherd(space), (el) => el.child(button(t, "setup-start", `Start Shepherd in ${space.name}`, () => {
           m.startShepherd(space, st.known);
           close();
-        })))));
+        }, { primary: true })))));
 }
 
 // ---- the tab bar's + menu --------------------------------------------------------------------

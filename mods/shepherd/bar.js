@@ -6,10 +6,11 @@ import { theme, setShared } from "herdr";
 import { MONO, VIEW, palette } from "./common.js";
 import { answerButton } from "./needs.js";
 import { startAction } from "./start.js";
+import { waitsText } from "./ui.js";
 
 const WIDTH = 780;
 
-export function renderBar(m, cx) {
+export function renderBar(m) {
   const t = palette();
   const qs = m.questions();
   const q = qs[0];
@@ -51,14 +52,19 @@ export function renderBar(m, cx) {
 
   // Without a Shepherd: Start Shepherd (or why not), and the lines that wait for it.
   const waiting = m.queued(space).length;
-  const waits = waiting ? `${waiting} message${waiting > 1 ? "s" : ""} wait${waiting > 1 ? "" : "s"} for it` : null;
+  const waits = waiting ? `${waitsText(waiting)} for it` : null;
   const sub = sh
     ? `shepherd · ${space?.name ?? "—"} · ${waiting ? `sending ${waiting} waiting message${waiting > 1 ? "s" : ""}…` : m.lastEvent() ?? "ready"}`
     : h_flex().min_w(0).gap(6).items_center()
-      .child(div().flex_none().child(m.isStarting(space) ? "Starting Shepherd" : "no Shepherd in this space"))
-      .child(div().flex_none().child("·"))
-      .child(startAction(m, cx, t, space, "bar-shep", { size: 10.5 }))
-      .when(Boolean(waits), (el) => el.child(div().flex_none().child("·")).child(div().flex_none().text_color(t.blocked).child(waits)));
+      .when(m.isStarting(space), (el) => el.child(div().flex_none().child("Starting Shepherd…")))
+      .when(!m.isStarting(space), (el) => el.child(div().flex_none().child("no Shepherd in this space"))
+        .child(div().flex_none().child("·"))
+        .child(startAction(m, t, space, "bar-shep", { size: 10.5 })))
+      .when(Boolean(waits), (el) => el.child(div().flex_none().child("·")).child(div().flex_none().text_color(t.blocked).child(waits))
+        .child(div().id("bar-discard").flex_none().text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); m.discardQueued(space); cx.notify(); })
+          .child("Discard")));
 
   const main = h_flex().w_full().h(56).px(12).gap(12).items_center()
     .child(avatar)

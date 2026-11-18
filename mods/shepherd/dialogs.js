@@ -8,7 +8,7 @@ import {
 } from "herdr";
 import { MONO, palette } from "./common.js";
 import { KINDS } from "./machines.js";
-import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, execSafe, failLine, onMachine, openSetup, checkStartable, startable } from "./ui.js";
+import { MACHINE_KINDS, NEW_SPACE, chip, check, normRemote, execSafe, failLine, onMachine, openSetup, checkStartable, machineStartState } from "./ui.js";
 
 const stop = (_e, cx) => cx.stop_propagation();
 
@@ -138,11 +138,12 @@ export function renderAddMachine(m) {
 // ---- New space ------------------------------------------------------------------------------
 
 const norm = (p) => (p ?? "").replace(/\/+$/, "");
-const LOCAL = ""; // this computer's key in m.ns.scans / m.ns.shep
+const LOCAL = ""; // this computer's key in m.ns.scans / m.ns.unavailable
 const keyOf = (machine) => machine ?? LOCAL;
-/** Whether Shepherd can start on the picked machine: this dialog's check, unless a later shared
- *  answer says yes (Set up Shepherd on <machine> finished meanwhile). */
-const nsShep = (m, machine) => (startable(machine)?.dir ? startable(machine) : m.ns.shep[keyOf(machine)]);
+/** Whether Shepherd can start on the picked machine: the shared answer every panel uses
+ *  (machineStartState; Set up Shepherd updates it), or "unreachable" for a machine whose core is
+ *  unavailable. */
+const nsShep = (m, machine) => m.ns.unavailable[keyOf(machine)] ?? machineStartState(m, machine);
 const onOf = (machine) => (machine ? { on: machine } : {});
 const SCAN_MS = { local: 15000, remote: 20000 }; // a remote scan also pays for ssh
 
@@ -182,7 +183,7 @@ const realPath = async (dir, machine) => {
 const spaceIn = (machine, dir, real) => spaces().find((s) => onMachine(s, machine) && s.folder && [dir, real].includes(norm(s.folder)));
 
 export function initNewSpace(m, cx, InputState) {
-  m.ns = { machine: null, scans: {}, shep: {}, sel: null, folder: "", start: false, error: null, busy: false };
+  m.ns = { machine: null, scans: {}, unavailable: {}, asked: {}, sel: null, folder: "", start: false, error: null, busy: false };
   m.nsFilter = InputState.new({ placeholder: "code/…, or a path" });
   m.nsFilter.on("change", (_e, cx) => { m.ns.error = null; cx.notify(); });
   m.nsFilter.on("submit", (_e, cx) => { const r = nsRows(m)[0]; if (r) { m.ns.sel = r.path; addSpace(m, cx); } });
@@ -199,14 +200,14 @@ function pickMachine(m, cx, machine) {
   const key = keyOf(machine);
   m.ns = { ...m.ns, machine, sel: null, error: null };
   if (m.ns.scans[key]?.error) delete m.ns.scans[key];
-  if (m.ns.shep[key]?.unreachable) delete m.ns.shep[key];
-  const shep = m.ns.shep[key];
-  if (m.ns.start && shep && !shep.dir) m.ns.start = false;
+  delete m.ns.unavailable[key]; // asked again below if it still is
+  const shep = nsShep(m, machine);
+  if (m.ns.start && !["ok", "checking"].includes(shep.state)) m.ns.start = false;
   cx.notify();
   if (nsMachines().find((x) => x.name === machine)?.unavailable) {
     const why = `${machine} is unavailable: Herdr can't reach its core right now.`;
     m.ns.scans[key] = { repos: [], home: null, error: why };
-    m.ns.shep[key] = { reason: why.replace(/\.$/, ""), unreachable: true };
+    m.ns.unavailable[key] = { state: "unreachable", reason: why.replace(/\.$/, "") };
     m.ns.start = false;
     return;
   }
@@ -232,12 +233,11 @@ function pickMachine(m, cx, machine) {
       cx.notify();
     });
   }
-  if (!(key in m.ns.shep)) {
-    m.ns.shep[key] = null; // checking
-    cx.spawn(async (cx) => {
-      m.ns.shep[key] = await checkStartable(m, machine, true);
-      cx.notify();
-    });
+  // Asked once per dialog and machine, again when it didn't answer (picked again, or Retry).
+  if (!m.ns.asked[key] || shep.state === "unreachable") {
+    m.ns.asked[key] = true;
+    const asked = checkStartable(m, machine, true);
+    cx.spawn(async (cx) => { await asked; cx.notify(); });
   }
 }
 
@@ -287,7 +287,7 @@ function addSpace(m, cx) {
       run("space.select", { id: old.id });
       notify({ title: `${old.name} is already a space`, body: "Selected it instead of making another.", level: "info" });
     } else {
-      const start = m.ns.start && Boolean(nsShep(m, machine)?.dir);
+      const start = m.ns.start && nsShep(m, machine).state === "ok";
       setShared(NEW_SPACE, { machine, folder: dir, real, before: spaces().map((s) => s.id), group: m.ns.folder || null, start, at: Date.now() });
       run("space.new", { folder: real, machine: machine ?? "" });
     }
@@ -309,9 +309,9 @@ export function renderNewSpace(m, folders) {
   const scan = m.ns.scans[keyOf(machine)];
   const rows = nsRows(m);
   const shep = nsShep(m, machine);
-  const canStart = Boolean(shep?.dir);
+  const canStart = shep.state === "ok";
   // A ticked Start Shepherd waits for the check on this machine, so it's never dropped unseen.
-  const pending = m.ns.start && shep == null;
+  const pending = m.ns.start && shep.state === "checking";
   const ok = Boolean(m.ns.sel) && !m.ns.busy && !pending;
   const row = (r) => h_flex().id(`ns-${r.path}`).gap(10).px(8).py(6).rounded(6).border(1).cursor_pointer()
     .border_color(m.ns.sel === r.path ? t.input : t.surface).bg(m.ns.sel === r.path ? t.hover : t.surface)
@@ -356,9 +356,9 @@ export function renderNewSpace(m, folders) {
       .child(startBox))
     .when(!canStart, (el) => el.child(h_flex().mx(18).mb(10).gap(10).items_center()
       .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.dim).truncate()
-        .child(shep == null ? `Checking whether Shepherd can start on ${where}…` : `Can't start Shepherd on ${where}: ${shep.reason}.`))
-      .when(Boolean(shep?.unreachable) && !scan?.error, (el) => el.child(retryLink))
-      .when(Boolean(shep?.missing && machine), (el) => el.child(div().id("ns-setup").flex_none().text_size(12).text_color(t.accent).cursor_pointer()
+        .child(shep.state === "checking" ? `Checking whether Shepherd can start on ${where}…` : `Can't start Shepherd on ${where}: ${shep.reason}.`))
+      .when(shep.state === "unreachable" && !scan?.error, (el) => el.child(retryLink))
+      .when(shep.state === "missing", (el) => el.child(div().id("ns-setup").flex_none().text_size(12).text_color(t.accent).cursor_pointer()
         .on_click(() => openSetup(machine)).child(`Set up Shepherd on ${machine}…`)))))
     .child(h_flex().px(18).py(12).gap(8).items_center().border_t(1).border_color(t.border)
       .when(!machine, (el) => el.child(div().id("ns-finder").px(10).h(28).flex().items_center().rounded(5).border(1).border_color(t.input).cursor_pointer()

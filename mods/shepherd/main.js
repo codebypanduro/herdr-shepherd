@@ -33,7 +33,8 @@ import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "
 import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
 import {
   openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, openSetup, readWorkflow,
-  execSafe, failLine, TERM_WINDOW, closeTermWindow, STARTING, QUEUED, startable, checkStartable,
+  execSafe, failLine, TERM_WINDOW, closeTermWindow, STARTING, QUEUED, QUEUE_MAX_MS, checkStartable, startStale,
+  machineStartState, spaceByArg, waitsText,
 } from "./ui.js";
 import { renderSetup, renderNewTab, initSetup } from "./start.js";
 
@@ -47,9 +48,11 @@ const PR_STALE_MS = 30000; // gh pr view, for the PR card's checks
 const PROOF_STALE_MS = 15000;
 const LOAD_MS = 15000; // the status bar's machine load
 const CHAT_MAX = 500; // History keeps the newest lines
-const QINDEX = new WeakMap();
-const START_STALE_MS = 120000; // a "starting" mark older than this is from a copy that went away
-const QUEUE_FALLBACK_MS = 90000; // a Shepherd that never reports a status gets queued lines after this // questions array → questionIndex(), so it is worked out once per load
+const QINDEX = new WeakMap(); // questions array → questionIndex(), so it is worked out once per load
+const START_STALE_MS = 120000; // a "starting" mark older than this (start.sh done, no Shepherd showed) is dropped
+const QUEUE_IDLE_MS = 5000; // queued lines go once Shepherd has been idle (or done) this long
+const QUEUE_FALLBACK_MS = 90000; // a Shepherd that never reports a status gets queued lines after this
+const QUEUE_CLAIM_MS = 60000; // a copy sending a line holds it this long, so two copies never send it twice
 
 /** Task status → board status. Queued, paused and parked read as idle (grey). */
 const TASK_STATUS = { working: "working", blocked: "blocked", done: "done" };
@@ -81,7 +84,7 @@ export default class Shepherd extends View {
     }
     if (p.panel === "history") {
       this.historyInput = InputState.new({ placeholder: "Talk to shepherd · try “add a dark mode toggle”" });
-      this.historyInput.on("submit", () => { if (this.tell(this.historyInput.value().trim())) this.historyInput.set_value(""); });
+      this.historyInput.on("submit", () => { if (this.tell(this.historyInput.value())) this.historyInput.set_value(""); });
       this.historyScroll = ScrollHandle.new();
       this.historyCount = 0;
     }
@@ -125,8 +128,11 @@ export default class Shepherd extends View {
         }
       });
     }
-    // Lines written while the space had no Shepherd: the bar sends them once it's up (one copy only).
+    // Lines written while the space had no Shepherd: the bar sends them once it's up.
     if (p.panel === "bar") cx.timer.every(2000, (cx) => this.flushQueue(cx));
+    // Panels with a Start Shepherd action ask whether it can start here: now and on the 5 s tick
+    // below (never from render), so a space switch shows the answer within a tick.
+    if (["tabs", "bar", "history"].includes(p.panel)) cx.spawn(async (cx) => this.askStartable(cx));
     if (p.panel === "status") {
       cx.timer.every(LOAD_MS, (cx) => this.readLoad(cx));
       this.readLoad(cx);
@@ -136,6 +142,7 @@ export default class Shepherd extends View {
     cx.timer.every(60000, (cx) => cx.notify());
     cx.timer.every(REFRESH_MS, (cx) => {
       this.sync(cx);
+      if (["tabs", "bar", "history"].includes(props()?.panel)) this.askStartable(cx);
       if (props()?.panel === "detail") { const task = this.selectedTask(); if (task) this.ensureGit(task, cx); }
     });
     this.sync(cx);
@@ -306,7 +313,8 @@ export default class Shepherd extends View {
   answer(q, text) {
     const answer = String(text ?? "").trim();
     const repo = this.repo();
-    if (!answer || !repo || !this.tell(`answer ${q.id}: ${answer}`, q.task ?? null)) return;
+    // Only a sent answer is pending; a queued one shows as open until it goes.
+    if (!answer || !repo || this.tell(`answer ${q.id}: ${answer}`, q.task ?? null) !== "sent") return;
     setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
   }
 
@@ -504,57 +512,78 @@ export default class Shepherd extends View {
   // ---- spaces ----------------------------------------------------------------------------
 
   /** shepherd/start.sh for a space, on its machine, in the background (it starts Shepherd in its
-   *  own tab): the one way every Start Shepherd (tab bar, bar, History, Space settings, New space, a
-   *  toast, a message written with no Shepherd) starts one. Here the script is this mod's own
+   *  own tab): the one way every Start Shepherd (tab bar, + menu, bar, History, Space settings, New
+   *  space, a toast, a message written with no Shepherd) starts one. Here the script is this mod's own
    *  checkout's, found through the mods/shepherd link; on another machine it's that machine's checkout,
    *  run with its login shell's PATH (checkStartable → shepherdOn; `known` is an answer already in
-   *  hand). One start per space at a time across copies (shared STARTING, shown as "Starting…"):
-   *  start.sh's own check for a running Shepherd is check-then-act, so two quick clicks could start
-   *  two. Resolves when it's done. */
+   *  hand). One start per space at a time across copies: shared STARTING, shown as "Starting…" from
+   *  the click until the Shepherd shows in terminals() (pruneStarting), since start.sh's own check for
+   *  a running Shepherd is check-then-act. A failure clears it and says why. Resolves when start.sh is done. */
   startShepherd(space, known = null) {
-    const dir = space ? space.folder || this.repo(space)?.dir : null;
-    if (!dir || this.isStarting(space)) return Promise.resolve();
-    setShared(STARTING, { ...(shared(STARTING) ?? {}), [space.id]: Date.now() });
+    if (!space || this.isStarting(space) || this.shepherd(space)) return Promise.resolve();
     const machine = space.machine ?? null;
-    const fail = (body, s = null) => notify({ title: "Shepherd didn't start", body, level: "error",
-      action: s?.missing ? { name: `shepherd.setup-shepherd:${space.id}` } : { name: `shepherd.start-shepherd:${space.id}` } });
+    const fail = (body, action = null) => notify({ title: "Shepherd didn't start", body, level: "error", ...(action ? { action: { name: action } } : {}) });
+    const dir = space.folder || this.repo(space)?.dir;
+    if (!dir) { fail(`${space.name} has no folder to start Shepherd in.`); return Promise.resolve(); }
+    this.markStarting(space.id, true);
     return (async () => {
       const s = known?.dir ? known : await checkStartable(this, machine, true);
-      if (!s.dir) return fail(`${machine ? `${machine}: ` : ""}${s.reason}${s.missing ? `. Click to set up Shepherd on ${machine}.` : ". Click to try again."}`, s);
+      if (!s.dir) {
+        return s.missing && machine ? fail(`${machine}: ${s.reason}. Click to set up Shepherd on ${machine}.`, `shepherd.setup-shepherd:${space.id}`)
+          : fail(`${machine ? `${machine}: ` : ""}${s.reason}. Click to try again.`, `shepherd.start-shepherd:${space.id}`);
+      }
       const args = [`${s.dir}/start.sh`, "--space", localId(space), dir];
       const r = machine ? await execSafe("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 60000 })
         : await execSafe("sh", args, { timeout: 60000 });
-      if (r.code !== 0) fail(r.code === -1 ? failLine(r) : (r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop());
-    })().catch((e) => fail(String(e?.message ?? e))).finally(() => {
-      const now = { ...(shared(STARTING) ?? {}) };
-      delete now[space.id];
-      setShared(STARTING, now);
-    });
+      if (r.code !== 0) return fail(r.code === -1 ? failLine(r) : (r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop(), `shepherd.start-shepherd:${space.id}`);
+      return true;
+    })().catch((e) => fail(String(e?.message ?? e), `shepherd.start-shepherd:${space.id}`))
+      .then((ok) => { if (ok !== true) this.markStarting(space.id, false); });
   }
 
-  /** Whether start.sh is running for the space (from any copy). */
+  /** Sets or clears a space's shared "starting" mark. */
+  markStarting(id, on) {
+    const now = { ...(shared(STARTING) ?? {}) };
+    if (on) now[id] = Date.now(); else delete now[id];
+    setShared(STARTING, now);
+  }
+
+  /** Drops "starting" marks whose Shepherd now shows, or that are older than START_STALE_MS. The bar runs it. */
+  pruneStarting() {
+    const marks = shared(STARTING) ?? {};
+    const all = terminals();
+    const gone = Object.keys(marks).filter((id) => {
+      const space = spaces().find((x) => x.id === id);
+      return !space || this.shepherd(space, all) || Date.now() - marks[id] >= START_STALE_MS;
+    });
+    if (!gone.length) return;
+    const now = { ...marks };
+    for (const id of gone) delete now[id];
+    setShared(STARTING, now);
+  }
+
+  /** Whether a start was asked for the space (from any copy) and its Shepherd hasn't shown yet. */
   isStarting(space) {
     const at = space ? (shared(STARTING) ?? {})[space.id] : null;
     return Boolean(at) && Date.now() - at < START_STALE_MS;
   }
 
-  /** What a Start Shepherd action shows for a space: "running" | "starting" | "checking" | "ok" |
-   *  "missing" (no checkout there: Set up) | "unreachable" (Retry) | "no", with the reason.
-   *  Asks checkStartable when there's no fresh answer (outside render: spawned). */
-  startState(space, cx) {
+  /** What a Start Shepherd action shows for a space, a pure read: "running" | "starting", else
+   *  machineStartState's (checking, ok, missing, unreachable, no) with its reason. askStartable asks. */
+  startState(space) {
     if (!space) return { state: "no", reason: "no space" };
     if (this.shepherd(space)) return { state: "running" };
     if (this.isStarting(space)) return { state: "starting" };
-    const machine = space.machine ?? null;
-    const s = startable(machine);
-    const ttl = s?.dir ? 600000 : s?.unreachable ? 60000 : 300000;
-    if ((!s || Date.now() - s.at >= ttl) && cx && !this.checkingStart?.[machine ?? ""]) {
-      const asked = checkStartable(this, machine); // marks the machine busy at once, so the next render doesn't ask again
-      cx.spawn(async (cx) => { await asked; cx.notify(); });
-    }
-    if (!s) return { state: "checking" };
-    if (s.dir) return { state: "ok", known: s };
-    return { state: s.missing && machine ? "missing" : s.unreachable ? "unreachable" : "no", reason: s.reason };
+    return machineStartState(this, space.machine ?? null);
+  }
+
+  /** Asks whether Shepherd can start on the space's machine when it has none and the answer is
+   *  stale. From timers and handlers only. */
+  askStartable(cx, space = this.space()) {
+    if (!space || this.shepherd(space) || !startStale(space.machine ?? null) || this.checkingStart?.[space.machine ?? ""]) return;
+    const asked = checkStartable(this, space.machine ?? null); // marks the machine busy at once
+    cx.notify();
+    cx.spawn(async (cx) => { await asked; cx.notify(); });
   }
 
   /** Lines waiting for a space's Shepherd (QUEUED). */
@@ -562,33 +591,58 @@ export default class Shepherd extends View {
     return space ? (shared(QUEUED) ?? []).filter((x) => x.space === space.id) : [];
   }
 
+  /** Throws away a space's waiting lines (the bar's Discard). */
+  discardQueued(space = this.space()) {
+    if (space) setShared(QUEUED, (shared(QUEUED) ?? []).filter((x) => x.space !== space.id));
+  }
+
   /** Sends queued lines (oldest first) to each space's Shepherd once it's up and has finished its
-   *  first turn (idle or done, seen for 5 s; a Shepherd asking for something in its tab, like Claude's
-   *  folder trust, is blocked and waits), or after QUEUE_FALLBACK_MS if it reports no status. Each line is recorded
-   *  in that space's chat once sent. A space that's gone drops its lines with a toast. The bar runs it. */
+   *  first turn: idle or done for QUEUE_IDLE_MS (a Shepherd asking for something in its tab, like
+   *  Claude's folder trust, is blocked and waits), or QUEUE_FALLBACK_MS after it shows if it reports
+   *  no status. Each line is claimed in QUEUED first (so another copy never sends it too), removed
+   *  once sent and recorded in that space's chat. Lines older than QUEUE_MAX_MS, or whose space is
+   *  gone, are dropped with a toast. The bar runs it every 2 s, with pruneStarting. */
   flushQueue(cx) {
-    const q = shared(QUEUED) ?? [];
+    this.pruneStarting();
+    const now = Date.now();
+    this.copyId ??= Math.random().toString(36).slice(2);
+    const mine = (x) => !x.sending || x.sending.by === this.copyId || now - x.sending.at >= QUEUE_CLAIM_MS;
+    let q = shared(QUEUED) ?? [];
     if (!q.length || this.flushing) return;
+    const drop = (lines, title, why) => {
+      if (!lines.length) return;
+      const ids = new Set(lines.map((x) => x.id));
+      setShared(QUEUED, (shared(QUEUED) ?? []).filter((x) => !ids.has(x.id)));
+      notify({ title, body: `${why}: ${lines.map((x) => x.line).join(" · ").slice(0, 160)}`, level: "warning" });
+    };
+    const alive = new Set(spaces().map((x) => x.id));
+    drop(q.filter((x) => mine(x) && !alive.has(x.space)), "Message not sent", "Its space is gone");
+    drop(q.filter((x) => mine(x) && alive.has(x.space) && now - (Date.parse(x.at) || now) > QUEUE_MAX_MS),
+      "Message to Shepherd dropped", "No Shepherd took it within an hour");
+    q = shared(QUEUED) ?? [];
+    const all = terminals();
+    const idle = (this.idleSince ??= {});
+    const seen = (this.shepSeen ??= {});
+    const ready = [];
+    for (const id of new Set(q.map((x) => x.space))) {
+      const space = spaces().find((x) => x.id === id);
+      const sh = space && this.shepherd(space, all);
+      if (!sh) continue;
+      seen[sh.address] ??= now;
+      if (["idle", "done"].includes(sh.status)) idle[sh.address] ??= now; else delete idle[sh.address];
+      const go = (idle[sh.address] != null && now - idle[sh.address] >= QUEUE_IDLE_MS)
+        || (sh.status == null && now - seen[sh.address] >= QUEUE_FALLBACK_MS);
+      const lines = q.filter((x) => x.space === id);
+      if (go && lines.every(mine)) ready.push({ space, sh, lines });
+    }
+    if (!ready.length) return;
+    // Claim them before the first await: another copy's tick sees them as taken.
+    const claimed = new Set(ready.flatMap((r) => r.lines.map((x) => x.id)));
+    setShared(QUEUED, q.map((x) => (claimed.has(x.id) ? { ...x, sending: { by: this.copyId, at: now } } : x)));
     this.flushing = true;
     cx.spawn(async (cx) => {
       try {
-        const all = terminals();
-        const done = new Set();
-        for (const id of [...new Set(q.map((x) => x.space))]) {
-          const lines = q.filter((x) => x.space === id);
-          const space = spaces().find((x) => x.id === id);
-          if (!space) {
-            notify({ title: "Message not sent", body: `Its space is gone: ${lines.map((x) => x.line).join(" · ").slice(0, 160)}`, level: "warning" });
-            for (const x of lines) done.add(x.id);
-            continue;
-          }
-          const sh = this.shepherd(space, all);
-          if (!sh) continue;
-          // How long this copy has seen it (not its start time, which terminals() may not carry).
-          const seen = ((this.shepSeen ??= {})[sh.address] ??= Date.now());
-          const age = Date.now() - seen;
-          const ready = (["idle", "done"].includes(sh.status) && age > 5000) || (sh.status == null && age > QUEUE_FALLBACK_MS);
-          if (!ready) continue;
+        for (const { space, sh, lines } of ready) {
           for (const x of lines) {
             const r = await hc(["send", sh.address, x.line]).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));
             if (r.code !== 0) {
@@ -596,13 +650,14 @@ export default class Shepherd extends View {
                 (this.queueFailed ??= new Set()).add(x.id);
                 notify({ title: "Couldn't send to Shepherd yet", body: `${failLine(r)}. Trying again.`, level: "warning" });
               }
-              break; // keep the order: the rest wait behind it
+              break; // keep the order: the rest wait behind it (their claims lapse)
             }
             this.record("you", x.line, x.task, space);
-            done.add(x.id);
+            setShared(QUEUED, (shared(QUEUED) ?? []).filter((y) => y.id !== x.id));
           }
         }
-        if (done.size) setShared(QUEUED, (shared(QUEUED) ?? []).filter((x) => !done.has(x.id)));
+        // Release what wasn't sent, so the next tick tries again at once.
+        setShared(QUEUED, (shared(QUEUED) ?? []).map((x) => (x.sending?.by === this.copyId ? { ...x, sending: undefined } : x)));
       } finally { this.flushing = false; cx.notify(); }
     });
   }
@@ -631,27 +686,28 @@ export default class Shepherd extends View {
   }
 
   /** A line to this space's Shepherd (CONVENTIONS.md "Talking to Shepherd"), kept in the chat.
-   *  With no Shepherd the line waits in QUEUED (sent by the bar once one is up) and one is started;
-   *  true either way (the line isn't lost), "queued" when it waits. */
+   *  "sent"; or "queued" when it waits in QUEUED: there's no Shepherd (one is started, with a toast)
+   *  or earlier lines still wait (it goes after them, never ahead); null for an empty line or no space. */
   tell(line, task = null) {
+    const text = String(line ?? "").trim();
     const space = this.space();
+    if (!text || !space) return null;
     const sh = this.shepherd(space);
-    if (sh) {
-      hc(["send", sh.address, line]);
-      this.record("you", line, task);
-      return true;
+    if (sh && !this.queued(space).length) {
+      hc(["send", sh.address, text]);
+      this.record("you", text, task);
+      return "sent";
     }
-    if (!space) return false;
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    setShared(QUEUED, [...(shared(QUEUED) ?? []), { id, space: space.id, line, task, at: new Date().toISOString() }]);
-    const n = this.queued(space).length;
-    const waits = n > 1 ? `${n} messages wait` : "Your message waits";
+    setShared(QUEUED, [...(shared(QUEUED) ?? []), { id, space: space.id, line: text, task, at: new Date().toISOString() }]);
+    if (sh) return "queued";
+    const waits = waitsText(this.queued(space).length);
     const st = this.startState(space);
     if (st.state === "missing" || st.state === "no") {
-      notify({ title: "No Shepherd in this space", body: `${waits} for one. Can't start here: ${st.reason}.${st.state === "missing" ? ` Click to set up Shepherd on ${space.machine}.` : ""}`,
+      notify({ title: "No Shepherd in this space", body: `${waits} for one (an hour at most). Can't start here: ${st.reason}.${st.state === "missing" ? ` Click to set up Shepherd on ${space.machine}.` : ""}`,
         level: "warning", ...(st.state === "missing" ? { action: { name: `shepherd.setup-shepherd:${space.id}` } } : {}) });
     } else {
-      notify({ title: `Starting Shepherd in ${space.name}`, body: `${waits} and goes to Shepherd once it's up.`, level: "info" });
+      notify({ title: `Starting Shepherd in ${space.name}`, body: `${waits}: it goes to Shepherd once it's up.`, level: "info" });
       this.startShepherd(space, st.known ?? null);
     }
     return "queued";
@@ -822,15 +878,15 @@ export default class Shepherd extends View {
       "add-machine": () => openAddMachine(),
       machine: () => openMachine(arg || null),
       "start-shepherd": () => {
-        const s = arg ? spaces().find((x) => x.id === arg || localId(x) === arg) : this.space();
+        const s = arg ? spaceByArg(arg) : this.space();
         if (s) this.startShepherd(s);
       },
       "setup-shepherd": () => {
-        const s = arg ? spaces().find((x) => x.id === arg || localId(x) === arg) : this.space();
+        const s = arg ? spaceByArg(arg) : this.space();
         if (s?.machine) openSetup(s.machine, s.id);
       },
       "space-settings": () => {
-        const s = arg ? spaces().find((x) => x.id === arg || localId(x) === arg) : this.space();
+        const s = arg ? spaceByArg(arg) : this.space();
         if (s) openSpaceSettings(s.id);
       },
     }[name];
@@ -999,14 +1055,14 @@ export default class Shepherd extends View {
     if (p.panel === "newspace") return renderNewSpace(this, folders());
     if (p.panel === "workflow") return renderWorkflow(this);
     if (p.panel === "spacesettings") return renderSpaceSettings(this);
-    if (p.panel === "tabs") return renderTabBar(this, cx);
+    if (p.panel === "tabs") return renderTabBar(this);
     if (p.panel === "steer") return renderSteer(this).track_focus(this.keys).on_key_down((e, cx) => this.steerKey(e, cx));
     if (p.panel === "term") return renderTermBar(this).track_focus(this.keys).on_key_down((e, cx) => this.termKey(e, cx));
     if (p.panel === "termfoot") return renderTermFoot(this).track_focus(this.keys)
       .on_mouse_down("left", () => this.keys.focus()).on_key_down((e, cx) => this.termKey(e, cx));
     if (p.panel === "digest") return renderDigest(this);
-    if (p.panel === "history") return renderHistory(this, cx);
-    if (p.panel === "bar") return renderBar(this, cx);
+    if (p.panel === "history") return renderHistory(this);
+    if (p.panel === "bar") return renderBar(this);
     if (p.panel === "detail") {
       const task = this.selectedTask();
       if (task) this.ensureGit(task, cx);

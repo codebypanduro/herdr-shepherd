@@ -4,8 +4,8 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, readTextFile, writeTextFile, appHome, openOverlay, closeOverlay, terminals, hc, shared, setShared } from "herdr";
-import { MONO, machineOf } from "./common.js";
+import { exec, readTextFile, writeTextFile, appHome, openOverlay, closeOverlay, terminals, hc, shared, setShared, spaces } from "herdr";
+import { MONO, machineOf, localId } from "./common.js";
 
 export const MACHINE_INFO = "shepherd.machineInfo"; // { "<machine name, '' here>": {cpu, mem, disk, kind, model, tools, at, error} }
 export const MACHINE_KINDS = "shepherd.machineKinds"; // the person's pick in Add machine: { name: kind }
@@ -13,14 +13,32 @@ export const USAGE = "shepherd.usage"; // { at, by: { "<machine, '' here>": { cl
 export const FOLDERS = "shepherd.folders"; // sidebar folders: [{ id, name, open }]
 export const SPACE_FOLDERS = "shepherd.spaceFolders"; // { space id: folder id }
 export const NEW_SPACE = "shepherd.newSpace"; // New space's pending { folder, real, before, group, start, at }
-export const STARTABLE = "shepherd.startable"; // { "<machine, '' here>": shepherdOn's answer + at }: whether start.sh can run there
-export const STARTING = "shepherd.starting"; // { space id: ms }: start.sh running for that space (any copy)
-export const QUEUED = "shepherd.queued"; // [{ id, space, line, task, at }]: lines written with no Shepherd, sent once one is up
+export const STARTABLE = "shepherd.startable"; // { "<machine, '' here>": { ...shepherdOn's answer, at } }: whether start.sh can run there
+export const STARTING = "shepherd.starting"; // { space id: ms }: a start asked for that space, until its Shepherd shows (any copy)
+export const QUEUED = "shepherd.queued"; // [{ id, space, line, task, at, sending? }]: lines waiting for a Shepherd, sent once one is up
+export const QUEUE_MAX_MS = 3600000; // a queued line older than this is dropped (with a toast), never sent days later
 
 /** Where "Set up Shepherd on <machine>" clones the public repo on another machine (setup.sh), and
  *  where shepherdOn looks last. */
 export const SETUP_DIR = "~/.herdr-shepherd";
 export const SETUP_REPO = "https://github.com/codebypanduro/herdr-shepherd";
+
+/** A dialog button: `primary` solid, `danger` red, else outlined. */
+export const button = (t, id, label, onClick, { primary = false, danger = false } = {}) => div().id(id).px(12).h(28).flex().items_center()
+  .rounded(5).cursor_pointer().text_size(12).font_semibold()
+  .when(primary, (el) => el.bg(t.solid).text_color(t.solid_foreground))
+  .when(danger, (el) => el.bg(t.ansi1).text_color(t.background))
+  .when(!primary && !danger, (el) => el.border(1).border_color(t.input).text_color(t.foreground).hover((x) => x.bg(t.hover)))
+  .on_click(onClick).child(label);
+
+/** "key=value" lines (a script's answer) as an object. */
+export const parseKv = (text) => Object.fromEntries(String(text ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
+
+/** A space by its app id or its id on its machine (a command's argument), else null. */
+export const spaceByArg = (arg) => spaces().find((x) => x.id === arg || localId(x) === arg) ?? null;
+
+/** "Your message waits" / "3 messages wait". */
+export const waitsText = (n) => (n > 1 ? `${n} messages wait` : n === 1 ? "1 message waits" : "");
 
 /** A choice chip: the selected one is foreground on background, the others muted on an input border. */
 export const chip = (t, id, label, on, onClick, { mono = true, dim = false } = {}) => div().id(id).h(24).px(9).flex().items_center()
@@ -87,7 +105,7 @@ d=""
 for c in "$HOME/.config/herdr-app/mods/shepherd" "$1/../mods/shepherd" "$HOME/.herdr-shepherd/mods/shepherd"; do
   x=$(cd -P "$c" 2>/dev/null && cd ../../shepherd 2>/dev/null && [ -f start.sh ] && [ -f bin/shep.mjs ] && pwd -P) && { d=$x; break; }
 done
-[ -n "$d" ] || { echo "no=no herdr-shepherd checkout with shepherd/start.sh there"; exit 0; }
+[ -n "$d" ] || { echo "missing=1"; echo "no=no herdr-shepherd checkout with shepherd/start.sh there"; exit 0; }
 for t in node hc claude git; do command -v "$t" >/dev/null 2>&1 || { echo "no=$t isn't installed there"; exit 0; }; done
 echo "dir=$d"
 echo "path=$PATH"`;
@@ -99,9 +117,9 @@ export async function shepherdOn(m, machine) {
   const h = await shepherdHome(m);
   if (!machine) return h ? { dir: h.dir, path: null } : { reason: "mods/shepherd isn't inside a checkout with shepherd/start.sh" };
   const r = await execSafe("sh", ["-c", SHEP_CHECK, "check", h?.dir ?? "/nonexistent"], { on: machine, timeout: 15000 });
-  const kv = Object.fromEntries((r.stdout ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
+  const kv = parseKv(r.stdout);
   if (kv.dir && kv.path) return { dir: kv.dir, path: kv.path };
-  if (kv.no) return { reason: kv.no, missing: kv.no.startsWith("no herdr-shepherd checkout") };
+  if (kv.no) return { reason: kv.no, missing: kv.missing === "1" };
   return { reason: `couldn't check ${machine}: ${failLine(r)}`, unreachable: true };
 }
 
@@ -109,14 +127,28 @@ export async function shepherdOn(m, machine) {
  *  or { reason, unreachable, missing }, with `at`; null while never asked. */
 export const startable = (machine) => (shared(STARTABLE) ?? {})[machine ?? ""] ?? null;
 
-/** Asks shepherdOn again when there's no answer or it's old (a yes for 10 minutes, a machine that
- *  didn't answer for 1, any other no for 5), or with `force` (Retry, a dialog opening, after setup).
- *  One check per machine at a time per copy. Resolves with the answer. */
+/** How long an answer holds: a yes 10 minutes, a machine that didn't answer 1, any other no 5. */
+export const startTtl = (s) => (s?.dir ? 600000 : s?.unreachable ? 60000 : 300000);
+
+/** Whether the answer for a machine should be asked again (none, or past startTtl). */
+export const startStale = (machine) => { const s = startable(machine); return !s || Date.now() - s.at >= startTtl(s); };
+
+/** Whether Shepherd can start on a machine, as every panel shows it (a pure read; checkStartable
+ *  asks): { state: "checking" | "ok" | "missing" (no checkout there: Set up) | "unreachable" (Retry)
+ *  | "no", reason, known (the answer, for startShepherd) }. "checking" while this copy is asking. */
+export function machineStartState(m, machine) {
+  const s = startable(machine);
+  if (!s || m.checkingStart?.[machine ?? ""]) return { state: "checking" };
+  if (s.dir) return { state: "ok", known: s };
+  return { state: s.missing && machine ? "missing" : s.unreachable ? "unreachable" : "no", reason: s.reason };
+}
+
+/** Asks shepherdOn again when the answer is stale (startStale), or with `force` (Retry, a dialog
+ *  opening, after setup). One check per machine at a time per copy. Resolves with the answer.
+ *  Called from timers and handlers, never from render. */
 export async function checkStartable(m, machine, force = false) {
   const key = machine ?? "";
-  const had = startable(machine);
-  const ttl = had?.dir ? 600000 : had?.unreachable ? 60000 : 300000;
-  if (!force && had && Date.now() - had.at < ttl) return had;
+  if (!force && !startStale(machine)) return startable(machine);
   const busy = (m.checkingStart ??= {});
   if (busy[key]) return busy[key];
   busy[key] = shepherdOn(m, machine).catch((e) => ({ reason: String(e?.message ?? e), unreachable: true }))
@@ -131,7 +163,7 @@ export async function setupShepherd(machine) {
   const script = await readTextFile(`${appHome()}/mods/shepherd/setup.sh`).catch(() => null);
   if (!script) return { error: "mods/shepherd/setup.sh is missing here" };
   const r = await execSafe("sh", ["-c", script, "setup.sh", SETUP_REPO], { on: machine, timeout: 300000 });
-  const kv = Object.fromEntries((r.stdout ?? "").split("\n").map((l) => l.match(/^(\w+)=(.*)$/)).filter(Boolean).map((x) => [x[1], x[2]]));
+  const kv = parseKv(r.stdout);
   if (kv.ok) return { ok: kv.ok };
   return { error: kv.no ?? `couldn't reach ${machine}: ${failLine(r)}` };
 }

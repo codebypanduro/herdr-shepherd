@@ -10,7 +10,7 @@ import { spaces, terminals, run, closeOverlay, props } from "herdr";
 import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
-import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, startable, checkStartable, openSetup } from "./ui.js";
+import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, checkStartable, openSetup } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
 const MODELS = ["opus", "sonnet", "haiku"];
@@ -178,7 +178,7 @@ function limitsBlock(t, id, lim, pick, ms, sub, note, extra = null) {
 
 export function initSpaceSettings(m, cx, InputState) {
   const s = ssSpace();
-  m.ss = { error: null, ci: null, ciTouched: false, shep: null };
+  m.ss = { error: null, ci: null, ciTouched: false };
   m.ssName = InputState.new({ placeholder: s?.name ?? "" });
   m.ssName.set_value(s?.named ? s.name : "");
   m.ssCi = InputState.new({ placeholder: "none: Shepherd skips CI" });
@@ -210,34 +210,33 @@ export function initSpaceSettings(m, cx, InputState) {
 /** Asks again whether start.sh can run on the space's machine (the dialog opening, Retry); the
  *  answer is shared (ui.js STARTABLE), so the tab bar, the bar and History see it too. */
 function checkShepherd(m, cx, s) {
-  m.ss.checking = true;
-  const asked = checkStartable(m, s.machine ?? null, true);
-  cx.spawn(async (cx) => { await asked; m.ss.checking = false; cx.notify(); });
+  const asked = checkStartable(m, s.machine ?? null, true); // "Checking…" until it answers
+  cx.spawn(async (cx) => { await asked; cx.notify(); });
 }
 
 /** Start Shepherd, or why it can't, whole (it wraps under the button): Retry when the machine didn't
- *  answer, Set up Shepherd on <machine> when it has no herdr-shepherd checkout. */
+ *  answer, Set up Shepherd on <machine> when it has no herdr-shepherd checkout. The state is
+ *  m.startState, as everywhere else. */
 function startButton(m, t, s) {
-  const shep = m.ss.checking ? null : startable(s.machine ?? null);
-  const busy = m.isStarting(s);
-  const ok = Boolean(shep?.dir) && !busy;
+  const st = m.startState(s);
+  const ok = st.state === "ok";
   const start = (_e, cx) => {
     if (!ok) return;
-    const done = m.startShepherd(s, shep);
+    const done = m.startShepherd(s, st.known);
     cx.notify();
     cx.spawn(async (cx) => { await done; cx.notify(); });
   };
   const link = (id, label, onClick) => div().id(id).flex_none().text_size(12).text_color(t.accent).cursor_pointer().on_click(onClick).child(label);
   return v_flex().w_full().min_w(0).gap(6).items_end()
     .child(h_flex().gap(10).items_center()
-      .when(Boolean(shep?.unreachable), (el) => el.child(link("ss-retry", "Retry", (_e, cx) => { checkShepherd(m, cx, s); cx.notify(); })))
-      .when(Boolean(shep?.missing && s.machine), (el) => el.child(link("ss-setup", `Set up Shepherd on ${s.machine}…`, () => openSetup(s.machine, s.id))))
+      .when(st.state === "unreachable", (el) => el.child(link("ss-retry", "Retry", (_e, cx) => { checkShepherd(m, cx, s); cx.notify(); })))
+      .when(st.state === "missing", (el) => el.child(link("ss-setup", `Set up Shepherd on ${s.machine}…`, () => openSetup(s.machine, s.id))))
       .child(div().id("ss-start").flex_none().px(10).h(26).flex().items_center().rounded(5).text_size(12).font_semibold()
         .bg(ok ? t.solid : t.raised).text_color(ok ? t.solid_foreground : t.dim)
         .when(ok, (el) => el.cursor_pointer()).on_click(start)
-        .child(busy ? "Starting…" : shep == null ? "Checking…" : "Start Shepherd")))
-    .when(shep != null && !shep.dir, (el) => el.child(div().w_full().text_size(11.5).line_height(1.4).text_color(t.dim)
-      .child(`Can't start here: ${shep.reason}`)));
+        .child(st.state === "starting" ? "Starting…" : st.state === "checking" ? "Checking…" : "Start Shepherd")))
+    .when(Boolean(st.reason), (el) => el.child(div().w_full().text_size(11.5).line_height(1.4).text_color(t.dim)
+      .child(`Can't start here: ${st.reason}`)));
 }
 
 const ssSpace = () => spaces().find((x) => x.id === props()?.space) ?? null;

@@ -5,8 +5,8 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { terminals, run, setShared, knownAgents, openOverlay, closeOverlay, props } from "herdr";
-import { openWorkflow } from "./ui.js";
+import { terminals, panes, run, setShared, knownAgents, openOverlay, closeOverlay, props } from "herdr";
+import { openWorkflow, button } from "./ui.js";
 import { shepherdMark, programIcon, startAction } from "./start.js";
 import { MONO, VIEW, VIEW_LIST, localId, machineOf, palette } from "./common.js";
 
@@ -15,15 +15,16 @@ import { MONO, VIEW, VIEW_LIST, localId, machineOf, palette } from "./common.js"
 function openNewTab(m, cx, space) {
   if (!space || m.newTabAsking) return;
   m.newTabAsking = true;
-  m.startState(space, cx); // asks whether Shepherd can start there, if not known yet
+  m.askStartable(cx, space); // whether Shepherd can start there, if not known yet
   cx.spawn(async (cx) => {
-    let agents = null, error = null;
+    let agents = null, error = null, timer = null;
     try {
       agents = await new Promise((resolve, reject) => {
-        cx.timer.after(6000, () => reject(new Error("timed out")));
+        timer = cx.timer.after(6000, () => reject(new Error("timed out")));
         knownAgents({ on: space.machine ?? null }).then(resolve, reject);
       });
     } catch (e) { error = `Couldn't list agents${space.machine ? ` on ${space.machine}` : ""}: ${e?.message ?? e}`; }
+    timer?.cancel();
     m.newTabAsking = false;
     const list = (agents ?? []).filter((a) => a.installed && Array.isArray(a.run) && a.run.length)
       .map((a) => ({ key: a.key, name: a.name, icon: a.icon, tint: a.tint, run: a.run }));
@@ -32,35 +33,42 @@ function openNewTab(m, cx, space) {
   });
 }
 
-/** Closes a tab with Herdr's tab.close. A tab still running something besides its shell (a program
- *  in the foreground, or an agent working or waiting) asks first, as Herdr's own tabs do. */
-function closeTab(tab, ts, name) {
-  const busy = ts.filter((x) => (x.program && !x.program.shell) || ["working", "blocked"].includes(x.status));
-  if (!busy.length) { run("tab.close", { id: tab.id, confirmed: true }); return; }
+const isShepherd = (x) => x.labels?.["herdr.role"] === "shepherd";
+
+/** Closes a tab (`tab.close`) or one pane of Shepherd's tab (`pane.close`). Asks first, in the
+ *  closetab dialog, when something besides a shell still runs there (a program in the foreground, or
+ *  an agent working or waiting), as Herdr's own tabs do, and when it's the space's last tab, which
+ *  closes the space. Never closes Shepherd: a tab holding it is refused. */
+function closeTarget({ space, tab, pane, terms, name }) {
+  if (terms.some(isShepherd)) return; // stopping Shepherd is its own, explicit thing
+  const busy = terms.filter((x) => (x.program && !x.program.shell) || ["working", "blocked"].includes(x.status));
+  const last = !pane && (space?.tabs?.length ?? 0) <= 1;
+  const cmd = pane ? { name: "pane.close", args: { pane } } : { name: "tab.close", args: { id: tab.id, confirmed: true } };
+  if (!busy.length && !last) { run(cmd.name, cmd.args); return; }
   const what = [...new Set(busy.map((x) => x.program?.name ?? x.address))].join(", ");
-  openOverlay({ mod: "shepherd", kind: "dialog", width: 400, height: 150, props: { panel: "closetab", tab: tab.id, name, what } });
+  openOverlay({ mod: "shepherd", kind: "dialog", width: 400, height: 160,
+    props: { panel: "closetab", cmd, name, what, space: last ? space?.name ?? "this space" : null } });
 }
 
-/** "Close <name>?" for a tab with a program still running (panel "closetab"). */
+/** "Close <name>?" before closing a tab or pane that still runs something, or the space's last tab
+ *  (panel "closetab"; props.cmd is the command to run). */
 export function renderCloseTab() {
   const t = palette();
   const p = props() ?? {};
   const close = () => closeOverlay(p.overlay);
-  const button = (id, label, danger, onClick) => div().id(id).px(12).h(28).flex().items_center().rounded(5).cursor_pointer()
-    .text_size(12).font_semibold()
-    .when(danger, (el) => el.bg(t.ansi1).text_color(t.background))
-    .when(!danger, (el) => el.border(1).border_color(t.input).text_color(t.foreground).hover((s) => s.bg(t.hover)))
-    .on_click(onClick).child(label);
+  const why = [
+    p.what ? `${p.what} is still running in it, and closing it ends ${p.what.includes(",") ? "them" : "it"}.` : null,
+    p.space ? `It's the last tab in ${p.space}: closing it closes the space.` : null,
+  ].filter(Boolean).join(" ");
   return v_flex().id("shepherd-closetab").size_full().p(16).gap(8).bg(t.background).text_color(t.foreground)
     .child(div().text_size(14).font_semibold().child(`Close ${p.name ?? "this tab"}?`))
-    .child(div().flex_1().text_size(12).text_color(t.muted).line_height(1.45)
-      .child(`${p.what || "A program"} is still running in it. Closing the tab ends it.`))
+    .child(div().flex_1().text_size(12).text_color(t.muted).line_height(1.45).child(why))
     .child(h_flex().gap(8).justify_end()
-      .child(button("ct-cancel", "Cancel", false, close))
-      .child(button("ct-close", "Close tab", true, () => { run("tab.close", { id: p.tab, confirmed: true }); close(); })));
+      .child(button(t, "ct-cancel", "Cancel", close))
+      .child(button(t, "ct-close", p.space ? "Close tab and space" : "Close", () => { if (p.cmd) run(p.cmd.name, p.cmd.args); close(); }, { danger: true })));
 }
 
-export function renderTabBar(m, cx) {
+export function renderTabBar(m) {
   const t = palette();
   const space = m.space();
   const view = m.view();
@@ -92,6 +100,8 @@ export function renderTabBar(m, cx) {
         .child(m.hoverTab === id ? "✕" : "")));
   const dot = (status) => div().size(6).rounded(3).flex_none().bg(t[status] ?? t.idle)
     .when(status === "working", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }));
+  // What a terminal runs, for its pill: its program's name, else "shell".
+  const progName = (x) => (x?.program && !x.program.shell && x.program.name ? x.program.name : "shell");
 
   const pills = [];
   // Shepherd first, whether or not its tab sorts first; without one, its pill starts one.
@@ -103,26 +113,39 @@ export function renderTabBar(m, cx) {
       .border(1).border_color(t.border).text_size(12)
       .child(div().opacity(0.6).child(shepherdMark(t, 16)))
       .child(div().flex_none().text_color(t.dim).child("Shepherd"))
-      .child(startAction(m, cx, t, space, "tab-shep")));
+      .child(startAction(m, t, space, "tab-shep")));
   }
+  const paneOf = (x) => panes().find((p) => p.terminal === x.address)?.pane ?? null;
   for (const tab of space?.tabs ?? []) {
     const ts = termsOf(tab);
-    if (sh && ts.some((x) => x.address === sh.address)) continue;
+    // Shepherd's tab (by its label, whether or not m.shepherd() matched it) is the Shepherd pill and
+    // never closes; anything split beside Shepherd gets a pill of its own, closed by its pane.
+    if (ts.some(isShepherd)) {
+      for (const x of ts.filter((y) => !isShepherd(y))) {
+        const name = progName(x);
+        const pane = paneOf(x);
+        pills.push(pill(`tab-${tab.id}-${x.address}`, [programIcon(t, x.program), dot(x.status), div().text_color(t.muted).child(name)],
+          { onClick: () => m.openTerminal(x.address, null, `The ${name} beside Shepherd`),
+            onClose: pane ? () => closeTarget({ space, pane, terms: [x], name }) : null }));
+      }
+      continue;
+    }
     const first = ts[0];
     const task = first?.labels?.["shepherd.task"];
     if (task) {
-      // A sub-agent kept as a tab: its address and task; ✕ parks it: the tab goes, the task's agent
-      // keeps running (closing would end it mid-task).
+      // A sub-agent kept as a tab: its address and task. ✕ parks every terminal in the tab: the tab
+      // goes, the agents keep running (closing would end a task's agent mid-task).
       pills.push(pill(`tab-${tab.id}`, [programIcon(t, first.program), dot(first.status),
         div().font_family(MONO).text_size(11).child(first.address),
         div().text_color(t.dim).child(task)],
-      { onClick: () => m.openTerminal(first.address, task, `${task}'s agent`), onClose: () => run("terminal.park", { terminal: first.address }),
-        closeTip: "Put away: the agent keeps running" }));
+      { onClick: () => m.openTerminal(first.address, task, `${task}'s agent`),
+        onClose: () => { for (const x of ts) run("terminal.park", { terminal: x.address }); },
+        closeTip: "Put away: the tab goes, its agents keep running" }));
     } else {
-      // Named by the tab's name, else what it runs (Claude Code, Codex, shell).
-      const name = tab.named ? tab.name : first?.program && !first.program.shell && first.program.name ? first.program.name : "shell";
+      // Named by the tab's name, else what it runs (Claude Code, Codex, sleep), else "shell".
+      const name = tab.named ? tab.name : progName(first);
       pills.push(pill(`tab-${tab.id}`, [programIcon(t, first?.program), dot(tab.status), div().text_color(t.muted).child(name)],
-        { onClick: () => first && m.openTerminal(first.address, null, `The ${name} tab`), onClose: () => closeTab(tab, ts, name) }));
+        { onClick: () => first && m.openTerminal(first.address, null, `The ${name} tab`), onClose: () => closeTarget({ space, tab, terms: ts, name }) }));
     }
   }
 
