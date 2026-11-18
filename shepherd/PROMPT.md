@@ -87,7 +87,7 @@ Add to either: "If something is still open, ask it as one question the Grill way
 Send the planner: "/to-tickets <id>: on the spec in `.herdr/shepherd/plans/<id>/spec.md`: vertical slices, the first one a prefactor if it helps, each with its blocking edges. Make no ticket for the glossary and decisions in `.herdr/shepherd/plans/<id>/docs/`: Shepherd commits them on the first ticket's branch before it starts. Write `.herdr/shepherd/plans/<id>/tickets.json` as `[{"key": "A", "title": "…", "brief": "what it delivers, enough for an implementer", "blockedBy": ["…keys"]}]` and send `tickets <id>: <that path>`." `start <id> tickets --terminal <address>`.
 
 - `tickets <id>: <path>` → `end <id> ask`, `ask <id> --kind approve --tickets <path> --text "<n> tickets for <title>" --options "Approve|Merge them|Split them" --recommended "Approve"`.
-- Any answer other than Approve: send it to the planner and wait for a new tickets file; ask again.
+- Any answer other than Approve: `start <id> tickets --terminal <planner>` (a new run, so the rework is counted), send the answer to the planner and wait for a new tickets file; then `end <id> ask` and ask again.
 - **Approve**: add each ticket in order, mapping keys to the ids `add` prints: `add --title "…" --stage tickets --parent <id> --brief "…" --blocked-by "<ids of its blockers>"`. The first ticket you add (the lowest id with that parent) is the one that carries the grilling's docs (Starting a ticket). Then `start <id> done` for the spec task, `set <id> summary="Split into <ids>."`, kill and remove the planner, and start every ticket `ready` prints.
 
 ### Starting a ticket

@@ -32,7 +32,8 @@
 //   shep say [--from shepherd|you] [--task T-3] "<text>"   a line of the History (chat.jsonl beside tasks.json)
 //   shep get <id> | shep ls
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync, readdirSync, createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -94,17 +95,25 @@ function openRun(t) {
   return null;
 }
 
-// Tokens a stage run's agent used, from its own session log. The run's terminal (`start --terminal`) is asked for
-// its process (`hc get`); Claude Code keeps `<config>/sessions/<pid>.json` with the session id and folder while it
-// runs, and the session's messages in `<config>/projects/<folder with every non-alphanumeric as ->/<id>.jsonl`, with
-// sub-agents in `<id>/subagents/*.jsonl`. Each API response's usage is logged once per content block, so lines are
-// counted once per message id. tokens = input + cache writes + output; cache reads (the same context read again on
-// every turn) are kept apart in `usage.cacheRead` and not counted. Only lines after an earlier run of the same
-// session ended count, so an agent kept across runs isn't counted twice. Nothing from the log is printed or kept
-// but the counts, the model and the session id. Codex agents (10j) aren't read yet.
+// Tokens a stage run's agent used, from its own session log. Claude Code keeps `<config>/sessions/<pid>.json` with
+// the session id and folder while it runs, and the session's messages in `<config>/projects/<folder with every
+// non-alphanumeric as ->/<id>.jsonl`, with sub-agents in `<id>/subagents/*.jsonl`. The run's session is noted at
+// `start --terminal` (`hc get` gives the agent's pid) and used at the end; only a run without one asks its terminal
+// then (an address can be reused, so a saved session always wins). Addresses on another machine (`vps/t3`) are
+// skipped: their pid means nothing in this machine's sessions folder. Each API response's usage is logged once per
+// content block, so lines are counted once per message id. tokens = input + cache writes + output; cache reads (the
+// same context read again on every turn) are kept apart in `usage.cacheRead` and not counted. Only lines after an
+// earlier run of the same session ended count, so an agent kept across runs isn't counted twice. Logs are streamed
+// a line at a time (they reach tens of MB). Nothing from the log is printed or kept but the counts, the model and the
+// session id and folder. Codex agents (10j) aren't read yet.
+const NO_AGENT = new Set(["ci", "merge"]); // CI is a plain program; Ready to merge waits on the person.
 const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 
+// A run's session as { id, cwd }; runs saved by the first 10e build kept a string id and `sessionCwd`.
+const sessionOfRun = (run) => (typeof run.session === "string" ? { id: run.session, cwd: run.sessionCwd ?? null } : run.session ?? null);
+
 function claudeSession(address) {
+  if (!address || address.includes("/")) return null;
   let info;
   try {
     info = JSON.parse(execFileSync("hc", ["get", address], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 }));
@@ -132,22 +141,23 @@ function sessionLog(session) {
   return null;
 }
 
-function logUsage(files, after) {
+async function logUsage(files, after) {
   const seen = new Map();
   let model = null;
   for (const f of files) {
-    let text;
-    try { text = readFileSync(f, "utf8"); } catch { continue; }
-    for (const line of text.split("\n")) {
-      if (!line.includes('"usage"')) continue;
-      let d;
-      try { d = JSON.parse(line); } catch { continue; }
-      const m = d?.message;
-      if (d?.type !== "assistant" || !m?.usage || m.model === "<synthetic>") continue;
-      if (after && !((Date.parse(d.timestamp ?? "") || 0) > after)) continue;
-      seen.set(m.id ?? d.requestId ?? d.uuid, m.usage);
-      if (!d.isSidechain && !f.includes("/subagents/")) model = m.model ?? model;
-    }
+    try {
+      const lines = createInterface({ input: createReadStream(f, { encoding: "utf8" }), crlfDelay: Infinity });
+      for await (const line of lines) {
+        if (!line.includes('"usage"')) continue;
+        let d;
+        try { d = JSON.parse(line); } catch { continue; }
+        const m = d?.message;
+        if (d?.type !== "assistant" || !m?.usage || m.model === "<synthetic>") continue;
+        if (after && !((Date.parse(d.timestamp ?? "") || 0) > after)) continue;
+        seen.set(m.id ?? d.requestId ?? d.uuid, m.usage);
+        if (!d.isSidechain && !f.includes("/subagents/")) model = m.model ?? model;
+      }
+    } catch {}
   }
   const u = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
   for (const x of seen.values()) {
@@ -159,38 +169,45 @@ function logUsage(files, after) {
   return { usage: u, tokens: u.input + u.cacheWrite + u.output, model, messages: seen.size };
 }
 
-function agentTokens(t, run) {
-  const address = run.terminal ?? t.terminal;
-  const session = (address && claudeSession(address)) ?? (run.session ? { id: run.session, cwd: run.sessionCwd ?? null } : null);
-  if (!session) return { why: address ? `${address} isn't a running Claude Code agent` : "the run has no terminal" };
+async function agentTokens(t, run) {
+  // A run of its own (a terminal or a session) never borrows the task's terminal, which may be a later agent.
+  const own = Boolean(run.terminal || run.session);
+  const address = own ? run.terminal : t.terminal;
+  const session = sessionOfRun(run) ?? claudeSession(address);
+  if (!session) {
+    return { why: !address ? "the run has no terminal"
+      : address.includes("/") ? `${address} is on another machine` : `${address} isn't a running Claude Code agent` };
+  }
   const log = sessionLog(session);
   if (!log) return { why: `no session log for ${session.id}` };
   const sub = join(log.dir, session.id, "subagents");
   let files = [join(log.dir, log.name)];
   try { files = files.concat(readdirSync(sub).filter((f) => f.endsWith(".jsonl")).map((f) => join(sub, f))); } catch {}
-  const after = t.history.filter((r) => r !== run && r.session === session.id && r.end)
+  const after = t.history.filter((r) => r !== run && sessionOfRun(r)?.id === session.id && r.end)
     .reduce((n, r) => Math.max(n, Date.parse(r.end) || 0), 0);
-  return { session, ...logUsage(files, after) };
+  const r = await logUsage(files, after);
+  if (!r.messages) return { why: `no usage in ${session.id}'s log since the run began` };
+  return { session, ...r };
 }
 
-// Closes a run: its end, and the tokens its agent used unless given by hand.
-function closeRun(t, run, given) {
+// Closes a run: its end, and the tokens its agent used unless given by hand. Returns what it recorded, for `end`
+// to print; problems go to stderr.
+async function closeRun(t, run, given) {
   run.end = now();
   delete run.cost;
-  if (given !== undefined && !Number.isNaN(given)) { run.tokens = given; return; }
-  // CI is a plain program and Ready to merge waits on the person: no agent, no tokens.
-  if (run.stage === "ci" || run.stage === "merge") return;
-  const r = agentTokens(t, run);
+  if (given !== undefined && !Number.isNaN(given)) { run.tokens = given; return null; }
+  if (NO_AGENT.has(run.stage)) return null;
+  const r = await agentTokens(t, run);
   if (r.why) {
-    if (run.terminal ?? t.terminal) process.stderr.write(`shep: ${t.id} ${run.stage}: tokens not recorded: ${r.why}\n`);
-    return;
+    process.stderr.write(`shep: ${t.id} ${run.stage}: tokens not recorded: ${r.why}\n`);
+    return null;
   }
-  run.session = r.session.id;
-  if (r.session.cwd) run.sessionCwd = r.session.cwd;
+  run.session = r.session;
+  delete run.sessionCwd;
   run.tokens = r.tokens;
   run.usage = r.usage;
   if (!run.model && r.model) run.model = r.model;
-  console.log(`${t.id} ${run.stage}: ${r.tokens} tokens (${r.messages} messages)`);
+  return `${t.id} ${run.stage}: ${r.tokens} tokens (${r.messages} messages)`;
 }
 
 const { pos, opt } = parse(process.argv.slice(2));
@@ -242,7 +259,7 @@ switch (cmd) {
     if (!STAGES.includes(stage)) die(`start <id> <stage>; stage one of ${STAGES.join(" ")}`);
     const t = task(state, id);
     const open = openRun(t);
-    if (open) { closeRun(t, open); open.result = open.result === "running" ? "pass" : open.result ?? "pass"; }
+    if (open) { await closeRun(t, open); open.result = open.result === "running" ? "pass" : open.result ?? "pass"; }
     t.stage = stage;
     delete t.wait;
     // Ready to merge waits on the person.
@@ -251,12 +268,12 @@ switch (cmd) {
     if (stage !== "done") {
       const run = { loop: t.loop, stage, result: "running", note: opt.note ?? "",
         start: now(), end: null, model: opt.model ?? null, tokens: null };
-      // The run keeps its own terminal, so its tokens are read from that agent even after another takes the task's.
+      // The run keeps its own terminal, so its tokens are read from that agent even after another takes the task's,
+      // and its session now (`hc get`, up to 10 s; the start time is already taken), in case the agent is gone or its
+      // address reused by the time the run ends.
       if (typeof opt.terminal === "string") {
         run.terminal = opt.terminal;
-        // Its session now, in case the agent is gone by the time the run ends.
-        const session = claudeSession(opt.terminal);
-        if (session) { run.session = session.id; if (session.cwd) run.sessionCwd = session.cwd; }
+        if (!NO_AGENT.has(stage)) { const session = claudeSession(opt.terminal); if (session) run.session = session; }
       }
       t.history.push(run);
     }
@@ -270,7 +287,8 @@ switch (cmd) {
     const t = task(state, id);
     const open = openRun(t);
     if (!open) die(`${id} has no open stage run`);
-    closeRun(t, open, num(opt.tokens));
+    const recorded = await closeRun(t, open, num(opt.tokens));
+    if (recorded) console.log(recorded);
     open.result = result;
     if (opt.note) open.note = opt.note;
     if (result === "ask") t.status = "blocked";

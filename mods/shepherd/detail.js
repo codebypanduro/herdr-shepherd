@@ -181,7 +181,7 @@ function overview(m, task, t) {
       .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("TIMELINE"))
       .child(h_flex().gap(6).items_end().children(loops.map(loopGroup)))
       .child(h_flex().gap(12).font_family(MONO).text_size(10.5).text_color(t.muted)
-        .child(dur(total)).child(`${kTokens(tokens)} tokens`))))
+        .child(dur(total)).when(tokens > 0, (el) => el.child(`${kTokens(tokens)} tokens`)))))
     .child(v_flex().gap(8)
       .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("COMMENTS"))
       .when(comments.length === 0, (el) => el.child(div().text_color(t.dim).child("No comments yet.")))

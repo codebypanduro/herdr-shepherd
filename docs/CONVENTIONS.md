@@ -27,7 +27,7 @@ hc run --bg --keep --name hrd-144-impl-2 \
 
 ## Task state: `.herdr/shepherd/tasks.json`
 
-Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; the top of shep.mjs lists its commands, and `shep` with none names them). The schema below is what the board reads; shep also writes `answered` (time) on an answered question, and an open stage run's history `result` is `"running"`. A run's `tokens` (input + cache writes + output) and `usage` are what its agent's own Claude Code session log says, read by `shep end` (RECIPE.md, *Tokens*); shep also keeps the run's `session` and `sessionCwd` to find the log again. There is no `cost`. Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
+Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; the top of shep.mjs lists its commands, and `shep` with none names them). The schema below is what the board reads; shep also writes `answered` (time) on an answered question, and an open stage run's history `result` is `"running"`. A run's `tokens` (input + cache writes + output) and `usage` are what its agent's own Claude Code session log says, read by `shep end` (RECIPE.md, *Tokens*); shep also keeps the run's `session` (`{id, cwd}`, noted at `start --terminal`) to find the log again. There is no `cost`. Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
 
 ```json
 {
@@ -55,7 +55,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
         "start": "2026-11-17T09:02:11Z", "end": "2026-11-17T09:31:40Z",
         "model": "Sonnet 4.5", "terminal": "t6", "tokens": 142000,
         "usage": { "input": 120, "cacheWrite": 118400, "cacheRead": 2310000, "output": 23480 },
-        "session": "<Claude Code session id>" }
+        "session": { "id": "<Claude Code session id>", "cwd": "<the agent's folder>" } }
     ],
     "findings": [
       { "id": "f1", "loop": 1, "file": "mods/tabs/main.js", "line": 42,
