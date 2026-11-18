@@ -257,6 +257,8 @@ switch (cmd) {
     const q = { id: `q${n}`, task: t.id, kind, from: typeof opt.from === "string" ? opt.from : "shepherd",
       text, options, recommended, asked: now(), answer: null, answered: null };
     if (why) q.why = why;
+    // The asker's file name (grill-<n>): the mods send the answer straight to the asker as "<ref> answer: …".
+    if (typeof opt.question === "string") q.ref = basename(opt.question).replace(/\.json$/, "");
     if (tickets) q.tickets = tickets.map((k) => ({ ...k, blockedBy: Array.isArray(k.blockedBy) ? k.blockedBy : k.blockedBy ? [k.blockedBy] : [] }));
     state.questions.push(q);
     t.status = "blocked";

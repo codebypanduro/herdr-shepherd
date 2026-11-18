@@ -42,6 +42,7 @@ import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } f
 const REFRESH_MS = 5000;
 const PENDING = "shepherd.pending"; // question ids answered here that tasks.json hasn't caught up with
 const ALERTED = "shepherd.alerted"; // "<repo key>#<question id>" already alerted
+const SENT_TEXT = "shepherd.sentText"; // "<repo key>#<question id>" → the answer text sent from here (History shows it at once)
 const ANSWERED = "shepherd.answered"; // "<repo key>#<question id>" answered here (never pruned by load; toasts read it)
 const ALERT_WINDOW_MS = 15 * 60000; // older questions found on first sight are not news
 const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for Needs you cards
@@ -344,11 +345,27 @@ export default class Shepherd extends View {
   answer(q, text, space = this.space()) {
     const answer = String(text ?? "").trim();
     const repo = this.repo(space);
+    if (!answer || !repo) return;
+    // A grilling question goes straight to its griller (it waits on "<ref> answer: …"), so it can go
+    // on while Shepherd, told it was sent, only records it: one AI turn less per question.
+    const asker = String(q.from ?? "").split(" ")[0];
+    const direct = q.kind === "grill" && q.ref && /^t[0-9a-z]+$/.test(asker) && this.shepherd(space) && !this.queued(space).length
+      && terminals().some((x) => x.state === "live" && x.address === (space.machine ? `${space.machine}/${asker}` : asker));
+    const line = direct ? `answer ${q.id}: ${answer} (sent to ${asker})` : `answer ${q.id}: ${answer}`;
     // Only a sent answer is pending; a queued one shows as open until it goes.
-    if (!answer || !repo || this.tell(`answer ${q.id}: ${answer}`, q.task ?? null, space) !== "sent") return;
+    if (this.tell(line, q.task ?? null, space) !== "sent") return;
+    if (direct) hc(["send", space.machine ? `${space.machine}/${asker}` : asker, `${q.ref} answer: ${answer}`]);
     const id = pendingId(repo.key, q.id);
     setShared(PENDING, [...(shared(PENDING) ?? []), id]);
     setShared(ANSWERED, [...(shared(ANSWERED) ?? []), id].slice(-200));
+    setShared(SENT_TEXT, { ...Object.fromEntries(Object.entries(shared(SENT_TEXT) ?? {}).slice(-50)), [id]: answer });
+  }
+
+  /** The answer sent from here for a question tasks.json hasn't recorded yet, else null. */
+  sentAnswer(q, space = this.space()) {
+    const repo = this.repo(space);
+    if (!repo || q.answer != null || !(shared(PENDING) ?? []).includes(pendingId(repo.key, q.id))) return null;
+    return (shared(SENT_TEXT) ?? {})[pendingId(repo.key, q.id)] ?? "…";
   }
 
   /** A message from the bar: plain text to Shepherd. */

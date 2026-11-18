@@ -67,7 +67,7 @@ Look facts up yourself (the code, the docs) instead of asking them. When nothing
 
 followed by the Plan brief ending. `start <id> grill --terminal <address> --model <model>`.
 
-- `grill <id>: <path>` → `ask <id> --kind grill --question <path> --from "<address> griller"`. Nothing more: the question reaches the person in Needs you and the bar. Their answer arrives as `answer <qid>: <text>`, or they reply to you; record it with `answer`, then send the asker `grill-<n> answer: <text>` (n from the file name).
+- `grill <id>: <path>` → `ask <id> --kind grill --question <path> --from "<address> griller"`. Nothing more: the question reaches the person in Needs you and the bar. Their answer arrives as `answer <qid>: <text>`, or they reply to you; record it with `answer`, then send the asker `grill-<n> answer: <text>` (n from the file name). When it ends with `(sent to <address>)`, the board already sent it to the griller: only record it (the text without that ending), send nothing.
 - `grilled <id>: <path>` → `end <id> pass --note "grilled: <n> questions"`, then Spec.
 
 ### Spec

@@ -62,7 +62,9 @@ export function renderHistory(m) {
         .child(div().flex_1().min_w(0).text_color(t.muted).child(it.text));
     }
     const q = it.q;
-    const open = q.answer == null;
+    // Answered here but not yet recorded by Shepherd: shown as answered at once.
+    const sent = m.sentAnswer(q);
+    const open = q.answer == null && sent == null;
     const kind = KINDS[q.kind] ?? KINDS.ask;
     return v_flex().id(`h-${i}`).gap(8).px(12).py(10).rounded(6).border(1)
       .border_color(open ? tint(t.blocked, 0.45) : t.border).bg(open ? tint(t.blocked, 0.05) : t.surface)
@@ -81,7 +83,7 @@ export function renderHistory(m) {
       .when(open && (q.options ?? []).length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(
         q.options.map((o, j) => answerButton(t, `h-${i}-o${j}`, o, o === q.recommended, () => m.answer(q, o), { fit: true })))))
       .when(!open, (el) => el.child(h_flex().gap(4).text_size(11.5).text_color(t.muted)
-        .child("↳ you:").child(div().text_color(t.foreground).child(q.answer))));
+        .child("↳ you:").child(div().text_color(t.foreground).child(q.answer ?? sent))));
   };
 
   const status = sh?.status ?? null;
