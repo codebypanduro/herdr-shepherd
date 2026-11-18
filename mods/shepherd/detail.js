@@ -2,14 +2,15 @@
 // Changes and Files come from git in the task's worktree (see git.js), Terminal mirrors the task's
 // agent (term.js); the rest is tasks.json.
 
-import { div } from "gpui-kit";
+import { div, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { theme, run, shared, setShared } from "herdr";
+import { run, setShared, terminals } from "herdr";
 import { STAGES, MONO, ROLE, SELECTED, TAB, TABS, currentTab, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens } from "./common.js";
-import { renderChanges, renderFiles } from "./git.js";
+import { renderChanges, renderFiles, fileIcon, worktreeOf } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
-import { renderTerm, termBlocked, termAddress } from "./term.js";
+import { renderTerm, termBlocked } from "./term.js";
+import { shepherdMark, programIcon } from "./start.js";
 
 export { TAB, TABS, currentTab };
 const TAB_TITLES = { overview: "Overview", review: "Review", changes: "Changes", files: "Files", proof: "Proof", terminal: "Terminal" };
@@ -18,16 +19,39 @@ const BUILD = ["implement", "review", "ci", "proof"];
 export { tint };
 
 const ms = (r, now) => Math.max(0, (Date.parse(r.end ?? "") || now) - (Date.parse(r.start ?? "") || now));
-function dur(x) {
-  const s = Math.round(x / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.round(s / 60);
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
-}
 
 export function closeDetail() {
   setShared(SELECTED, null);
   run("layout.hide", { id: "detail" });
+}
+
+/** Where the task's worktree is, as the design words it before and after: none yet for plan
+ *  stages and queued tickets, "merged · worktree removed" once done. */
+export function worktreeLine(m, task) {
+  if (task.stage === "done") return { branch: task.branch ?? "merged", path: "merged · worktree removed", active: false };
+  if (!task.worktree) return { branch: "no worktree yet", path: "one is made when the ticket starts", active: false };
+  return { branch: task.branch ?? "—", path: `${m.space()?.machine ?? "this mac"}:${task.worktree}`, active: true };
+}
+
+/** What the stage chip and the timeline's last total say about where the task is now:
+ *  done, stuck, waiting on you, or how long it's been in its stage. */
+function nowState(m, task) {
+  const asked = m.questions().some((q) => q.task === task.id);
+  const card = m.taskCard(task, new Map(terminals().map((x) => [x.address, x])), asked);
+  const stage = STAGES[task.stage]?.title ?? task.stage;
+  // Since the stage's run started; a stage with no run of its own (Ready to merge) counts from
+  // the last run's end.
+  const runs = task.history ?? [];
+  const own = runs.some((r) => r.stage === task.stage);
+  const since = own ? card.since : Date.parse(runs[runs.length - 1]?.end ?? "") || null;
+  const inStage = since ? `${mins((Date.now() - since) / 60000)} in ${stage}` : stage;
+  if (task.stage === "done") return { kind: "done", text: "done" };
+  if (task.status === "queued") return { kind: "queued", text: "queued" };
+  if (task.status === "parked") return { kind: "parked", text: "parked" };
+  if (card.stuck) return { kind: "stuck", text: `stuck · ${inStage}` };
+  if (asked || task.status === "blocked" || card.status === "blocked") return { kind: "waiting", text: `waiting on you · ${inStage}` };
+  if (task.status === "paused") return { kind: "paused", text: `paused · ${inStage}` };
+  return { kind: "working", text: inStage };
 }
 
 export function renderDetail(m) {
@@ -41,45 +65,66 @@ export function renderDetail(m) {
   const tab = currentTab();
   const runs = task.history ?? [];
   const tokens = runTokens(runs);
-  const color = groupColor(t, stageGroup(task.stage));
+  const now = nowState(m, task);
+  // The design's chip: 12% fill, 45% edge, in the group's color, amber while it waits on you.
+  const color = now.kind === "waiting" && stageGroup(task.stage) !== "ship" ? t.blocked : groupColor(t, stageGroup(task.stage));
   const stageIcon = task.stage === "merge" ? "⑃ " : task.stage === "done" ? "✓ " : "";
+  const skill = m.settings().stages?.[task.stage]?.skill ?? STAGES[task.stage]?.skill ?? "";
+  const loopText = BUILD.includes(task.stage) ? `loop ${task.loop ?? 1}/${Math.max(task.maxLoops ?? 3, task.loop ?? 1)}`
+    : stageGroup(task.stage) === "plan" ? skill : "";
+  const wt = worktreeLine(m, task);
+  const meta = (text) => div().flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(text);
 
-  const chip = (text, c) => div().px(7).h(20).flex().items_center().rounded(5).border(1).border_color(c)
-    .text_size(11).text_color(c).child(text);
+  // The agent's terminal: opens the terminal window (as T does); "no agent" greyed without one.
+  const termChip = h_flex().id("detail-term").flex_none().h(24).px(8).gap(6).items_center().rounded(5)
+    .border(1).border_color(t.input).font_family(MONO).text_size(11)
+    .text_color(task.terminal ? t.foreground : t.dim)
+    .tooltip(task.terminal ? "Open terminal (T)" : "No agent running")
+    .when(Boolean(task.terminal), (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
+      .on_click(() => m.openTerminal(task.terminal, task.id)))
+    .child(div().w(12).h(9).rounded(2).border(1).border_color(task.terminal ? t.muted : t.dim))
+    .child(task.terminal ?? "no agent");
 
-  const header = v_flex().flex_none().px(14).pt(12).pb(10).gap(8).border_b(1).border_color(t.border)
-    .child(h_flex().gap(8).items_center()
-      .child(div().font_family(MONO).text_size(11.5).text_color(t.muted).child(task.id))
-      .child(div().flex_1().min_w(0).truncate().text_size(14).font_semibold().child(task.title ?? ""))
-      .child(div().id("detail-close").px(6).rounded(4).text_color(t.dim)
+  const header = v_flex().flex_none().px(14).pt(12).pb(9).gap(6)
+    .child(h_flex().gap(10).items_start()
+      .child(h_flex().flex_1().min_w(0).flex_wrap().gap(10).items_center()
+        .child(div().flex_none().font_family(MONO).text_size(12).text_color(t.muted).child(task.id))
+        .child(div().min_w(0).truncate().text_size(15).font_semibold().child(task.title ?? ""))
+        .child(div().flex_none().px(8).h(20).flex().items_center().rounded(10).border(1)
+          .border_color(tint(color, 0.45)).bg(tint(color, 0.12)).text_size(11).text_color(color)
+          .child(`${stageIcon}${STAGES[task.stage]?.title ?? task.stage}`))
+        .when(Boolean(loopText), (el) => el.child(meta(loopText)))
+        .when(tokens > 0, (el) => el.child(meta(`${kTokens(tokens)} tokens`))))
+      .child(termChip)
+      .child(div().id("detail-close").flex_none().size(24).flex().items_center().justify_center().rounded(4).text_color(t.muted)
+        .tooltip("Close (Esc)")
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click(() => closeDetail()).child("✕")))
-    .child(h_flex().gap(8).items_center()
-      .child(chip(`${stageIcon}${STAGES[task.stage]?.title ?? task.stage}`, color))
-      .when(BUILD.includes(task.stage), (el) => el.child(
-        div().font_family(MONO).text_size(11).text_color(t.muted).child(`loop ${task.loop ?? 1}/${task.maxLoops ?? 3}`)))
-      .when(tokens > 0, (el) => el.child(div().font_family(MONO).text_size(11).text_color(t.muted).child(`${kTokens(tokens)} tokens`)))
-      .when(Boolean(task.terminal), (el) => el.child(
-        div().id("detail-term").px(7).h(20).flex().items_center().rounded(5).bg(t.raised).cursor_pointer()
-          .font_family(MONO).text_size(11).text_color(t.foreground)
-          .hover((s) => s.bg(t.hover))
-          .on_click(() => run("terminal.peek", { terminal: termAddress(m, task) }))
-          .child(`▭ ${task.terminal}`))))
-    .when(Boolean(task.worktree), (el) => el.child(
-      div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
-        .child(`⑂ ${task.branch ?? "—"} · ${m.space()?.machine ?? "this mac"}:${task.worktree}`)));
+    .child(h_flex().min_w(0).gap(8).items_center().font_family(MONO).text_size(11).text_color(t.dim)
+      .child(div().flex_none().text_color(wt.active ? t.accent : t.dim).child(`⑂ ${wt.branch}`))
+      .child(div().flex_none().text_color(t.border).child("·"))
+      .child(div().min_w(0).truncate().child(wt.path)));
 
-  const tabs = h_flex().flex_none().h(32).px(10).gap(2).items_center().border_b(1).border_color(t.border)
-    .children(TABS.map((k, i) => h_flex().id(`dtab-${k}`).h(24).px(9).gap(5).items_center().rounded(5)
-      .bg(tab === k ? t.selected : t.surface).text_color(tab === k ? t.foreground : t.muted)
-      .hover((s) => s.bg(t.hover))
+  // Counts as the design: Review = the task's findings, Changes = changed files (once git has read them).
+  const g = worktreeOf(task) ? m.git(task) : null;
+  const counts = {
+    review: (task.findings ?? []).length || null,
+    changes: g && !g.error && g.files.length ? g.files.length : null,
+  };
+  const tabs = h_flex().flex_none().px(10).gap(2).border_b(1).border_color(t.border)
+    .children(TABS.map((k, i) => h_flex().id(`dtab-${k}`).pt(7).pb(7).px(10).gap(6).items_center()
+      .border_b(2).border_color(tab === k ? t.foreground : t.surface)
+      .text_size(12.5).text_color(tab === k ? t.foreground : t.muted)
+      .hover((s) => s.text_color(t.foreground))
       .on_click(() => setShared(TAB, k))
       .child(TAB_TITLES[k])
+      .when(counts[k] != null, (el) => el.child(div().px(5).rounded(8).bg(t.raised)
+        .font_family(MONO).text_size(10.5).text_color(t.muted).child(String(counts[k]))))
       // The agent waits on the person (a permission or trust prompt): an amber dot on Terminal.
       .when(k === "terminal" && termBlocked(m, task), (el) => el.child(div().size(6).rounded(3).bg(t.blocked)))
       .child(div().font_family(MONO).text_size(10).text_color(t.dim).child(String(i + 1)))));
 
-  const body = tab === "overview" ? overview(m, task, t)
+  const body = tab === "overview" ? overview(m, task, t, now)
     : tab === "review" ? review(task, t)
     : tab === "changes" ? renderChanges(m, task, t)
     : tab === "files" ? renderFiles(m, task, t)
@@ -103,94 +148,177 @@ export const segmentTitle = (r, now = Date.now()) => [
   r.tokens ? `${kTokens(r.tokens)} tokens${r.model ? ` · ${r.model}` : ""}` : null,
 ].filter(Boolean).join(" · ") + (r.note ? ` — ${r.note}` : "");
 
-function overview(m, task, t) {
+/** The design's short stage names, for labels inside timeline segments ("impl 14m"). */
+const SHORT = { triage: "triage", grill: "grill", spec: "spec", tickets: "tickets", implement: "impl", review: "review", ci: "ci", proof: "proof", merge: "merge", done: "done" };
+
+/** Who wrote a comment: name and color per role (the design's), purple for plan roles and review. */
+const ROLES = (t) => ({
+  shepherd: ["Shepherd", t.accent], you: ["You", t.foreground], implementer: ["Implementer", t.working],
+  reviewer: ["Reviewer", t.ansi5], planner: ["Planner", t.ansi5], griller: ["Griller", t.ansi5], triager: ["Triager", t.ansi5],
+  ci: ["CI", t.muted], qa: ["QA", t.ansi6],
+});
+
+/** Which agent a model runs in: Codex for codex/gpt models, else Claude Code; null with no model. */
+export const agentOf = (model) => (!model ? null : /codex|gpt/i.test(model) ? "codex" : "claude");
+
+/** A comment's 22px avatar: the agent's icon (Claude Code, Codex, or the Shepherd terminal's own
+ *  program) with a corner in the role's color, else the role's initial on its color. */
+function avatar(t, role, { model = null, program = null } = {}) {
+  const [name, color] = ROLES(t)[role] ?? [role, t.muted];
+  const agent = agentOf(model);
+  const icon = program?.icon ? programIcon(t, program, 14)
+    : agent ? image(`icons/${agent}.svg`).size(14).flex_none() : null;
+  const tile = div().size(22).rounded(5).flex().items_center().justify_center();
+  return div().relative().size(22).flex_none()
+    .tooltip(icon ? `${program?.name ?? (agent === "codex" ? "Codex" : "Claude Code")} · ${name}` : name)
+    .child(icon ? tile.bg(t.raised).border(1).border_color(t.border).child(icon)
+      : role === "shepherd" ? shepherdMark(t, 22)
+      : tile.bg(color).text_color(t.background).text_size(11).font_semibold().child(name[0]))
+    .when(Boolean(icon), (el) => el.child(div().absolute().right(-3).bottom(-3).size(9).rounded(3)
+      .border(2).border_color(t.surface).bg(color)));
+}
+
+const STATE_COLOR = (t, s) => (s === "resolved" || s === "approved" ? t.done : s === "fixing" ? t.working : t.blocked);
+
+function overview(m, task, t, nowSt) {
   const now = Date.now();
   const runs = task.history ?? [];
   const total = runs.reduce((n, r) => n + ms(r, now), 0) || 1;
   const tokens = runTokens(runs);
-  const loops = [...new Set(runs.map((r) => r.loop ?? 1))];
+  const findings = task.findings ?? [];
+  const open = findings.filter((f) => f.state !== "resolved").length;
+  const skillOf = (stage) => m.settings().stages?.[stage]?.skill ?? STAGES[stage]?.skill ?? "";
+  const shepherd = m.shepherd();
 
-  // Segments flex by their share of the time; a 2% floor keeps short stages visible.
-  const segment = (r, i) => {
-    const c = RESULT_COLOR(t, r.result);
-    return div().id(`seg-${i}`).h_full().flex_basis(0).flex_grow(Math.max(0.02, ms(r, now) / total)).min_w(4).rounded(3).bg(c)
-      .tooltip(segmentTitle(r, now))
-      .when(r.result === "running", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 }));
-  };
-  const loopGroup = (l) => {
-    const rs = runs.map((r, i) => ({ r, i })).filter(({ r }) => (r.loop ?? 1) === l);
-    const share = rs.reduce((n, { r }) => n + ms(r, now), 0) / total;
-    return v_flex().gap(4).flex_basis(0).flex_grow(Math.max(0.06, share)).min_w(30)
-      .child(div().font_family(MONO).text_size(10).text_color(t.dim).child(`loop ${l}`))
-      .child(h_flex().h(10).gap(2).children(rs.map(({ r, i }) => segment(r, i))))
-      .child(div().truncate().text_size(10).text_color(t.dim).child(rs.map(({ r }) => STAGES[r.stage]?.title ?? r.stage).join(" · ")));
-  };
+  // Timeline: one segment per stage run, flexed by its share of the time (2% floor), tinted in
+  // its result color with "impl 14m" inside when it's wide enough; "plan" / "loop n" over the first
+  // segment of each part, a small gap between parts.
+  const part = (r) => (stageGroup(r.stage) === "plan" ? 0 : r.loop ?? 1);
+  const segs = runs.map((r, i) => {
+    const share = Math.max(0.02, ms(r, now) / total);
+    const fresh = i === 0 || part(runs[i - 1]) !== part(r);
+    return { r, i, share, fresh, mark: fresh ? (part(r) ? `loop ${part(r)}` : "plan") : "" };
+  });
+  const cell = (s) => div().flex_basis(0).flex_grow(s.share).min_w(3).when(s.fresh && s.i > 0, (el) => el.ml(5));
+  const timeline = segs.length === 0
+    ? h_flex().h(22).px(5).items_center().rounded(3).border(1).border_color(t.border).bg(t.raised)
+      .font_family(MONO).text_size(10).text_color(t.dim).child("not started")
+    : h_flex().h(22).gap(2).children(segs.map((s) => {
+      const c = RESULT_COLOR(t, s.r.result);
+      return cell(s).id(`seg-${s.i}`).h_full().flex().items_center().px(5).overflow_hidden().rounded(3)
+        .bg(tint(c, 0.22)).border(1).border_color(tint(c, 0.55))
+        .tooltip(segmentTitle(s.r, now))
+        .when(s.r.result === "running", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1600 }))
+        .when(s.share > 0.07, (el) => el.child(div().min_w(0).truncate().font_family(MONO).text_size(10).text_color(t.foreground)
+          .child(`${SHORT[s.r.stage] ?? s.r.stage} ${mins(ms(s.r, now) / 60000)}`)));
+    }));
+  const marks = h_flex().h(14).gap(2).children(segs.map((s) => cell(s).flex().items_end()
+    .font_family(MONO).text_size(10).text_color(t.muted).child(s.mark)));
+  const nowColor = nowSt.kind === "stuck" ? t.ansi1 : nowSt.kind === "waiting" ? t.blocked : nowSt.kind === "done" ? t.done : t.muted;
 
-  const comment = ({ who, color, where = null, text, state = null, fg = t.foreground, whereColor = t.dim }) => v_flex().gap(4).p(10).rounded(6).bg(t.raised)
-    .child(h_flex().gap(7).items_center()
-      .child(div().w(3).h(12).rounded(2).bg(color))
-      .child(div().text_size(11.5).font_semibold().child(who))
-      .when(Boolean(where), (el) => el.child(div().font_family(MONO).text_size(10.5).text_color(whereColor).child(where)))
-      .child(div().flex_1())
-      .when(Boolean(state), (el) => el.child(div().px(6).h(18).flex().items_center().rounded(4).border(1)
-        .border_color(state === "resolved" ? t.done : state === "fixing" ? t.working : t.blocked)
-        .text_size(10.5).text_color(state === "resolved" ? t.done : state === "fixing" ? t.working : t.blocked)
-        .child(state))))
-    .child(div().text_size(12.5).line_height(1.4).text_color(fg).child(text));
+  // One comment: avatar, who, "model · skill", "loop n", a state chip, a file:line chip, the text.
+  const comment = ({ role, model = null, program = null, sub = null, loop = null, state = null, file = null, line = null, text, fg = t.foreground, subColor = t.dim }) => {
+    const [name] = ROLES(t)[role] ?? [role];
+    return h_flex().gap(10).py(10).items_start().border_t(1).border_color(t.border)
+      .child(avatar(t, role, { model, program }))
+      .child(v_flex().flex_1().min_w(0).gap(5)
+        .child(h_flex().gap(8).items_center().flex_wrap()
+          .child(div().text_size(12).font_semibold().child(name))
+          .when(Boolean(sub), (el) => el.child(div().font_family(MONO).text_size(11).text_color(subColor).child(sub)))
+          .when(loop != null, (el) => el.child(div().font_family(MONO).text_size(11).text_color(t.dim).child(`loop ${loop}`)))
+          .child(div().flex_1())
+          .when(Boolean(state), (el) => el.child(div().px(7).h(18).flex().items_center().rounded(9).border(1)
+            .border_color(STATE_COLOR(t, state)).text_size(10.5).text_color(STATE_COLOR(t, state)).child(state))))
+        .when(Boolean(file), (el) => el.child(fileChip(m, task, t, file, line)))
+        .child(div().text_size(13).line_height(1.5).text_color(fg).child(text)));
+  };
+  const modelSub = (role, stage, model) => {
+    const skill = role === "implementer" ? "" : skillOf(stage);
+    return [model, skill.startsWith("/") ? skill : ""].filter(Boolean).join(" · ") || null;
+  };
 
   const comments = [
-    ...runs.filter((r) => r.note).map((r) => ({
-      at: Date.parse(r.end ?? r.start ?? "") || 0,
-      el: comment({ who: `${ROLE[r.stage] ?? r.stage} · ${r.model ?? "agent"}`, color: RESULT_COLOR(t, r.result),
-        where: `${STAGES[r.stage]?.title ?? r.stage} · loop ${r.loop ?? 1}`, text: r.note,
-        state: r.result === "running" ? null : r.result === "fail" ? "open" : null }),
-    })),
+    ...runs.filter((r) => r.note).map((r) => {
+      const role = r.stage === "merge" ? "shepherd" : ROLE[r.stage] ?? r.stage;
+      // A failed run is open until a later loop runs; a passed review is approved.
+      const later = runs.some((x) => (x.loop ?? 1) > (r.loop ?? 1));
+      const state = r.result === "fail" ? (later ? "resolved" : "open") : r.result === "pass" && r.stage === "review" ? "approved" : null;
+      return {
+        at: Date.parse(r.end ?? r.start ?? "") || 0,
+        el: comment({ role, model: r.model, sub: modelSub(role, r.stage, r.model),
+          loop: stageGroup(r.stage) === "plan" ? null : r.loop ?? 1, state, text: r.note }),
+      };
+    }),
     // The task's chat (chat.jsonl lines with this task): your `re <id>: …` lines as your text, the
     // board's other lines (pause, steer, status, answers) as short events, and Shepherd's replies.
     ...m.taskChat(task.id).map((c) => ({
       at: Date.parse(c.at) || now,
       el: chatComment(c, task.id, now),
     })),
-    ...(task.findings ?? []).map((f) => ({
+    ...findings.map((f) => {
       // Findings carry no time: place each just after the review run that found it.
-      at: (Date.parse(runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0]?.end ?? "") || 0) + 1,
-      el: comment({ who: "reviewer", color: t.ansi5, where: f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : `loop ${f.loop}`, text: f.text, state: f.state }),
-    })),
+      const rev = runs.filter((r) => r.stage === "review" && (r.loop ?? 1) === (f.loop ?? 1)).slice(-1)[0];
+      return {
+        at: (Date.parse(rev?.end ?? "") || 0) + 1,
+        el: comment({ role: "reviewer", model: rev?.model, sub: modelSub("reviewer", "review", rev?.model),
+          loop: f.loop ?? 1, state: f.state, file: f.file, line: f.line, text: f.text }),
+      };
+    }),
   ].sort((a, b) => a.at - b.at).map((c) => c.el);
 
   function chatComment(c, id, now) {
     const text = String(c.text ?? "");
-    if (c.from !== "you") return comment({ who: "shepherd", color: t.accent, where: ago(c.at, now), text, fg: t.muted });
+    if (c.from !== "you") return comment({ role: "shepherd", program: shepherd?.program, sub: ago(c.at, now), text, fg: t.muted });
     const asked = text.match(new RegExp(`^re ${escRe(id)}:\\s*([\\s\\S]*)$`));
     if (asked) {
-      return comment({ who: "you", color: t.foreground, text: asked[1],
-        where: c.failed ? `not kept in the History: ${c.failed}` : c.queued ? "waits for Shepherd…" : c.pending ? "sending…" : ago(c.at, now),
-        whereColor: c.failed ? t.ansi1 : c.queued ? t.blocked : t.dim });
+      return comment({ role: "you", text: asked[1],
+        sub: c.failed ? `not kept in the History: ${c.failed}` : c.queued ? "waits for Shepherd…" : c.pending ? "sending…" : ago(c.at, now),
+        subColor: c.failed ? t.ansi1 : c.queued ? t.blocked : t.dim });
     }
     // Lines the board sent about this task: one short line each, like the History's ⎿ events.
-    return h_flex().gap(8).px(2).items_start().font_family(MONO).text_size(11).text_color(t.muted)
+    return h_flex().gap(8).px(2).py(6).items_start().border_t(1).border_color(t.border)
+      .font_family(MONO).text_size(11).text_color(t.muted)
       .child(div().text_color(t.dim).child("⎿"))
       .child(div().flex_1().min_w(0).child(boardEvent(text, id)))
       .child(div().flex_none().text_color(t.dim).child(ago(c.at, now)));
   }
 
+  const heading = (text) => div().text_size(11).text_color(t.dim).child(text);
+
   // 120px under the Ask field: the floating bar covers the pane's bottom, and the field is last.
-  return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).pb(120).gap(16)
+  return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).pt(16).pb(120).gap(18)
     // What the task waits on you for, answerable here as in Needs you (a merge question is the PR card's).
     .children(m.questions().filter((q) => q.task === task.id && q.kind !== "merge").map((q) => questionCard(m, q, t, { id: "ov-q" })))
     .when(task.stage === "merge", (el) => el.child(renderPrCard(m, task, t)))
-    .child(div().text_size(14).line_height(1.45).text_color(task.summary ? t.foreground : t.dim)
-      .child(task.summary || "Shepherd hasn't written a summary yet."))
-    .when(runs.length > 0, (el) => el.child(v_flex().gap(6)
-      .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("TIMELINE"))
-      .child(h_flex().gap(6).items_end().children(loops.map(loopGroup)))
-      .child(h_flex().gap(12).font_family(MONO).text_size(10.5).text_color(t.muted)
-        .child(dur(total)).when(tokens > 0, (el) => el.child(`${kTokens(tokens)} tokens`)))))
     .child(v_flex().gap(8)
-      .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("COMMENTS"))
-      .when(comments.length === 0, (el) => el.child(div().text_color(t.dim).child("No comments yet.")))
+      .child(h_flex().gap(8).items_center().child(shepherdMark(t, 16)).child(heading("SHEPHERD SUMMARY")))
+      .child(div().text_size(14).line_height(1.55).text_color(task.summary ? t.foreground : t.dim)
+        .child(task.summary || "Shepherd hasn't written a summary yet."))
+      .child(v_flex().gap(6).pt(4)
+        .when(segs.length > 0, (el) => el.child(marks))
+        .child(timeline)
+        .child(h_flex().flex_wrap().gap(14).font_family(MONO).text_size(11).text_color(t.muted)
+          .when(runs.length > 0, (el) => el.child(`${mins(total / 60000)} total`))
+          .when(tokens > 0, (el) => el.child(`${kTokens(tokens)} tokens`))
+          .child(div().text_color(nowColor).child(nowSt.text)))))
+    .child(v_flex()
+      .child(h_flex().gap(10).pb(8).items_center()
+        .child(heading("COMMENTS"))
+        .child(div().font_family(MONO).text_size(11).text_color(t.dim)
+          .child(findings.length ? `${findings.length} from review · ${open} open` : "no review findings")))
+      .when(comments.length === 0, (el) => el.child(div().py(10).border_t(1).border_color(t.border).text_color(t.dim).child("No comments yet.")))
       .children(comments))
     .child(askField(m, task, t));
+}
+
+/** A finding's file:line as a chip that opens it: in Changes when the task changed it, else in Files. */
+function fileChip(m, task, t, file, line) {
+  return h_flex().id(`fchip-${file}-${line ?? ""}`).self_start().gap(6).px(7).py(2).items_center().rounded(4)
+    .bg(t.raised).cursor_pointer().hover((s) => s.bg(t.hover))
+    .font_family(MONO).text_size(11).text_color(t.accent)
+    .on_click((_e, cx) => { m.openFileAt(task, file); cx.notify(); })
+    .child(fileIcon(t, file))
+    .child(`${file}${line ? `:${line}` : ""}`);
 }
 
 /** A board line about a task (CONVENTIONS "Talking to Shepherd") as a short event. */
@@ -247,46 +375,59 @@ function review(task, t) {
   const runs = task.history ?? [];
   const cur = task.loop ?? 1;
   const loops = Array.from({ length: Math.max(cur, ...findings.flatMap((f) => (f.history ?? []).map((x) => x.loop))) }, (_, i) => i + 1);
-  const cellColor = (s) => (s === "fixed" ? t.done : s === "fixing" ? t.working : s === "found" || s === "still open" ? t.blocked : t.dim);
+  const cellColor = (s) => (s === "fixed" ? t.done : s === "fixing" ? t.working : s === "found" ? t.ansi1 : s === "still open" ? t.blocked : t.dim);
+  const fixed = findings.filter((f) => f.state === "resolved").length;
+  const heading = (text) => div().text_size(11).text_color(t.dim).child(text);
 
-  const COLW = 92;
-  const headerRow = h_flex().h(26).items_center().border_b(1).border_color(t.border)
-    .child(div().flex_1().min_w(0).text_size(10.5).font_semibold().text_color(t.dim).child("FINDING"))
-    .children(loops.map((l) => div().w(COLW).h_full().flex().items_center().justify_center()
-      .when(l === cur, (el) => el.bg(t.raised))
-      .text_size(10.5).font_semibold().text_color(t.dim).child(`LOOP ${l}`)));
-  const row = (f) => h_flex().min_h(34).items_center().border_b(1).border_color(t.border)
-    .child(v_flex().flex_1().min_w(0).py(5).pr(8)
-      .child(div().truncate().text_size(12).child(f.text))
-      .when(Boolean(f.file), (el) => el.child(div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
-        .child(`${f.file}${f.line ? `:${f.line}` : ""}`))))
+  // The grid: a finding column, then one per loop; the current loop's column is shaded.
+  const COLW = 112;
+  const shade = (el, l) => el.when(l === cur, (e) => e.bg(t.raised));
+  const headerRow = h_flex().bg(t.raised).border_b(1).border_color(t.border).font_family(MONO).text_size(11).text_color(t.muted)
+    .child(div().flex_1().min_w(0).px(10).py(8).child("finding"))
+    .children(loops.map((l) => div().w(COLW).flex_none().px(10).py(8).truncate().child(`loop ${l}${l === cur ? " · now" : ""}`)));
+  const row = (f, i) => h_flex().items_stretch().when(i > 0, (el) => el.border_t(1).border_color(t.border))
+    .child(v_flex().flex_1().min_w(0).px(10).py(9).gap(3).justify_center()
+      .child(div().text_size(12.5).line_height(1.4).child(f.text))
+      .child(div().truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
+        .child(f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "general")))
     .children(loops.map((l) => {
       const s = cellState(f, l);
-      return div().w(COLW).self_stretch().flex().items_center().justify_center()
-        .when(l === cur, (el) => el.bg(t.raised))
-        .text_size(11).text_color(cellColor(s)).child(s === "fixed" ? "✓ fixed" : s);
+      const c = cellColor(s);
+      return shade(div().w(COLW).flex_none().px(10).flex().items_center(), l)
+        .when(Boolean(s), (el) => el.child(div().px(7).py(2).rounded(9).bg(tint(c, 0.14))
+          .text_size(10.5).text_color(c).child(s === "fixed" ? "✓ fixed" : s)));
     }));
 
   const perLoop = loops.map((l) => {
     const impl = runs.filter((r) => r.loop === l && r.stage === "implement").slice(-1)[0];
     const rev = runs.filter((r) => r.loop === l && r.stage === "review").slice(-1)[0];
     const fresh = findings.filter((f) => cellState(f, l) === "found").length;
-    const fixed = findings.filter((f) => cellState(f, l) === "fixed").length;
+    const fixedN = findings.filter((f) => cellState(f, l) === "fixed").length;
     const carried = findings.filter((f) => ["still open", "fixing"].includes(cellState(f, l))).length;
-    return v_flex().gap(5).p(10).rounded(6).bg(t.raised)
-      .child(h_flex().gap(8).items_center()
-        .child(div().font_semibold().child(`Loop ${l}`))
-        .child(div().flex_1())
-        .child(div().font_family(MONO).text_size(10.5).text_color(t.muted).child(`${fresh} new · ${fixed} fixed · ${carried} carried`)))
-      .child(div().text_size(12).text_color(t.muted).child(`Implementer: ${impl?.note || "—"}`))
-      .child(div().text_size(12).text_color(t.muted).child(`Review: ${rev ? `${rev.result}${rev.note ? ` · ${rev.note}` : ""}` : "—"}`));
+    const revText = !rev ? "not reached" : rev.result === "pass" ? "approved"
+      : !rev.result || rev.result === "running" ? "in progress" : `${rev.result}${rev.note ? ` · ${rev.note}` : ""}`;
+    const label = (k, v) => h_flex().gap(4).text_size(12.5).text_color(t.foreground)
+      .child(div().flex_none().text_color(t.dim).child(k)).child(div().min_w(0).child(v));
+    return h_flex().gap(12).py(9).items_start().border_t(1).border_color(t.border)
+      .child(div().w(56).flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(`loop ${l}`))
+      .child(v_flex().flex_1().min_w(0).gap(3)
+        .child(label("Implementer:", impl?.note || "—"))
+        .child(label("Review:", revText)))
+      .child(h_flex().flex_none().gap(6).font_family(MONO).text_size(10.5)
+        .when(fresh > 0, (el) => el.child(div().text_color(t.ansi1).child(`${fresh} new`)))
+        .when(fixedN > 0, (el) => el.child(div().text_color(t.done).child(`${fixedN} fixed`)))
+        .when(carried > 0, (el) => el.child(div().text_color(t.blocked).child(`${carried} carried`))));
   });
 
-  return v_flex().id("rv-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).gap(16)
+  return v_flex().id("rv-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).py(16).gap(18)
+    .child(h_flex().gap(12).items_center()
+      .child(heading("FINDINGS ACROSS LOOPS"))
+      .child(div().font_family(MONO).text_size(11).text_color(t.muted)
+        .child(`${findings.length} found · ${fixed} fixed · ${findings.length - fixed} open`)))
     .child(findings.length === 0
-      ? div().text_color(t.dim).child("No findings. Review hasn't flagged anything on this task.")
-      : v_flex().child(headerRow).children(findings.map(row)))
-    .child(v_flex().gap(8).children(perLoop));
+      ? div().text_size(13).text_color(t.dim).child("No review findings yet.")
+      : v_flex().rounded(7).border(1).border_color(t.border).overflow_hidden().child(headerRow).children(findings.map(row)))
+    .child(v_flex().child(div().pb(6).child(heading("LOOP BY LOOP"))).children(perLoop));
 }
 
 export { age };

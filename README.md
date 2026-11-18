@@ -12,7 +12,7 @@ Ship         Ready to merge → Done
 
 ## Status
 
-Built: slices 1–9 and 10a–10e in [docs/SLICES.md](docs/SLICES.md). Each slice's **Built:** line says what was checked live and what wasn't. [RECIPE.md](RECIPE.md) describes the build as it is, including what isn't built (*Watch out*).
+Built: slices 1–9 and 10a–10f in [docs/SLICES.md](docs/SLICES.md). Each slice's **Built:** line says what was checked live and what wasn't. [RECIPE.md](RECIPE.md) describes the build as it is, including what isn't built (*Watch out*).
 
 ## Start here (for an agent working on it)
 

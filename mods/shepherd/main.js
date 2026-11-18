@@ -15,6 +15,7 @@ import {
 import {
   TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
   localId, machineOf, palette, mins, tint, recAnswer, pendingId,
+  currentTab,
 } from "./common.js";
 import { renderBoard } from "./board.js";
 import { peekedKey, closePeek } from "./peek.js";
@@ -49,6 +50,7 @@ const ANSWERED = "shepherd.answered"; // "<repo key>#<question id>" answered her
 const ALERT_WINDOW_MS = 15 * 60000; // older questions found on first sight are not news
 const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for Needs you cards
 const GIT_STALE_MS = 10000; // Changes and Files reload this often while shown
+const GIT_COUNT_STALE_MS = 30000; // other tabs (Changes' count on the tab bar) reload less often
 const PR_STALE_MS = 30000; // gh pr view, for the PR card's checks
 const PROOF_STALE_MS = 15000;
 const LOAD_MS = 15000; // the status bar's machine load
@@ -1089,6 +1091,21 @@ export default class Shepherd extends View {
   file(task, path) { return this.entry(task).files[path] ?? null; }
   ui(task) { return this.entry(task).ui; }
 
+  /** A finding's file:line chip: Changes at that file when the task changed it, else Files at it
+   *  (its folders opened). */
+  openFileAt(task, path, inChanges = true) {
+    const ui = this.ui(task);
+    if (inChanges && this.git(task)?.files?.some((f) => f.path === path)) {
+      ui.changesFile = path;
+      setShared(TAB, "changes");
+      return;
+    }
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) ui.open.add(parts.slice(0, i).join("/"));
+    ui.file = path;
+    if (currentTab() !== "files") setShared(TAB, "files");
+  }
+
   /** Starts whatever reads the shown tab needs and doesn't have yet: git for Changes and Files
    *  (and a local merge's diff size), gh for the PR card, proof.json for Proof. */
   ensureGit(task, cx) {
@@ -1106,9 +1123,11 @@ export default class Shepherd extends View {
     if (repo && tab === "proof" && stale(e.proof, PROOF_STALE_MS)) once("proof", async () => { e.proof = await loadProof(repo, task); });
     const prCard = tab === "overview" && task.stage === "merge";
     if (repo && prCard && task.pr && stale(e.pr, PR_STALE_MS)) once("pr", async () => { e.pr = await loadPr(repo, task); });
-    const wantGit = tab === "changes" || tab === "files" || (prCard && !task.pr);
-    if (!dir || !wantGit) return;
-    if (!e.git || Date.now() - (e.git.at ?? 0) > GIT_STALE_MS) {
+    // Every tab reads git (Changes' count on the tab bar, a local merge's diff size); only Changes
+    // and Files read diffs and files.
+    if (!dir) return;
+    const gitStale = tab === "changes" || tab === "files" ? GIT_STALE_MS : GIT_COUNT_STALE_MS;
+    if (!e.git || Date.now() - (e.git.at ?? 0) > gitStale) {
       once("git", async () => {
         const g = await loadGit(dir, on);
         // Fresh contents: drop cached diffs and files so they reload.
@@ -1121,6 +1140,12 @@ export default class Shepherd extends View {
     if (tab === "changes" && g.files.length) {
       const sel = g.files.find((f) => f.path === e.ui.changesFile) ?? g.files[0];
       if (e.diffs[sel.path] == null) once(`diff:${sel.path}`, async () => { e.diffs[sel.path] = await loadDiff(dir, on, g.base, sel); });
+    }
+    // Files opens on the first changed file, its folders open, as the design does.
+    if (tab === "files" && !e.ui.file && !e.ui.picked) {
+      const first = g.files.find((f) => f.status !== "D");
+      e.ui.picked = true;
+      if (first) this.openFileAt(task, first.path, false);
     }
     if (tab === "files" && e.ui.file && !e.files[e.ui.file]) {
       const path = e.ui.file;
