@@ -7,7 +7,8 @@
 //   shep add --title "…" [--id X-1] [--source you] [--stage grill] [--max-loops 3]
 //            [--blocked-by "T-4,T-5"] [--parent T-3] [--brief "…"]                       prints the id
 //   shep ready                        queued tasks whose blockers are all done, one id per line
-//   shep start <id> <stage> [--terminal t6] [--model M] [--note "…"]      opens a stage run (status working)
+//   shep start <id> <stage> [--terminal t6] [--model M] [--skill /wayfinder] [--note "…"]
+//                                     opens a stage run (status working); --skill: the skill it runs when not the stage's own
 //   shep end <id> pass|fail|ask [--note "…"] [--tokens N]                 closes the open stage run and records the
 //                                     tokens its agent used, read from the agent's own session log (see agentTokens;
 //                                     --tokens only overrides that by hand)
@@ -267,6 +268,8 @@ switch (cmd) {
     if (stage !== "done") {
       const run = { loop: t.loop, stage, result: "running", note: opt.note ?? "",
         start: now(), end: null, model: opt.model ?? null, tokens: null };
+      // The skill this run uses when the workflow picked another than the stage's own (Spec: /wayfinder for a big one).
+      if (typeof opt.skill === "string" && opt.skill) run.skill = opt.skill;
       // The run keeps its own terminal, so its tokens are read from that agent even after another takes the task's,
       // and its session now (`hc get`, up to 10 s; the start time is already taken), in case the agent is gone or its
       // address reused by the time the run ends.

@@ -269,7 +269,7 @@ function overview(m, task, t, where) {
   // 120px under the Ask field: the floating bar covers the pane's bottom, and the field is last.
   return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).pt(16).pb(120).gap(18)
     // What the task waits on you for, answerable here as in Needs you (a merge question is the PR card's).
-    .children(m.questions().filter((q) => q.task === task.id && q.kind !== "merge").map((q) => questionCard(m, q, t, { id: "ov-q" })))
+    .children(m.questions().filter((q) => q.task === task.id && q.kind !== "merge").map((q) => questionCard(m, q, t, { id: "ov-q", viewTask: false })))
     .when(task.stage === "merge", (el) => el.child(renderPrCard(m, task, t)))
     .child(v_flex().gap(8)
       .child(h_flex().gap(8).items_center().child(shepherdMark(t, 16)).child(heading("SHEPHERD SUMMARY")))

@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, setShared } from "herdr";
-import { MONO, VIEW, palette } from "./common.js";
+import { MONO, VIEW, palette, stateColor } from "./common.js";
 import { answerButton } from "./needs.js";
 import { startAction, programIcon } from "./start.js";
 import { waitsText } from "./ui.js";
@@ -62,8 +62,17 @@ export function renderBar(m) {
   // Without a Shepherd: Start Shepherd (or why not), and the lines that wait for it.
   const waiting = m.queued(space).length;
   const waits = waiting ? `${waitsText(waiting)} for it` : null;
+  // "shepherd · <space> · T-2 code review fail · 1 finding", the task id in its result's tone.
+  const ev = sh && !waiting ? m.lastEvent() : null;
   const sub = sh
-    ? `shepherd · ${space?.name ?? "—"} · ${waiting ? `sending ${waiting} waiting message${waiting > 1 ? "s" : ""}…` : m.lastEvent() ?? "ready"}`
+    ? h_flex().min_w(0).gap(6).items_center()
+      .child(div().flex_none().text_color(t.muted).child("shepherd"))
+      .child(div().flex_none().child("·"))
+      .child(div().flex_none().child(space?.name ?? "—"))
+      .child(div().flex_none().child("·"))
+      .when(Boolean(ev?.task), (el) => el.child(div().flex_none().text_color(stateColor(t, ev.result, t.working)).child(ev.task)))
+      .child(div().flex_1().min_w(0).truncate()
+        .child(waiting ? `sending ${waiting} waiting message${waiting > 1 ? "s" : ""}…` : ev?.text ?? "ready"))
     : h_flex().min_w(0).gap(6).items_center()
       .when(m.isStarting(space), (el) => el.child(div().flex_none().child("Starting Shepherd…")))
       .when(!m.isStarting(space), (el) => el.child(div().flex_none().child("no Shepherd in this space"))

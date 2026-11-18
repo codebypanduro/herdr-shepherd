@@ -54,6 +54,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
       { "loop": 1, "stage": "implement", "result": "pass", "note": "timer in tabs mod",
         "start": "2026-11-17T09:02:11Z", "end": "2026-11-17T09:31:40Z",
         "model": "Sonnet 4.5", "terminal": "t6", "tokens": 142000,
+        "skill": "/wayfinder   (optional: the skill this run used when not the stage's own; shep start --skill; the card shows it)",
         "usage": { "input": 120, "cacheWrite": 118400, "cacheRead": 2310000, "output": 23480 },
         "session": { "id": "<Claude Code session id>", "cwd": "<the agent's folder>" } }
     ],

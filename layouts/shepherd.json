@@ -96,6 +96,15 @@
           ]
         },
         {
+          "id": "barroom",
+          "type": "row",
+          "size": {
+            "px": 102
+          },
+          "resizable": false,
+          "children": []
+        },
+        {
           "id": "status",
           "type": "block",
           "size": {

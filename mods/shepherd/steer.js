@@ -3,7 +3,7 @@
 // `steer <id> redirect: …`, `steer <id> context: …`, `pause <id>`, `resume <id>`, `status <id>?`.
 
 import { div } from "gpui-kit";
-import { v_flex, h_flex, Input } from "gpui-base";
+import { v_flex, h_flex, Textarea } from "gpui-base";
 import { props, terminals, closeOverlay, run } from "herdr";
 import { STAGES, ROLE, MONO, age, palette, kTokens, runTokens } from "./common.js";
 import { closeTermWindow } from "./ui.js";
@@ -25,15 +25,16 @@ export function renderSteer(m) {
     const redirect = m.steerMode === "redirect";
     return root.child(head).child(v_flex().gap(6).px(6).pt(4).pb(6)
       .child(div().text_size(11.5).text_color(t.muted).child(redirect ? "What should it do instead?" : "What should it know?"))
-      .child(Input.new(m.steerInput).w_full().h(30).px(8).rounded(5).border(1).border_color(t.input).bg(t.background)
+      .child(Textarea.new(m.steerInputs[m.steerMode]).w_full().px(8).py(7).rounded(5).border(1).border_color(t.input).bg(t.background)
         .font_family(MONO).text_size(12).text_color(t.foreground))
       .child(h_flex().gap(6).justify_end()
         .child(div().id("steer-cancel").px(10).py(4).rounded(4).text_size(11.5).text_color(t.muted).cursor_pointer()
           .hover((s) => s.bg(t.hover)).on_click(close).child("Cancel"))
-        .child(div().id("steer-send").px(10).py(4).rounded(4).text_size(11.5).font_semibold().cursor_pointer()
+        .child(h_flex().id("steer-send").px(10).py(4).gap(6).items_center().rounded(4).text_size(11.5).font_semibold().cursor_pointer()
           .bg(t.solid).text_color(t.solid_foreground)
           .on_click(() => m.sendSteer())
-          .child(`Send to ${task.terminal ?? "shepherd"}`))));
+          .child(`Send to ${task.terminal ?? "shepherd"}`)
+          .child(div().font_family(MONO).text_size(10).opacity(0.7).child("⌘↵")))));
   }
 
   const canPause = ["working", "paused"].includes(task.status);
@@ -44,7 +45,7 @@ export function renderSteer(m) {
     .child(div().w(14).flex().justify_center().font_family(MONO).text_size(11).text_color(t.muted).child(icon))
     .child(div().flex_1().child(label))
     .child(div().font_family(MONO).text_size(10).text_color(t.dim).child(key));
-  const input = (mode) => (cx) => { m.steerMode = mode; m.steerInput.set_value(""); m.steerInput.focus(); cx.notify(); };
+  const input = (mode) => (cx) => m.steerField(mode, cx);
 
   return root.child(head)
     .child(item("pause", paused ? "▶" : "⏸", paused ? "Resume" : "Pause", "P", canPause, () => m.togglePause(task)))

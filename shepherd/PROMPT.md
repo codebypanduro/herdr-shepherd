@@ -77,7 +77,7 @@ Spec writes the spec from the grilling; it doesn't grill again. The spec skill i
 - The griller still live: `hc label <address> herdr.role=planner shepherd.stage=spec`, then send it "<spec skill> <id>: write the spec from the grilling and the docs in plans/<id>/docs/, without asking again."
 - Else start a planner (`--name <id lowercased>-spec`) with "<spec skill> <id>: <brief>. Write the spec from the grilling in `.herdr/shepherd/plans/<id>/grilling.md` and the glossary and decisions in `.herdr/shepherd/plans/<id>/docs/` if there are any; don't grill again." and the Plan brief ending.
 
-Add to either: "If something is still open, ask it as one question the Grill way: write `.herdr/shepherd/plans/<id>/grill-<n>.json`, n the next number after the grill-*.json already there, and send `grill <id>: <that path>`; the answer comes back as `grill-<n> answer: <text>`. Write the spec to `.herdr/shepherd/plans/<id>/spec.md` and send `spec <id>: <that path>`." `start <id> spec --terminal <address>` (the griller's or the new planner's).
+Add to either: "If something is still open, ask it as one question the Grill way: write `.herdr/shepherd/plans/<id>/grill-<n>.json`, n the next number after the grill-*.json already there, and send `grill <id>: <that path>`; the answer comes back as `grill-<n> answer: <text>`. Write the spec to `.herdr/shepherd/plans/<id>/spec.md` and send `spec <id>: <that path>`." `start <id> spec --terminal <address> --skill <spec skill>` (the griller's or the new planner's; the skill shows on the card).
 
 - `grill <id>: <path>` during Spec → ask it as in Grill, with `--from "<address> planner"`.
 - `spec <id>: <path>` → `end <id> pass --note "spec written"`, `set <id> summary="…"` from the spec, and go to Tickets with the same planner if it's still live (else a new one).
@@ -153,6 +153,7 @@ hc run --bg --name <id lowercased>-ci-<loop> --cwd <worktree> \
 ### Proof
 
 Start a qa agent in the worktree (`--name <id lowercased>-proof-<loop> --label herdr.space={{SPACE}} --label herdr.role=qa --label shepherd.task=<id> --label shepherd.stage=proof --label shepherd.loop=<loop>`, the implement model): "Prove <id> works: <brief>. If it has a UI, run it and use a headless browser (Playwright, or `<stages.proof.browser>`) to take screenshots of what changed and, if you can, a short recording. Otherwise run it the way a person would and keep the output. Write everything to {{REPO}}/.herdr/shepherd/proof/<id>/: PNG screenshots, the recording (webm, mp4 or gif), and proof.json: {"checks": [{"name": "…", "pass": true, "note": "…", "time": <seconds it took>}], "screenshots": ["file.png"], "recording": "file.webm" or null, "recordingLength": <the recording's seconds>}. Don't edit code or start agents. Report with: hc send $HC_TERMINAL_ID 'proof <id>: pass|fail <one line>'." `start <id> proof --terminal <address>`.
+The workflow's `stages.proof` switches (each on unless `false`) change that message: with `headless` off, don't use a browser: run it the way a person would and keep the output (no screenshots or recording); with `screenshots` off, take none (`"screenshots": []`); with `recording` off, make none (`"recording": null`).
 
 On `pass`: `end <id> pass --note "<its line>"`, `set <id> proof={{REPO}}/.herdr/shepherd/proof/<id>`, kill and remove it, then Ship. On `fail`: each failed check is a finding.
 

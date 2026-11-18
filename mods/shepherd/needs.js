@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme } from "herdr";
-import { STAGES, KINDS, MONO, groupColor, age, palette } from "./common.js";
+import { STAGES, KINDS, MONO, groupColor, age, palette, tint, kindIcon } from "./common.js";
 
 export function answerButton(t, id, text, recommended, onClick, { fit = false, solid = null, icon = null } = {}) {
   // fit: shrink to share a row and cut the text with … (the bar); the full text shows on hover.
@@ -38,6 +38,31 @@ export function oldRound(t, q) {
     .child(div().text_size(11.5).text_color(t.dim).child("An old grilling round: reply with your answers in order, as 1. … 2. …"));
 }
 
+/** The reply field's placeholder by kind, as the design words it. */
+export const placeholderFor = (q) => (q.kind === "merge" ? "Or send it back with a note…"
+  : q.kind === "escalate" ? "Or tell shepherd how to fix it…" : "Or answer in your own words…");
+
+/** "❯ <placeholder>" + Send, like the Overview's Ask field: InputState can't change its placeholder,
+ *  so the field has none and the kind's is drawn under it while it's empty (the slot re-renders on
+ *  change). Enter (the slot's submit) or Send answers. A press stops here, so the pane's own
+ *  mouse-down (the detail's, which takes the 1–6 keys) doesn't take the keyboard from it. */
+function replyField(t, id, input, placeholder, send) {
+  const empty = !input.value();
+  return h_flex().id(`${id}-reply`).gap(8).px(10).py(7).items_center().rounded(6).border(1)
+    .border_color(t.input).bg(t.background)
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .child(div().font_family(MONO).text_size(12).text_color(t.accent).child("❯"))
+    .child(div().relative().flex_1().min_w(0).h(18)
+      .when(empty, (el) => el.child(div().absolute().inset_0().flex().items_center().truncate()
+        .font_family(MONO).text_size(12).text_color(t.dim).child(placeholder)))
+      .child(Input.new(input).absolute().inset_0().font_family(MONO).text_size(12).text_color(t.foreground)))
+    .child(div().id(`${id}-send`).px(10).py(3).rounded(4).bg(t.raised).cursor_pointer()
+      .text_size(11).text_color(empty ? t.dim : t.foreground)
+      .hover((s) => s.bg(t.hover))
+      .on_click(send)
+      .child("Send"));
+}
+
 /** Proposed tickets and what each waits on. */
 function ticketList(q, t) {
   const byKey = new Map(q.tickets.map((k) => [k.key, k]));
@@ -54,7 +79,7 @@ function ticketList(q, t) {
 
 /** One open question with its answers: a Needs you card, and the top of its task's Overview
  *  (`id` prefixes element ids, so both can be built in one frame). */
-export function questionCard(m, q, t, { id = "q", now = Date.now() } = {}) {
+export function questionCard(m, q, t, { id = "q", now = Date.now(), viewTask = true } = {}) {
   const kind = KINDS[q.kind] ?? KINDS.ask;
   const color = groupColor(t, kind.group);
   const task = q.taskObj;
@@ -66,9 +91,9 @@ export function questionCard(m, q, t, { id = "q", now = Date.now() } = {}) {
   return v_flex().id(`${id}-${q.id}`).w_full().max_w(760).gap(10).p(14).rounded(8)
     .bg(t.surface).border(1).border_color(t.blocked)
     .child(h_flex().gap(8).items_center()
-      .child(h_flex().gap(5).px(7).h(20).items_center().rounded(5).border(1).border_color(color)
-        .text_size(11).text_color(color)
-        .child(kind.icon).child(kind.label))
+      .child(h_flex().gap(5).pl(6).pr(8).h(20).items_center().rounded(10).border(1).border_color(tint(color, 0.35))
+        .bg(tint(color, 0.14)).text_size(11).text_color(color)
+        .child(kindIcon(kind, color)).child(kind.label))
       .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(q.task))
       .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(task?.title ?? ""))
       .child(div().text_size(11).text_color(t.dim).child(where))
@@ -78,14 +103,17 @@ export function questionCard(m, q, t, { id = "q", now = Date.now() } = {}) {
       .child(`asked by ${q.from ?? "shepherd"}${finding ? ` · last finding: ${finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""} ` : ""}${finding.text}` : ""}`))
     .when(Array.isArray(q.questions), (el) => el.child(oldRound(t, q)))
     .when(q.kind === "approve" && Array.isArray(q.tickets), (el) => el.child(ticketList(q, t)))
-    .when((q.options ?? []).length > 0, (el) => el.child(h_flex().gap(8).flex_wrap().children(
-      q.options.map((o, i) => answerButton(t, `${id}-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))))
+    // The answers, then "View task" (not in the task's own Overview).
+    .when((q.options ?? []).length > 0 || viewTask, (el) => el.child(h_flex().gap(8).flex_wrap().items_center()
+      .children((q.options ?? []).map((o, i) => answerButton(t, `${id}-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))
+      .when(viewTask, (row) => row.child(div().id(`${id}-${q.id}-view`).h(28).px(11).flex().items_center().rounded(6)
+        .text_size(12).text_color(t.muted).cursor_pointer()
+        .hover((s) => s.text_color(t.foreground))
+        .on_click(() => m.openTask(q.task))
+        .child("View task")))))
     // Why the asker recommends its pick (grilling questions carry one).
     .when(Boolean(q.why), (el) => el.child(whyLine(t, q)))
-    .when(Boolean(input), (el) => el.child(h_flex().gap(8).items_center()
-      .child(Input.new(input).flex_1().h(30).px(9).rounded(6).border(1).border_color(t.input)
-        .bg(t.background).text_size(12.5).text_color(t.foreground))
-      .child(answerButton(t, `${id}-${q.id}-send`, "Send", false, () => m.answer(q, input.value())))));
+    .when(Boolean(input), (el) => el.child(replyField(t, `${id}-${q.id}`, input, placeholderFor(q), () => m.answer(q, input.value()))));
 }
 
 export function renderNeeds(m) {

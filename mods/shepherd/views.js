@@ -4,6 +4,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { shared } from "herdr";
 import { STAGES, ORDER, MONO, SELECTED, palette, stuckColor, tint, statusColor, loopDots } from "./common.js";
+import { statusFilters } from "./board.js";
 
 /** Rows react like cards: click opens the task, right-click steers it. */
 const rowActions = (m, el, c) => el
@@ -12,7 +13,8 @@ const rowActions = (m, el, c) => el
 
 export function renderPipeline(m) {
   const t = palette();
-  const cards = m.pipelineOrder(m.cards().filter((c) => c.task));
+  const all = m.cards().filter((c) => c.task);
+  const cards = m.pipelineOrder(m.filtered(all));
   const selected = shared(SELECTED);
   const CELL = 64;
   const TASK_W = 240;
@@ -53,12 +55,13 @@ export function renderPipeline(m) {
     .child(h_flex().w(54).flex_none().justify_end().child(loopDots(t, c, 2)));
 
   return v_flex().id("shepherd-pipeline").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
-    .child(m.header("pipeline", `${m.space()?.name ?? "—"} · ${cards.length} task${cards.length === 1 ? "" : "s"}`))
+    .child(statusFilters(m, t, all, m.header("pipeline", `${m.space()?.name ?? "—"} · ${all.length} task${all.length === 1 ? "" : "s"}`)))
     .child(div().id("pipe-scroll").flex_1().min_h(0).overflow_x_scrollbar()
       .child(v_flex().id("pipe-rows").h_full().min_w(TASK_W + ORDER.length * (CELL + 4) + 80).px(10).pt(6).pb(10)
         .overflow_y_scrollbar()
         .child(head)
-        .when(cards.length === 0, (el) => el.child(div().pt(40).text_color(t.dim).child("No tasks in this space yet.")))
+        .when(cards.length === 0, (el) => el.child(div().pt(40).text_color(t.dim)
+          .child(all.length ? "No task has the status the filters pick." : "No tasks in this space yet.")))
         .children(cards.map(row))));
 }
 

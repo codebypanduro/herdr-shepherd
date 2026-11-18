@@ -1,6 +1,6 @@
 // Shared by every Shepherd view: stages, colors and small helpers.
 
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { theme, shared } from "herdr";
 
@@ -22,6 +22,7 @@ export const DIGEST_OPEN = "shepherd.digestOpen"; // the open digest's overlay i
 export const HISTORY_OPEN = "shepherd.historyOpen"; // the open History's overlay id
 export const STEER_OPEN = "shepherd.steerOpen"; // the open steer menu's overlay id (no peek over it)
 export const TAB = "shepherd.detailTab"; // the task detail's open tab
+export const FILTERS = "shepherd.filters"; // the board and Pipeline's status filters: ["working", "blocked", "done"]
 
 /** The task detail's tabs, in order (1–6 switch them). */
 export const TABS = ["overview", "review", "changes", "files", "proof", "terminal"];
@@ -50,7 +51,7 @@ export const MONO = "JetBrains Mono";
 
 export const GROUPS = [
   { key: "plan", label: "PLAN", stages: ["triage", "grill", "spec", "tickets"] },
-  { key: "build", label: "BUILD LOOP · MAX 3", stages: ["implement", "review", "ci", "proof"] },
+  { key: "build", label: "BUILD LOOP", stages: ["implement", "review", "ci", "proof"] },
   { key: "ship", label: "SHIP", stages: ["merge", "done"] },
 ];
 export const STAGES = {
@@ -60,13 +61,16 @@ export const STAGES = {
   tickets: { title: "Tickets", skill: "/to-tickets" },
   implement: { title: "Implement", skill: "/implement" },
   review: { title: "Code review", skill: "/code-review" },
-  ci: { title: "CI", skill: "ci" },
-  proof: { title: "Proof", skill: "proof" },
-  merge: { title: "Ready to merge", skill: "gh pr" },
+  ci: { title: "CI", skill: "" },
+  proof: { title: "Proof", skill: "" },
+  merge: { title: "Ready to merge", skill: "" },
   done: { title: "Done", skill: "" },
 };
 
 export const ORDER = GROUPS.flatMap((g) => g.stages);
+
+/** A group's label over its first column: the build loop's carries the workflow's max loops. */
+export const groupLabel = (g, maxLoops) => (g.key === "build" ? `${g.label} · MAX ${maxLoops}` : g.label);
 
 /** Who works each stage, for the steer menu and comments. */
 export const ROLE = { triage: "triager", grill: "griller", spec: "planner", tickets: "planner", implement: "implementer", review: "reviewer", ci: "ci", proof: "qa", merge: "shepherd" };
@@ -82,15 +86,20 @@ export const LIMITS = { maxCpu: 80, maxMem: 85 };
 /** Stuck uses ansi red (CONVENTIONS.md). */
 export const stuckColor = (t) => t.ansi1;
 
-/** Question kinds: chip label, glyph and group (for its color). */
+/** Question kinds: chip label, icon (a drawn one from icons/, else a glyph) and group (for its color). */
 export const KINDS = {
-  triage: { label: "triage", icon: "⏷", group: "plan" },
+  triage: { label: "triage", svg: "kind-triage", group: "plan" },
   grill: { label: "grilling", icon: "?", group: "plan" },
-  approve: { label: "approve tickets", icon: "☰", group: "plan" },
+  approve: { label: "approve tickets", svg: "kind-tickets", group: "plan" },
   ask: { label: "question", icon: "?", group: "build" },
   escalate: { label: "loops used up", icon: "↻", group: "build" },
-  merge: { label: "ready to merge", icon: "⑃", group: "ship" },
+  merge: { label: "ready to merge", svg: "kind-merge", group: "ship" },
 };
+
+/** A question kind's 11px icon in `color`: the design's funnel, list and merge drawings, else its glyph. */
+export const kindIcon = (kind, color) => (kind.svg
+  ? svg(`mods/shepherd/icons/${kind.svg}.svg`).size(11).flex_none().text_color(color)
+  : div().w(11).flex_none().flex().justify_center().font_family(MONO).text_size(11).line_height(1).child(kind.icon));
 
 /** Group color by theme name: plan purple, build loop working, ship done (CONVENTIONS.md). */
 export const groupColor = (t, key) => (key === "plan" ? t.ansi5 : key === "build" ? t.working : t.done);

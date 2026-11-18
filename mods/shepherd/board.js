@@ -3,48 +3,23 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { GROUPS, STAGES, MONO, SELECTED, groupColor, age, palette, stuckColor, tint, kTokens, taskTokens, statusColor as statusOf, loopDots as dots } from "./common.js";
+import { GROUPS, STAGES, MONO, SELECTED, FILTERS, groupColor, groupLabel, age, palette, stuckColor, tint, kTokens, taskTokens, statusColor as statusOf, loopDots as dots } from "./common.js";
 import { hoverPeek, trackPeek, withPeek, closePeek } from "./peek.js";
 
 const COL_MIN = 172;
-const FILTERS = "shepherd.filters";
 
 export function renderBoard(m) {
   const t = palette();
   const all = m.cards();
-  const filters = shared(FILTERS) ?? [];
-  const shown = filters.length ? all.filter((c) => filters.includes(c.status)) : all;
+  const shown = m.filtered(all);
   // A peek whose card left the board (stage change, filter, space switch) stops reading and stops
   // taking S / T / ↵. Hover-out never comes for a card that's gone.
   if (m.peek && !shown.some((c) => c.key === m.peek.key)) closePeek(m);
   const selected = shared(SELECTED);
   const now = Date.now();
-  const statusColor = (s) => statusOf(t, s);
+  const maxLoops = m.settings().maxLoops;
 
-  const toggle = (s) => {
-    const f = shared(FILTERS) ?? [];
-    setShared(FILTERS, f.includes(s) ? f.filter((x) => x !== s) : [...f, s]);
-  };
-  const filter = (s, label) => {
-    const n = all.filter((c) => c.status === s).length;
-    const on = filters.includes(s);
-    return h_flex().id(`filter-${s}`).gap(5).items_center().px(7).h(22).rounded(5)
-      .when(on, (el) => el.bg(t.selected))
-      .hover((el) => el.bg(t.hover))
-      .on_click(() => toggle(s))
-      .child(div().size(6).rounded(3).bg(statusColor(s)))
-      .child(div().text_color(on ? t.foreground : t.muted).child(`${n} ${label}`));
-  };
-
-  const header = m.header("pipeline", `${m.space()?.name ?? "—"} · ${all.length} task${all.length === 1 ? "" : "s"}`)
-    .child(filter("working", "working"))
-    .child(filter("blocked", "need you"))
-    .child(filter("done", "done"))
-    .when(filters.length > 0, (el) => el.child(
-      div().id("filter-clear").px(7).h(22).flex().items_center().rounded(5).text_color(t.dim)
-        .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_click(() => setShared(FILTERS, []))
-        .child("✕ clear")));
+  const header = statusFilters(m, t, all, m.header("pipeline", `${m.space()?.name ?? "—"} · ${all.length} task${all.length === 1 ? "" : "s"}`));
 
   const loopDots = (c) => dots(t, c);
 
@@ -59,8 +34,8 @@ export function renderBoard(m) {
     // ⋯, S or right-click: the steer menu for a task; a label-only card just peeks at its terminal.
     const steer = () => { closePeek(m); return c.task ? m.openSteer(c.id) : c.address && run("terminal.peek", { terminal: c.address }); };
     return withPeek(m, t, c, v_flex().id(`card-${c.key}`).relative().flex_none().gap(6).p(10).rounded(6)
-      .bg(blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isKf ? t.accent : border)
-      .hover((s) => s.border_color(isSel || isKf ? t.accent : t.input))
+      .bg(isSel ? t.hover : blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isKf ? t.accent : border)
+      .hover((s) => s.bg(t.hover).border_color(isSel || isKf ? t.accent : t.input))
       .on_hover((on, cx) => hoverPeek(m, c, on, cx))
       .on_mouse_move((e) => trackPeek(m, c, e))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); steer(); })
@@ -76,7 +51,7 @@ export function renderBoard(m) {
       .child(h_flex().gap(6).items_center()
         .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
         .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
-          .child(c.skill ?? STAGES[c.stage].skill))
+          .child(c.skill ?? ""))
         .when(inBuild, (el) => el.child(loopDots(c)))
         .when(Boolean(c.task || c.address), (el) => el.child(div().id(`steer-${c.key}`).px(3).rounded(4).text_color(t.dim)
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
@@ -86,15 +61,17 @@ export function renderBoard(m) {
       .child(h_flex().gap(6).items_center()
         .child(c.status === "working"
           ? div().size(6).rounded(3).bg(t.working).loop("opacity", { from: 0.35, to: 1, period: 1200 })
-          : div().size(6).rounded(3).bg(statusColor(c.status)))
+          : div().size(6).rounded(3).bg(statusOf(t, c.status)))
         .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(c.note))
         .child(div().id(`time-${c.key}`).font_family(MONO).text_size(10.5).text_color(timeColor)
           .tooltip(timeTooltip(c, now)).child(age(now - c.since))))
       .when(Boolean(c.stuckText), (el) => el.child(h_flex().gap(6).items_center()
         .child(div().size(5).bg(stuckColor(t)))
         .child(div().text_size(11).text_color(stuckColor(t)).child(c.stuckText))))
-      .when(c.after.length > 0 && c.status !== "idle", (el) => el.child(
-        div().font_family(MONO).text_size(10.5).text_color(t.dim).child(`after ${c.after.join(", ")}`)))
+      // What waits on this card ("blocks T-5"), else what it waits on (a queued ticket says that in its note).
+      .when((c.blocks ?? []).length > 0 || (c.after.length > 0 && c.status !== "idle"), (el) => el.child(
+        div().font_family(MONO).text_size(10.5).text_color(t.dim)
+          .child((c.blocks ?? []).length ? `blocks ${c.blocks.join(", ")}` : `after ${c.after.join(", ")}`)))
       .when(c.asked, (el) => el.child(
         div().text_size(11).text_color(t.blocked).child("↳ asked you via shepherd"))), now);
   };
@@ -103,7 +80,7 @@ export function renderBoard(m) {
     const cards = shown.filter((c) => c.stage === stage);
     const color = groupColor(t, group.key);
     return v_flex().id(`col-${stage}`).flex_1().min_w(COL_MIN).gap(8)
-      .child(div().h(14).text_size(10.5).font_semibold().text_color(color).child(first ? group.label : ""))
+      .child(div().h(14).text_size(10.5).font_semibold().text_color(color).child(first ? groupLabel(group, maxLoops) : ""))
       .child(h_flex().h(24).items_center().justify_between().border_b(2).border_color(color)
         .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(STAGES[stage].title))
         .child(div().text_size(11).text_color(t.dim).child(String(cards.length))))
@@ -133,4 +110,33 @@ function timeTooltip(c, now) {
     return `Total time ${age(total || now - c.since)}${tok}`;
   }
   return `${age(now - c.since)} in ${STAGES[c.stage]?.title ?? c.stage}${tok ? `${tok} so far` : ""}`;
+}
+
+/** The status filters (● N working, ● N need you, ● N done, ✕ clear) after a view's header; the
+ *  board and Pipeline share them (shared FILTERS). `all`: the view's cards before filtering. */
+export function statusFilters(m, t, all, header) {
+  const filters = shared(FILTERS) ?? [];
+  const toggle = (s) => {
+    const f = shared(FILTERS) ?? [];
+    setShared(FILTERS, f.includes(s) ? f.filter((x) => x !== s) : [...f, s]);
+  };
+  const filter = (s, label) => {
+    const n = all.filter((c) => c.status === s).length;
+    const on = filters.includes(s);
+    return h_flex().id(`filter-${s}`).gap(5).items_center().px(7).h(22).rounded(5)
+      .when(on, (el) => el.bg(t.selected))
+      .hover((el) => el.bg(t.hover))
+      .on_click(() => toggle(s))
+      .child(div().size(6).rounded(3).bg(statusOf(t, s)))
+      .child(div().text_color(on ? t.foreground : t.muted).child(`${n} ${label}`));
+  };
+  return header
+    .child(filter("working", "working"))
+    .child(filter("blocked", "need you"))
+    .child(filter("done", "done"))
+    .when(filters.length > 0, (el) => el.child(
+      div().id("filter-clear").px(7).h(22).flex().items_center().rounded(5).text_color(t.dim)
+        .hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_click(() => setShared(FILTERS, []))
+        .child("✕ clear")));
 }

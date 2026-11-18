@@ -129,7 +129,8 @@ export function renderWorkflow(m) {
         h_flex().gap(6).items_center().text_size(12).text_color(t.muted).child("Set per space:")
           .child(svg("mods/shepherd/icons/gear.svg").size(12).text_color(t.dim)).child("on each space")))
       .child(row(t, "08", title(t, "Proof"), "Tests the app in a headless browser and records what it saw.",
-        h_flex().gap(12)
+        v_flex().gap(6).items_start()
+          .child(check(t, "wf-headless", "Headless browser run", proof.headless !== false, set(["stages", "proof", "headless"], proof.headless === false)))
           .child(check(t, "wf-shots", "Screenshots", proof.screenshots !== false, set(["stages", "proof", "screenshots"], proof.screenshots === false)))
           .child(check(t, "wf-video", "Screen recording", proof.recording !== false, set(["stages", "proof", "recording"], proof.recording === false)))))
       .child(row(t, "↻", title(t, "Max build loops"), "Implement → review → CI → proof. After this, Shepherd asks you.",

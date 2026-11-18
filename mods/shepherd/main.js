@@ -7,13 +7,13 @@
 // terminal, else the space's folder. Answers and messages go to Shepherd with `hc send`.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, ScrollHandle } from "gpui-base";
+import { v_flex, h_flex, InputState, TextareaState, ScrollHandle } from "gpui-base";
 import {
   props, terminals, panes, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
   hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
 import {
-  TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
+  TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
   localId, machineOf, palette, mins, tint, recAnswer, pendingId,
   currentTab,
 } from "./common.js";
@@ -86,8 +86,16 @@ export default class Shepherd extends View {
     this.data = {}; // repo key -> { tasks, questions, alerts, error? }
     this.watching = new Set();
     this.gitCache = {}; // "<repo key>#<task id>" -> { git, diffs: {path: text}, files: {path: {text, added}}, ui, loading }
-    this.slots = Array.from({ length: REPLY_SLOTS }, () => ({ q: null, input: InputState.new({ placeholder: "Or write your own answer…" }) }));
-    for (const s of this.slots) s.input.on("submit", () => { const q = this.questionById(s.q); if (q) this.answer(q, s.input.value()); });
+    // Needs you's reply fields. No placeholder of their own: it differs by the question's kind, and
+    // InputState can't change one, so needs.js draws it under the empty field (hence the redraw on change).
+    this.slots = Array.from({ length: REPLY_SLOTS }, () => ({ q: null, input: InputState.new({ placeholder: "" }) }));
+    for (const s of this.slots) {
+      s.input.on("submit", () => { const q = this.questionById(s.q); if (q) this.answer(q, s.input.value()); });
+      s.input.on("change", (_e, cx) => cx.notify());
+      // The detail's 1–6 keys keep off a reply field being typed in (an Overview question card).
+      s.input.on("focus", () => { s.focused = true; });
+      s.input.on("blur", () => { s.focused = false; });
+    }
     const p = props() ?? {};
     if (p.panel === "bar") {
       this.barInput = InputState.new({ placeholder: "Tell Shepherd what to build, or ask about any task…" });
@@ -95,8 +103,13 @@ export default class Shepherd extends View {
     }
     if (p.panel === "steer") {
       this.steerMode = null; // null: the menu; "redirect" | "context": the text field
-      this.steerInput = InputState.new({ placeholder: "" });
-      this.steerInput.on("submit", () => this.sendSteer());
+      // A 3-row field per mode, each with the design's example as its placeholder (a state can't
+      // change its placeholder). Enter is a new line; ⌘↵ (submit with `secondary`) or Send sends.
+      this.steerInputs = {
+        redirect: TextareaState.new({ placeholder: "Stop polishing the UI, fix the failing test first", rows: 3 }),
+        context: TextareaState.new({ placeholder: "The timer should use the core's start time", rows: 3 }),
+      };
+      for (const x of Object.values(this.steerInputs)) x.on("submit", (e) => { if (e?.secondary) this.sendSteer(); });
     }
     if (p.panel === "history") {
       this.historyInput = InputState.new({ placeholder: "Talk to shepherd · try “add a dark mode toggle”" });
@@ -489,8 +502,11 @@ export default class Shepherd extends View {
     const cur = [...runs].reverse().find((r) => r.stage === task.stage);
     const since = Date.parse(cur?.start ?? "") || Date.now();
     // Blockers still to finish; done ones no longer hold the task.
-    const doneIds = new Set((this.state().tasks ?? []).filter((x) => x.stage === "done").map((x) => x.id));
+    const tasks = this.state().tasks ?? [];
+    const doneIds = new Set(tasks.filter((x) => x.stage === "done").map((x) => x.id));
     const blockers = (task.blockedBy ?? []).filter((b) => b && !doneIds.has(b));
+    // Tickets still to finish that wait on this one: "blocks T-5" on its card.
+    const blocks = tasks.filter((x) => x.stage !== "done" && (x.blockedBy ?? []).includes(task.id)).map((x) => x.id);
     // Stuck counts from the stage run's start or the person's last answer in it, whichever is later:
     // time waiting on the person isn't the agent being stuck.
     const answeredAt = Math.max(0, ...(this.questionIndex().answers.get(task.id) ?? [])
@@ -511,14 +527,16 @@ export default class Shepherd extends View {
       id: task.id,
       title: task.title ?? task.id,
       stage: STAGES[task.stage] ? task.stage : "spec",
-      // The workflow's skill for the stage where it names one (Grill: /grill-me when picked).
-      skill: this.skillOf(task.stage),
+      // The run's own skill (Spec: /wayfinder for a big one), else the workflow's for the stage
+      // (Grill: /grill-me when picked); none for CI, Proof, Ready to merge and Done.
+      skill: cur?.skill ?? this.skillOf(task.stage),
       loop: Math.max(1, task.loop ?? 1),
       maxLoops: Math.max(1, task.maxLoops ?? MAX_LOOPS),
       status,
       note,
       since,
       after: blockers,
+      blocks,
       asked,
       stuck,
       stuckText: stuck ? `stuck · over ${mins(limit)} in ${STAGES[task.stage]?.title ?? task.stage}` : null,
@@ -582,6 +600,7 @@ export default class Shepherd extends View {
         id: l["shepherd.task"] ?? x.name ?? x.address,
         title: l["shepherd.title"] ?? x.title ?? x.name ?? (x.argv ?? []).join(" "),
         stage,
+        skill: this.skillOf(stage),
         loop: Math.max(1, parseInt(l["shepherd.loop"] ?? "1", 10) || 1),
         maxLoops: MAX_LOOPS,
         status: statusOf(x, stage),
@@ -596,16 +615,20 @@ export default class Shepherd extends View {
     return out.sort((a, b) => a.since - b.since);
   }
 
-  /** The newest thing that happened, for the bar: "T-2 review fail · 1 finding". */
+  /** The newest thing that happened, for the bar: a stage run's start or result ({task: "T-2",
+   *  text: "code review fail · 1 finding", result: "fail"}) or a question asked ({…, text: "asks: …",
+   *  result: "ask"}). The bar tints the task id by `result`, as the History does. */
   lastEvent() {
     let best = null;
+    const take = (at, ev) => { if (!best || at > best.at) best = { at, ...ev }; };
     for (const task of this.state().tasks ?? []) {
       for (const r of task.history ?? []) {
-        const at = Date.parse(r.end ?? r.start ?? "") || 0;
-        if (!best || at > best.at) best = { at, text: `${task.id} ${STAGES[r.stage]?.title.toLowerCase() ?? r.stage} ${r.result}${r.note ? ` · ${r.note}` : ""}` };
+        take(Date.parse(r.end ?? r.start ?? "") || 0,
+          { task: task.id, result: r.result, text: `${STAGES[r.stage]?.title.toLowerCase() ?? r.stage} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
       }
     }
-    return best?.text ?? null;
+    for (const q of this.state().questions ?? []) take(Date.parse(q.asked ?? "") || 0, { task: q.task, result: "ask", text: `asks: ${q.text}` });
+    return best;
   }
 
   // ---- spaces ----------------------------------------------------------------------------
@@ -863,7 +886,7 @@ export default class Shepherd extends View {
   }
 
   sendSteer() {
-    const text = this.steerInput.value().trim();
+    const text = (this.steerInputs[this.steerMode]?.value() ?? "").trim();
     const id = props()?.task;
     if (!text || !id || !this.steerMode) return;
     if (this.tell(`steer ${id} ${this.steerMode}: ${text}`, id)) closeOverlay(props().overlay);
@@ -885,9 +908,15 @@ export default class Shepherd extends View {
 
   // ---- keys ------------------------------------------------------------------------------
 
-  /** Cards in keyboard order: the board's column order, or the pipeline's rows. Other views: none. */
+  /** Cards the status filters let through (shared FILTERS; the board and Pipeline). */
+  filtered(cards) {
+    const f = shared(FILTERS) ?? [];
+    return f.length ? cards.filter((c) => f.includes(c.status)) : cards;
+  }
+
+  /** Cards in keyboard order: the board's column order, or the pipeline's rows, as filtered. Other views: none. */
   keyOrder() {
-    const cards = this.cards().filter((c) => c.task);
+    const cards = this.filtered(this.cards().filter((c) => c.task));
     const view = this.view();
     if (view === "pipeline") return this.pipelineOrder(cards).map((c) => c.key);
     if (view === "board") return ORDER.flatMap((s) => cards.filter((c) => c.stage === s)).map((c) => c.key);
@@ -1065,6 +1094,14 @@ export default class Shepherd extends View {
     done();
   }
 
+  /** The steer menu's Redirect… / Add context…: that mode's empty field, with the keyboard. */
+  steerField(mode, cx) {
+    this.steerMode = mode;
+    this.steerInputs[mode].set_value("");
+    this.steerInputs[mode].focus();
+    cx.notify();
+  }
+
   /** Steer menu keys: P (stays open, as in the design) R C S T ↵. Esc is Herdr's: it closes the popup. */
   steerKey(e, cx) {
     if (this.steerMode) return; // typing in the field
@@ -1073,7 +1110,7 @@ export default class Shepherd extends View {
     const k = e.key.toLowerCase();
     const close = () => closeOverlay(props().overlay);
     if (k === "p") this.togglePause(task);
-    else if (k === "r" || k === "c") { this.steerMode = k === "r" ? "redirect" : "context"; this.steerInput.focus(); }
+    else if (k === "r" || k === "c") this.steerField(k === "r" ? "redirect" : "context", cx);
     else if (k === "s") { close(); this.askStatus(task); }
     else if (k === "t") { close(); this.openTerminal(task.terminal, task.id); }
     else if (k === "enter") { close(); this.openTask(task.id); }
@@ -1234,12 +1271,12 @@ export default class Shepherd extends View {
       // The Terminal tab reads the agent's screen only while it's shown (term.js).
       syncTerm(this, task, cx);
       // 1–6 switch tabs while the detail pane holds the keyboard (the board handles them too), never
-      // while typing in the Ask field or the Terminal tab's field: their keys bubble up here. A click
-      // in either field stops there (detail.js, term.js), so this one doesn't take the keyboard from it.
+      // while typing in the Ask field, a question's reply field or the Terminal tab's field: their keys
+      // bubble up here. A click in any of them stops there (detail.js, term.js), so this one doesn't take the keyboard from it.
       return renderDetail(this).track_focus(this.keys)
         .on_mouse_down("left", () => this.keys.focus())
         .on_key_down((e, cx) => {
-          if (this.askFocused || this.termTab?.focused) return;
+          if (this.askFocused || this.termTab?.focused || this.slots.some((s) => s.focused)) return;
           if (!e.modifiers?.platform && !e.modifiers?.control && this.detailTab(e.key)) cx.stop_propagation();
         });
     }
