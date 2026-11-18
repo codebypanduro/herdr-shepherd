@@ -13,7 +13,7 @@ import {
   hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
 import {
-  TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN,
+  TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
   localId, machineOf, palette, mins, tint, recAnswer, pendingId,
 } from "./common.js";
 import { renderBoard } from "./board.js";
@@ -122,6 +122,9 @@ export default class Shepherd extends View {
     // D and ⌘J toggle these: the open copy's overlay id, cleared in close().
     if (p.panel === "digest") setShared(DIGEST_OPEN, p.overlay ?? null);
     if (p.panel === "history") setShared(HISTORY_OPEN, p.overlay ?? null);
+    if (p.panel === "steer") setShared(STEER_OPEN, p.overlay ?? null); // the board skips the peek while it's up
+    // A steer menu never outlives a restart, but its id in shared state would (close() didn't run).
+    if (!p.panel && shared(STEER_OPEN)) setShared(STEER_OPEN, null);
     // Keys (J/K, S, P, T, …) go to these copies only while they hold the keyboard, so typing in the
     // bar, a reply field or a terminal never triggers them. The board gets the keyboard when clicked
     // or from "focus" (mod.json focusable: pane.go, or a popup over it closing); popups and the
@@ -166,6 +169,8 @@ export default class Shepherd extends View {
     if (isToast(p)) { untrackToast(p.overlay); return; }
     if (p.panel === "digest" && shared(DIGEST_OPEN) === p.overlay) setShared(DIGEST_OPEN, null);
     if (p.panel === "history" && shared(HISTORY_OPEN) === p.overlay) setShared(HISTORY_OPEN, null);
+    if (p.panel === "steer" && shared(STEER_OPEN) === p.overlay) setShared(STEER_OPEN, null);
+    closePeek(this);
   }
 
   // ---- where things are ----------------------------------------------------------------
@@ -859,9 +864,9 @@ export default class Shepherd extends View {
     return [...cards].sort((a, b) => rank(a) - rank(b) || ORDER.indexOf(b.stage) - ORDER.indexOf(a.stage));
   }
 
-  /** The task keys act on: the peeked card (its footer names S / T / ↵), the keyboard focus, else the open one. */
+  /** The task keys act on: the keyboard focus, else the open one. S / T / ↵ prefer a peeked card (boardKey). */
   keyTask() {
-    const key = peekedKey(this) ?? this.kf ?? shared(SELECTED);
+    const key = this.kf ?? shared(SELECTED);
     return typeof key === "string" && key.startsWith("task-") ? this.taskById(key.slice(5)) : null;
   }
 
@@ -997,8 +1002,12 @@ export default class Shepherd extends View {
     }
     const sel = shared(SELECTED);
     if (["1", "2", "3", "4", "5"].includes(k)) { if (this.detailTab(k)) done(); return; }
+    // The peek's footer names S / T / ↵: those act on the peeked card and close the peek; j/k and Esc
+    // close it too (the keyboard moved on). P, A and key commands keep to the keyboard focus.
+    const peeked = peekedKey(this);
+    if (["j", "k", "down", "up", "enter", "escape", "s", "t"].includes(k)) closePeek(this);
     if (k === "j" || k === "k" || k === "down" || k === "up") { if (this.moveFocus(k === "j" || k === "down" ? 1 : -1)) done(); return; }
-    const enterKey = peekedKey(this) ?? this.kf;
+    const enterKey = peeked ?? this.kf;
     if (k === "enter" && enterKey?.startsWith("task-")) { this.openTask(enterKey.slice(5)); done(); return; }
     if (k === "escape") {
       if (typeof sel === "string") { setShared(SELECTED, null); run("layout.hide", { id: "detail" }); } else this.kf = null;
@@ -1011,9 +1020,8 @@ export default class Shepherd extends View {
     if (k === "r") { this.replyNext(cx); done(); return; }
     const key = { n: "new-space", f: "new-folder", w: "workflow", u: "usage" }[k];
     if (key && this.overlayCommand(key)) { done(); return; }
-    const task = this.keyTask();
+    const task = (k === "s" || k === "t") && peeked ? this.taskById(peeked.slice(5)) : this.keyTask();
     if (!task) return;
-    if (k === "s" || k === "t") closePeek(this);
     if (k === "s") this.openSteer(task.id, false);
     else if (k === "p") this.togglePause(task);
     else if (k === "t") this.openTerminal(task.terminal, task.id);
@@ -1160,7 +1168,9 @@ export default class Shepherd extends View {
       const task = this.selectedTask();
       if (task) this.ensureGit(task, cx);
       // The Ask field follows the open task; its value is switched outside render.
-      if ((task?.id ?? null) !== this.askTask) cx.spawn(async (cx) => { this.askFor(this.selectedTask()?.id ?? null); cx.notify(); });
+      // The task's body starts at once, still inside render, where cx.notify() is refused: let the
+      // foreground executor run it after this frame (cx.sleep), then switch and redraw.
+      if ((task?.id ?? null) !== this.askTask) cx.spawn(async (cx) => { await cx.sleep(0); this.askFor(this.selectedTask()?.id ?? null); cx.notify(); });
       // 1–5 switch tabs while the detail pane holds the keyboard (the board handles them too), never
       // while typing in the Ask field: its keys bubble up here. A click in the field stops there
       // (detail.js), so this one doesn't take the keyboard from it.
@@ -1174,6 +1184,7 @@ export default class Shepherd extends View {
     const view = this.view();
     // Needs you has reply fields: no board keys there, so typing a reply never steers a task.
     if (view === "needs") return renderNeeds(this);
+    if (view !== "board" && this.peek) closePeek(this); // only the board's cards peek
     const body = view === "pipeline" ? renderPipeline(this) : view === "deps" ? renderDeps(this) : renderBoard(this);
     // Clicking anywhere on the board gives it the keyboard.
     return body.track_focus(this.keys)

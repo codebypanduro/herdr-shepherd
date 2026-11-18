@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay } from "herdr";
-import { STAGES, MONO, age, palette, stuckColor, money, kTokens } from "./common.js";
+import { STAGES, MONO, age, palette, stuckColor, money, kTokens, runTokens } from "./common.js";
 
 export function renderDigest(m) {
   const t = palette();
@@ -22,7 +22,7 @@ export function renderDigest(m) {
     return {
       c, runs,
       cost: runs.reduce((n, r) => n + (r.cost ?? 0), 0),
-      tokens: runs.reduce((n, r) => n + (r.tokens ?? 0), 0),
+      tokens: runTokens(runs),
       shipped: c.stage === "done" && today(last?.end ?? last?.start),
     };
   }).filter((x) => x.runs.length);

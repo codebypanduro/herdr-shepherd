@@ -5,7 +5,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { props, terminals, closeOverlay, run } from "herdr";
-import { STAGES, ROLE, MONO, age, palette, money, kTokens } from "./common.js";
+import { STAGES, ROLE, MONO, age, palette, money, kTokens, runTokens } from "./common.js";
 import { closeTermWindow } from "./ui.js";
 
 export function renderSteer(m) {
@@ -115,7 +115,7 @@ export function renderTermFoot(m) {
   const runs = task?.history ?? [];
   const cur = [...runs].reverse().find((r) => r.stage === task?.stage);
   const since = Date.parse(cur?.start ?? "");
-  const tokens = runs.reduce((n, r) => n + (r.tokens ?? 0), 0);
+  const tokens = runTokens(runs);
   const cost = runs.reduce((n, r) => n + (r.cost ?? 0), 0);
   const right = task
     ? `${since ? `${age(Date.now() - since)} in ${STAGES[task.stage]?.title ?? task.stage} · ` : ""}${kTokens(tokens)} tokens · ${money(cost)}`

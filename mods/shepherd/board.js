@@ -3,8 +3,8 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { GROUPS, STAGES, MONO, SELECTED, groupColor, age, palette, stuckColor, tint, statusColor as statusOf, loopDots as dots } from "./common.js";
-import { hoverPeek, trackPeek, withPeek, closePeek, timeTooltip } from "./peek.js";
+import { GROUPS, STAGES, MONO, SELECTED, groupColor, age, palette, stuckColor, tint, kTokens, taskTokens, statusColor as statusOf, loopDots as dots } from "./common.js";
+import { hoverPeek, trackPeek, withPeek, closePeek } from "./peek.js";
 
 const COL_MIN = 172;
 const FILTERS = "shepherd.filters";
@@ -14,6 +14,9 @@ export function renderBoard(m) {
   const all = m.cards();
   const filters = shared(FILTERS) ?? [];
   const shown = filters.length ? all.filter((c) => filters.includes(c.status)) : all;
+  // A peek whose card left the board (stage change, filter, space switch) stops reading and stops
+  // taking S / T / ↵. Hover-out never comes for a card that's gone.
+  if (m.peek && !shown.some((c) => c.key === m.peek.key)) closePeek(m);
   const selected = shared(SELECTED);
   const now = Date.now();
   const statusColor = (s) => statusOf(t, s);
@@ -55,7 +58,7 @@ export function renderBoard(m) {
     const timeColor = c.stuck ? stuckColor(t) : blocked && minutes > 30 ? t.blocked : t.dim;
     // ⋯, S or right-click: the steer menu for a task; a label-only card just peeks at its terminal.
     const steer = () => { closePeek(m); return c.task ? m.openSteer(c.id) : c.address && run("terminal.peek", { terminal: c.address }); };
-    return withPeek(m, t, c, v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
+    return withPeek(m, t, c, v_flex().id(`card-${c.key}`).relative().flex_none().gap(6).p(10).rounded(6)
       .bg(blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isKf ? t.accent : border)
       .hover((s) => s.border_color(isSel || isKf ? t.accent : t.input))
       .on_hover((on, cx) => hoverPeek(m, c, on, cx))
@@ -116,4 +119,16 @@ export function renderBoard(m) {
     .child(div().id("board-scroll").flex_1().min_h(0).overflow_x_scrollbar()
       .child(h_flex().h_full().min_w(COL_MIN * 9 + 8 * 10 + 24).px(12).py(10).gap(10).items_stretch()
         .children(columns)));
+}
+
+/** The card time's tooltip: "34m in Code review · 12k tokens so far" / "Total time 2h 5m · 55k tokens". */
+function timeTooltip(c, now) {
+  const runs = c.task?.history ?? [];
+  const tokens = taskTokens(c.task);
+  const tok = tokens ? ` · ${kTokens(tokens)} tokens` : "";
+  if (c.stage === "done") {
+    const total = runs.reduce((n, r) => n + Math.max(0, (Date.parse(r.end ?? "") || now) - (Date.parse(r.start ?? "") || now)), 0);
+    return `Total time ${age(total || now - c.since)}${tok}`;
+  }
+  return `${age(now - c.since)} in ${STAGES[c.stage]?.title ?? c.stage}${tok ? `${tok} so far` : ""}`;
 }

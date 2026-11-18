@@ -20,6 +20,7 @@ export const VIEW = "shepherd.view";
 export const SELECTED = "shepherd.selected";
 export const DIGEST_OPEN = "shepherd.digestOpen"; // the open digest's overlay id
 export const HISTORY_OPEN = "shepherd.historyOpen"; // the open History's overlay id
+export const STEER_OPEN = "shepherd.steerOpen"; // the open steer menu's overlay id (no peek over it)
 
 /** The main views, in the tab bar's order. */
 export const VIEW_LIST = [["board", "Board"], ["pipeline", "Pipeline"], ["deps", "Dependencies"], ["needs", "Needs you"]];
@@ -103,6 +104,10 @@ export function mins(m) {
 }
 
 export const money = (n) => `$${(n ?? 0).toFixed(2)}`;
+/** Tokens of stage runs (null until runs record them), and of a whole task. */
+export const runTokens = (runs) => (runs ?? []).reduce((n, r) => n + (r.tokens ?? 0), 0);
+export const taskTokens = (task) => runTokens(task?.history);
+
 export const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n ?? 0));
 
 /** A question's one-click answer: Merge / Approve for those kinds, else its recommended answer.

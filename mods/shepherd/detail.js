@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens, mins } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens, mins, runTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 
@@ -88,22 +88,21 @@ export function renderDetail(m) {
 
 const RESULT_COLOR = (t, r) => (r === "pass" ? t.done : r === "fail" ? t.ansi1 : r === "ask" ? t.blocked : t.working);
 
-/** A timeline segment's tooltip: "Loop 2 · Code review · fail · 12m · 45k tokens · opus — 1 finding".
- *  Plan stages have no loop. */
+/** A timeline segment's tooltip, as the design: "Loop 2 · Code review · fail · 12m · 45k tokens · opus — 1 finding".
+ *  Plan stages have no loop; a running stage reads "run"; the model goes with the tokens (no $: 10e). */
 export const segmentTitle = (r, now = Date.now()) => [
   stageGroup(r.stage) === "plan" ? null : `Loop ${r.loop ?? 1}`,
   STAGES[r.stage]?.title ?? r.stage,
-  r.result ?? "running",
+  !r.result || r.result === "running" ? "run" : r.result,
   mins(ms(r, now) / 60000),
-  r.tokens ? `${kTokens(r.tokens)} tokens` : null,
-  r.model ?? null,
+  r.tokens ? `${kTokens(r.tokens)} tokens${r.model ? ` · ${r.model}` : ""}` : null,
 ].filter(Boolean).join(" · ") + (r.note ? ` — ${r.note}` : "");
 
 function overview(m, task, t) {
   const now = Date.now();
   const runs = task.history ?? [];
   const total = runs.reduce((n, r) => n + ms(r, now), 0) || 1;
-  const tokens = runs.reduce((n, r) => n + (r.tokens ?? 0), 0);
+  const tokens = runTokens(runs);
   const cost = runs.reduce((n, r) => n + (r.cost ?? 0), 0);
   const loops = [...new Set(runs.map((r) => r.loop ?? 1))];
 
