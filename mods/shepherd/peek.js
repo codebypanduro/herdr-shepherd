@@ -86,7 +86,7 @@ function statusLines(t, c, m) {
   const L = (text, fg = t.foreground) => ({ text, fg });
   if (c.paused) return [L("⏸ paused by you", t.muted), L(`  last step: ${c.task?.history?.slice(-1)[0]?.note ?? c.note}`, t.dim)];
   if (c.status === "blocked") {
-    const q = m.questions().find((x) => x.task === c.id);
+    const q = c.task ? m.questionsOf(c.task)[0] : null;
     return [L("⏺ waiting for an answer", t.muted), L(`? ${q?.text ?? c.note}`, t.blocked)];
   }
   if (c.stage === "done" || c.status === "done") return [L(`✓ ${c.note}`, t.done)];
@@ -125,7 +125,7 @@ function peekBox(m, t, c, p, now) {
   const task = c.task;
   const runs = task?.history ?? [];
   const cur = [...runs].reverse().find((r) => r.stage === c.stage);
-  const model = cur?.model ?? m.settings().stages?.[c.stage]?.model ?? null;
+  const model = cur?.model ?? m.settings(task ? m.spaceOf(task) : m.space()).stages?.[c.stage]?.model ?? null;
   const who = [ROLE[c.stage] ?? "done", model, c.id].filter(Boolean).join(" · ");
   const tokens = taskTokens(task);
   const lines = p.live

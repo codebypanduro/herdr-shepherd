@@ -7,8 +7,8 @@ import { STAGES, ORDER, MONO, SELECTED, palette, stuckColor, tint, statusColor, 
 
 /** Rows react like cards: click opens the task, right-click steers it. */
 const rowActions = (m, el, c) => el
-  .on_click(() => { m.kf = c.key; m.openTask(c.id); })
-  .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c.id); });
+  .on_click(() => { m.kf = c.key; m.openTask(c.ref); })
+  .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c.ref); });
 
 export function renderPipeline(m) {
   const t = palette();
@@ -47,6 +47,7 @@ export function renderPipeline(m) {
     .child(v_flex().w(TASK_W).flex_none().min_w(0).gap(3).pr(8)
       .child(h_flex().gap(8).items_center().min_w(0)
         .child(div().flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
+        .when(Boolean(c.spaceTag), (el) => el.child(div().flex_none().max_w(80).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(c.spaceTag)))
         .child(div().flex_1().min_w(0).truncate().text_size(13).child(c.title)))
       .child(div().truncate().text_size(11.5).text_color(c.stuck ? stuckColor(t) : c.status === "blocked" ? t.blocked : t.muted)
         .child(c.stuckText ?? c.note)))
@@ -54,7 +55,7 @@ export function renderPipeline(m) {
     .child(h_flex().w(54).flex_none().justify_end().child(loopDots(t, c, 2)));
 
   return v_flex().id("shepherd-pipeline").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
-    .child(statusFilters(m, t, all, m.header("pipeline", `${m.space()?.name ?? "—"} · ${all.length} task${all.length === 1 ? "" : "s"}`)))
+    .child(statusFilters(m, t, all, m.header("pipeline", `${m.scopeName()} · ${all.length} task${all.length === 1 ? "" : "s"}`)))
     .child(div().id("pipe-scroll").flex_1().min_h(0).overflow_x_scrollbar()
       .child(v_flex().id("pipe-rows").h_full().min_w(TASK_W + ORDER.length * (CELL + 4) + 80).px(10).pt(6).pb(10)
         .overflow_y_scrollbar()
@@ -84,9 +85,12 @@ export function chains(tasks) {
 export function renderDeps(m) {
   const t = palette();
   const cards = m.cards().filter((c) => c.task);
-  const byId = new Map(cards.map((c) => [c.id, c]));
-  const rows = chains(cards.map((c) => c.task)).map((path) => {
-    const nodes = path.map((x) => byId.get(x.id));
+  const byRef = new Map(cards.map((c) => [c.ref, c]));
+  // Chains stay inside a space: blockedBy names ids of the task's own space (All spaces shows several).
+  const bySpace = new Map();
+  for (const c of cards) { if (!bySpace.has(c.sid)) bySpace.set(c.sid, []); bySpace.get(c.sid).push(c.task); }
+  const rows = [...bySpace.values()].flatMap((tasks) => chains(tasks)).map((path) => {
+    const nodes = path.map((x) => byRef.get(x._ref ?? x.id));
     // What holds the chain up: its first task that isn't done.
     const head = nodes.find((c) => c.stage !== "done");
     const yours = Boolean(head && (head.asked || head.status === "blocked"));
@@ -99,11 +103,12 @@ export function renderDeps(m) {
     return v_flex().id(id).w(210).gap(6).px(10).py(9).rounded(6).cursor_pointer()
       .bg(t.raised).border(1).border_color(yours ? tint(t.blocked, 0.45) : t.border)
       .hover((s) => s.bg(t.hover))
-      .on_click(() => { m.kf = c.key; m.openTask(c.id); })
-      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c.id); })
+      .on_click(() => { m.kf = c.key; m.openTask(c.ref); })
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c.ref); })
       .child(h_flex().gap(6).items_center()
         .child(div().size(6).rounded(3).bg(statusColor(t, c.status)))
         .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
+        .when(Boolean(c.spaceTag), (el) => el.child(div().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(c.spaceTag)))
         .child(div().flex_1())
         .child(div().text_size(10.5).text_color(t.muted).child(STAGES[c.stage]?.title ?? c.stage)))
       .child(div().text_size(12.5).line_height(1.35).child(c.title))
@@ -120,7 +125,7 @@ export function renderDeps(m) {
         : [div().flex().items_center().px(2).font_family(MONO).text_size(13).text_color(t.dim).child("→"), node(c, `dep-${i}-${j}`)]))));
 
   return v_flex().id("shepherd-deps").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
-    .child(m.header("dependencies", `${m.space()?.name ?? "—"} · ${cards.length} task${cards.length === 1 ? "" : "s"}`))
+    .child(m.header("dependencies", `${m.scopeName()} · ${cards.length} task${cards.length === 1 ? "" : "s"}`))
     .child(v_flex().id("deps-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).gap(10)
       .child(div().text_size(12).text_color(t.muted).child("Tickets that wait on other tickets. A chain only moves when the ticket on the left is done."))
       .when(rows.length === 0, (el) => el.child(div().pt(40).flex().justify_center().text_size(13).text_color(t.dim)

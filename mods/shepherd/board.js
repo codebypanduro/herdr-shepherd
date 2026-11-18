@@ -19,7 +19,7 @@ export function renderBoard(m) {
   const now = Date.now();
   const maxLoops = m.settings().maxLoops;
 
-  const header = statusFilters(m, t, all, m.header("pipeline", `${m.space()?.name ?? "—"} · ${all.length} task${all.length === 1 ? "" : "s"}`));
+  const header = statusFilters(m, t, all, m.header("pipeline", `${m.scopeName()} · ${all.length} task${all.length === 1 ? "" : "s"}`));
 
   const loopDots = (c) => dots(t, c);
 
@@ -32,7 +32,7 @@ export function renderBoard(m) {
     const minutes = (now - c.since) / 60000;
     const timeColor = c.stuck ? stuckColor(t) : blocked && minutes > 30 ? t.blocked : t.dim;
     // ⋯, S or right-click: the steer menu for a task; a label-only card just peeks at its terminal.
-    const steer = () => { closePeek(m); return c.task ? m.openSteer(c.id) : c.address && run("terminal.peek", { terminal: c.address }); };
+    const steer = () => { closePeek(m); return c.task ? m.openSteer(c.ref) : c.address && run("terminal.peek", { terminal: c.address }); };
     return withPeek(m, t, c, v_flex().id(`card-${c.key}`).relative().flex_none().gap(6).p(10).rounded(6)
       .bg(isSel ? t.hover : blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isKf ? t.accent : border)
       .hover((s) => s.bg(t.hover).border_color(isSel || isKf ? t.accent : t.input))
@@ -49,7 +49,10 @@ export function renderBoard(m) {
         if (isSel) run("layout.hide", { id: "detail" });
       })
       .child(h_flex().gap(6).items_center()
-        .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
+        .child(div().flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
+        // All spaces: the card's space (ids repeat across spaces), cut before the skill is.
+        .when(Boolean(c.spaceTag), (el) => el.child(div().id(`tag-${c.key}`).max_w(96).truncate().font_family(MONO).text_size(10.5)
+          .text_color(t.dim).tooltip(c.spaceTag).child(c.spaceTag)))
         .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim)
           .child(c.skill ?? ""))
         .when(inBuild, (el) => el.child(loopDots(c)))

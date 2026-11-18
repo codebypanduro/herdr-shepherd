@@ -14,21 +14,22 @@ const toneOf = (t, result) => (result === "pass" ? t.done : result === "fail" ? 
 /** Every line of the History, sorted by time. */
 export function historyItems(m) {
   const { tasks = [], questions = [], chat = [] } = m.state();
-  const items = [...chat, ...m.queuedChat()].map((c) => ({ at: Date.parse(c.at) || 0, kind: c.from === "you" ? "you" : "shepherd", text: c.text, task: c.task ?? null, queued: Boolean(c.queued) }));
+  // Every item keeps its space (`sid`): All spaces tags each line with it.
+  const items = [...chat, ...m.queuedChat()].map((c) => ({ at: Date.parse(c.at) || 0, kind: c.from === "you" ? "you" : "shepherd", text: c.text, task: c.task ?? null, queued: Boolean(c.queued), sid: c._sid ?? null }));
   for (const task of tasks) {
     for (const r of task.history ?? []) {
       const title = STAGES[r.stage]?.title ?? r.stage;
       const start = Date.parse(r.start ?? "") || 0;
       const who = [r.model].filter(Boolean).join(" ");
-      items.push({ at: start, kind: "event", task: task.id, result: "running",
+      items.push({ at: start, kind: "event", task: task.id, sid: task._sid ?? null, result: "running",
         text: `${title} started${r.loop > 1 ? ` · loop ${r.loop}` : ""}${who ? ` (${who})` : ""}` });
       if (r.end) {
-        items.push({ at: Date.parse(r.end) || start, kind: "event", task: task.id, result: r.result,
+        items.push({ at: Date.parse(r.end) || start, kind: "event", task: task.id, sid: task._sid ?? null, result: r.result,
           text: `${title} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
       }
     }
   }
-  for (const q of questions) items.push({ at: Date.parse(q.asked) || 0, kind: "question", q, task: q.task });
+  for (const q of questions) items.push({ at: Date.parse(q.asked) || 0, kind: "question", q, task: q.task, sid: q._sid ?? null });
   return items.sort((a, b) => a.at - b.at);
 }
 
@@ -43,21 +44,27 @@ export function renderHistory(m) {
   if (items.length !== m.historyCount) { m.historyCount = items.length; if (items.length) m.historyScroll.scroll_to_item(items.length - 1); }
 
   const mono = (el) => el.font_family(MONO).text_size(12.5).line_height(1.55);
+  // All spaces: each line's space, dim, before it (the design's spaceTag).
+  const isAll = m.isAll();
+  const tagOf = (it) => (isAll && it.sid ? m.spaceById(it.sid)?.name ?? it.sid : null);
   const line = (it, i) => {
     if (it.kind === "you") {
       return mono(h_flex().id(`h-${i}`).gap(8).px(10).py(8).rounded(5).bg(t.raised).items_start())
         .child(div().text_color(t.accent).child("❯"))
+        .when(Boolean(tagOf(it)), (el) => el.child(div().flex_none().text_color(t.dim).child(`${tagOf(it)} ·`)))
         .child(div().flex_1().min_w(0).text_color(t.foreground).child(it.text))
         .when(it.queued, (el) => el.child(div().flex_none().text_size(11).text_color(t.blocked).child("waits for Shepherd")));
     }
     if (it.kind === "shepherd") {
       return mono(h_flex().id(`h-${i}`).gap(8).items_start())
         .child(div().text_color(t.foreground).child("⏺"))
-        .child(div().flex_1().min_w(0).text_color(t.muted).child(it.task ? `${it.text}` : it.text));
+        .when(Boolean(tagOf(it)), (el) => el.child(div().flex_none().text_color(t.dim).child(`${tagOf(it)} ·`)))
+        .child(div().flex_1().min_w(0).text_color(t.muted).child(it.text));
     }
     if (it.kind === "event") {
       return h_flex().id(`h-${i}`).gap(8).pl(2).items_start().font_family(MONO).text_size(11.5)
         .child(div().text_color(t.dim).child("⎿"))
+        .when(Boolean(tagOf(it)), (el) => el.child(div().flex_none().text_color(t.dim).child(tagOf(it))))
         .child(div().flex_none().text_color(toneOf(t, it.result)).child(it.task))
         .child(div().flex_1().min_w(0).text_color(t.muted).child(it.text));
     }
@@ -72,7 +79,8 @@ export function renderHistory(m) {
         .child(div().text_color(t.blocked).child("?"))
         .child(div().text_color(groupColor(t, kind.group)).child(kind.label))
         .child(div().child(q.from ?? "shepherd"))
-        .child(div().text_color(t.dim).child(`· ${q.task}`)))
+        .child(div().text_color(t.dim).child(`· ${q.task}`))
+        .when(Boolean(tagOf(it)), (el) => el.child(div().text_color(t.dim).child(`· ${tagOf(it)}`))))
       .child(div().text_size(13).line_height(1.45).text_color(t.foreground).child(q.text))
       .when(Array.isArray(q.tickets), (el) => el.child(v_flex().gap(3).children(q.tickets.map((k) => h_flex().gap(8).text_size(11.5)
         .child(div().w(22).font_family(MONO).text_color(t.dim).child(k.key))
@@ -91,10 +99,13 @@ export function renderHistory(m) {
     .child(h_flex().flex_none().h(44).px(14).gap(8).items_center().bg(t.surface).border_b(1).border_color(t.border)
       .child(div().size(7).rounded(4).bg(t[status] ?? t.idle)
         .when(status === "working", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 })))
-      .child(div().font_semibold().child(`Shepherd · ${m.space()?.name ?? "—"}`))
-      .when(Boolean(sh), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${sh.address} · ${items.length} messages`)))
+      // All spaces: "shepherds", and where the input's lines go (the last selected space's Shepherd).
+      .child(div().font_semibold().child(isAll ? "shepherds" : `Shepherd · ${m.space()?.name ?? "—"}`))
+      .when(Boolean(sh), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim)
+        .child(isAll ? `all spaces · replies go to ${m.space()?.name ?? "—"} · ${items.length} messages` : `${sh.address} · ${items.length} messages`)))
       .when(!sh, (el) => el.child(h_flex().flex_1().min_w(0).gap(6).items_center().text_color(t.dim)
         .when(m.isStarting(m.space()), (el) => el.child(div().flex_none().child("starting…")))
+        .when(isAll, (el) => el.child(div().flex_none().child(`all spaces · replies go to ${m.space()?.name ?? "—"} ·`)))
         .when(!m.isStarting(m.space()), (el) => el.child(div().flex_none().child("not running ·"))
           .child(startAction(m, t, m.space(), "h-shep")))))
       .when(waiting > 0, (el) => el.child(div().id("h-waiting").px(8).py(2).rounded(10).cursor_pointer()

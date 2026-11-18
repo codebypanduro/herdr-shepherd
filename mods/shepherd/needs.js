@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme } from "herdr";
-import { STAGES, KINDS, MONO, groupColor, age, palette, tint, kindIcon } from "./common.js";
+import { STAGES, KINDS, MONO, groupColor, age, palette, tint, kindIcon, refOf } from "./common.js";
 
 export function answerButton(t, id, text, recommended, onClick, { fit = false, solid = null, icon = null } = {}) {
   // fit: shrink to share a row and cut the text with … (the bar); the full text shows on hover.
@@ -87,8 +87,12 @@ export function questionCard(m, q, t, { id = "q", now = Date.now(), viewTask = t
     ? `${STAGES[task.stage]?.title ?? task.stage}${["implement", "review", "ci", "proof"].includes(task.stage) ? ` · loop ${task.loop ?? 1}/${task.maxLoops ?? 3}` : ""}${q.grillNo ? ` · question ${q.grillNo}` : ""}`
     : "";
   const finding = (task?.findings ?? []).filter((f) => f.state !== "resolved").slice(-1)[0];
-  const input = m.replyInput(q.id);
-  return v_flex().id(`${id}-${q.id}`).w_full().max_w(760).gap(10).p(14).rounded(8)
+  const input = m.replyInput(q.key);
+  // Ids repeat across spaces: elements go by the question's key ("<space id>/<id>").
+  const qk = q.key ?? q.id;
+  // All spaces: the question's space after its task's title (the design's spaceTag).
+  const tag = m.isAll() ? m.spaceOf(q)?.name ?? null : null;
+  return v_flex().id(`${id}-${qk}`).w_full().max_w(760).gap(10).p(14).rounded(8)
     .bg(t.surface).border(1).border_color(t.blocked)
     .child(h_flex().gap(8).items_center()
       .child(h_flex().gap(5).pl(6).pr(8).h(20).items_center().rounded(10).border(1).border_color(tint(color, 0.35))
@@ -96,6 +100,7 @@ export function questionCard(m, q, t, { id = "q", now = Date.now(), viewTask = t
         .child(kindIcon(kind, color)).child(kind.label))
       .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(q.task))
       .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(task?.title ?? ""))
+      .when(Boolean(tag), (el) => el.child(div().flex_none().font_family(MONO).text_size(11).text_color(t.dim).child(tag)))
       .child(div().text_size(11).text_color(t.dim).child(where))
       .child(div().font_family(MONO).text_size(10.5).text_color(t.dim).child(age(now - (Date.parse(q.asked) || now)))))
     .child(div().text_size(14).line_height(1.4).text_color(t.foreground).child(q.text))
@@ -105,15 +110,15 @@ export function questionCard(m, q, t, { id = "q", now = Date.now(), viewTask = t
     .when(q.kind === "approve" && Array.isArray(q.tickets), (el) => el.child(ticketList(q, t)))
     // The answers, then "View task" (not in the task's own Overview).
     .when((q.options ?? []).length > 0 || viewTask, (el) => el.child(h_flex().gap(8).flex_wrap().items_center()
-      .children((q.options ?? []).map((o, i) => answerButton(t, `${id}-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))
-      .when(viewTask, (row) => row.child(div().id(`${id}-${q.id}-view`).h(28).px(11).flex().items_center().rounded(6)
+      .children((q.options ?? []).map((o, i) => answerButton(t, `${id}-${qk}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))
+      .when(viewTask, (row) => row.child(div().id(`${id}-${qk}-view`).h(28).px(11).flex().items_center().rounded(6)
         .text_size(12).text_color(t.muted).cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
-        .on_click(() => m.openTask(q.task))
+        .on_click(() => m.openTask(refOf(q._sid, q.task)))
         .child("View task")))))
     // Why the asker recommends its pick (grilling questions carry one).
     .when(Boolean(q.why), (el) => el.child(whyLine(t, q)))
-    .when(Boolean(input), (el) => el.child(replyField(t, `${id}-${q.id}`, input, placeholderFor(q), () => m.answer(q, input.value()))));
+    .when(Boolean(input), (el) => el.child(replyField(t, `${id}-${qk}`, input, placeholderFor(q), () => m.answer(q, input.value()))));
 }
 
 export function renderNeeds(m) {
@@ -123,9 +128,9 @@ export function renderNeeds(m) {
   const card = (q) => questionCard(m, q, t, { now });
 
   return v_flex().id("shepherd-needs").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
-    .child(m.header("needs you", `${m.space()?.name ?? "—"} · ${qs.length} open`))
+    .child(m.header("needs you", `${m.isAll() ? "all spaces" : m.space()?.name ?? "—"} · ${qs.length} open`))
     .child(v_flex().id("needs-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(16).gap(12).items_center()
       .when(qs.length === 0, (el) => el.child(
-        div().pt(40).text_size(13).text_color(t.dim).child("Nothing needs you. Shepherd will ask here when it does.")))
+        div().pt(40).text_size(13).text_color(t.dim).child(m.isAll() ? "No space has open questions." : "Nothing needs you. Shepherd will ask here when it does.")))
       .children(qs.map(card)));
 }

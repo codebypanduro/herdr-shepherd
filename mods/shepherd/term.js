@@ -34,7 +34,7 @@ export function initTerm(m) {
 export function termAddress(m, task) {
   const t = task?.terminal;
   if (!t) return null;
-  const machine = m.space()?.machine ?? null;
+  const machine = m.spaceOf(task)?.machine ?? null; // the task's space: All spaces shows several
   return machine && !String(t).includes("/") ? `${machine}/${t}` : String(t);
 }
 
@@ -271,5 +271,5 @@ export function renderTerm(m, task, t) {
 const openButton = (m, task, t) => div().id("term-open").flex_none().px(9).h(24).flex().items_center().rounded(5)
   .border(1).border_color(t.border).cursor_pointer().text_size(11).text_color(t.foreground)
   .hover((s) => s.bg(t.hover))
-  .on_click(() => m.openTerminal(task.terminal, task.id))
+  .on_click(() => m.openTerminal(task.terminal, task._ref))
   .child("Open terminal ↗");

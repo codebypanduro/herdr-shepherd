@@ -18,6 +18,11 @@ export function renderBar(m) {
   const status = sh?.status ?? null;
   const space = m.space();
   const openNeeds = () => setShared(VIEW, "needs");
+  // All spaces: questions and events come from every space (tagged with it); the line still goes to
+  // the shown space's Shepherd, the last one selected.
+  const isAll = m.isAll();
+  const tagOf = (x) => (isAll && x?.sid ? m.spaceById(x.sid)?.name ?? null : null);
+  const qTag = isAll && q ? m.spaceOf(q)?.name ?? null : null;
 
   // Short options (Merge, Send back) sit on the question's line; longer ones (a grilling
   // question's) get a row of their own under it and shrink with … to fit the bar.
@@ -30,6 +35,7 @@ export function renderBar(m) {
   const line = q && h_flex().w_full().gap(8).items_center()
     .child(div().size(18).flex_none().rounded(9).bg(t.blocked).text_color(t.background)
       .text_size(11).font_semibold().flex().items_center().justify_center().child("?"))
+    .when(Boolean(qTag), (el) => el.child(div().flex_none().font_family(MONO).text_size(11).text_color(t.dim).child(qTag)))
     .child(div().flex_none().font_family(MONO).text_size(11).text_color(t.blocked).child(q.task))
     .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(q.text))
     .when(inline, (el) => el.children(buttons))
@@ -66,10 +72,11 @@ export function renderBar(m) {
   const ev = sh && !waiting ? m.lastEvent() : null;
   const sub = sh
     ? h_flex().min_w(0).gap(6).items_center()
-      .child(div().flex_none().text_color(t.muted).child("shepherd"))
+      .child(div().flex_none().text_color(t.muted).child(isAll ? "shepherds" : "shepherd"))
       .child(div().flex_none().child("·"))
-      .child(div().flex_none().child(space?.name ?? "—"))
+      .child(div().flex_none().child(isAll ? `replies go to ${space?.name ?? "—"}` : space?.name ?? "—"))
       .child(div().flex_none().child("·"))
+      .when(Boolean(tagOf(ev)), (el) => el.child(div().flex_none().child(tagOf(ev))))
       .when(Boolean(ev?.task), (el) => el.child(div().flex_none().text_color(stateColor(t, ev.result, t.working)).child(ev.task)))
       .child(div().flex_1().min_w(0).truncate()
         .child(waiting ? `sending ${waiting} waiting message${waiting > 1 ? "s" : ""}…` : ev?.text ?? "ready"))

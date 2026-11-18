@@ -30,7 +30,7 @@ export function closeDetail() {
 function worktreeLine(m, task) {
   if (task.stage === "done") return { branch: task.branch ?? "merged", path: "merged · worktree removed", active: false };
   if (!task.worktree) return { branch: "no worktree yet", path: "one is made when the ticket starts", active: false };
-  return { branch: task.branch ?? "—", path: `${m.space()?.machine ?? "this mac"}:${task.worktree}`, active: true };
+  return { branch: task.branch ?? "—", path: `${m.spaceOf(task)?.machine ?? "this mac"}:${task.worktree}`, active: true };
 }
 
 export function renderDetail(m) {
@@ -64,7 +64,7 @@ export function renderDetail(m) {
     .tooltip(live ? "Open terminal (T)" : term.state === "none" ? "No agent running"
       : term.state === "unknown" ? `${task.terminal} isn't running` : `${task.terminal} has ended`)
     .when(live, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click(() => m.openTerminal(task.terminal, task.id)))
+      .on_click(() => m.openTerminal(task.terminal, task._ref)))
     .child(div().w(12).h(9).rounded(2).border(1).border_color(live ? t.muted : t.dim))
     .child(term.state === "none" ? "no agent" : live ? task.terminal : `${task.terminal} · ended`);
 
@@ -268,7 +268,7 @@ function overview(m, task, t, where) {
 
   return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).pt(16).pb(16).gap(18)
     // What the task waits on you for, answerable here as in Needs you (a merge question is the PR card's).
-    .children(m.questions().filter((q) => q.task === task.id && q.kind !== "merge").map((q) => questionCard(m, q, t, { id: "ov-q", viewTask: false })))
+    .children(m.questionsOf(task).filter((q) => q.kind !== "merge").map((q) => questionCard(m, q, t, { id: "ov-q", viewTask: false })))
     .when(task.stage === "merge", (el) => el.child(renderPrCard(m, task, t)))
     .child(v_flex().gap(8)
       .child(h_flex().gap(8).items_center().child(shepherdMark(t, 16)).child(heading("SHEPHERD SUMMARY")))

@@ -59,7 +59,7 @@ const runTime = (r) => spanClock(r?.start, r?.end);
 const resultState = (r) => (r.result === "pass" ? "pass" : r.result === "fail" ? "fail" : "run");
 
 export function renderPrCard(m, task, t) {
-  const q = m.questions().find((x) => x.task === task.id && x.kind === "merge");
+  const q = m.questionsOf(task).find((x) => x.kind === "merge");
   const pr = task.pr ? m.pr(task) : null;
   const g = m.git(task);
   const runs = task.history ?? [];

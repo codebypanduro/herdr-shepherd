@@ -52,8 +52,8 @@ export function renderSteer(m) {
     .child(item("redirect", "↪", "Redirect…", "R", true, input("redirect")))
     .child(item("context", "+", "Add context…", "C", true, input("context")))
     .child(item("status", "?", "Ask for status", "S", true, () => { close(); m.askStatus(task); }))
-    .child(item("terminal", "▭", "Open terminal", "T", Boolean(task.terminal), () => { close(); m.openTerminal(task.terminal, task.id); }))
-    .child(item("open", "↗", "Open task", "↵", true, () => { close(); m.openTask(task.id); }));
+    .child(item("terminal", "▭", "Open terminal", "T", Boolean(task.terminal), () => { close(); m.openTerminal(task.terminal, task._ref); }))
+    .child(item("open", "↗", "Open task", "↵", true, () => { close(); m.openTask(task._ref); }));
 }
 
 /** What the window shows: the terminal, its task (if any) and how long it has been at it. */
@@ -94,7 +94,7 @@ export function renderTermBar(m) {
       () => { run("terminal.keep", { terminal: p.terminal }); closeTermWindow(p.overlay); })))
     .when(Boolean(task), (el) => el.child(button("term-steer",
       [div().child("Steer"), div().font_family(MONO).text_size(10).text_color(t.dim).child("S")],
-      () => m.openSteer(task.id, false))))
+      () => m.openSteer(task._ref, false))))
     .child(div().id("term-close").size(24).flex().items_center().justify_center().rounded(5).cursor_pointer()
       .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop)

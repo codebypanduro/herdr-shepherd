@@ -45,7 +45,7 @@ export function renderDigest(m) {
     .child(div().truncate().text_size(11.5).text_color(t.muted).child(label));
   const row = (key, c, meta, color, bar) => h_flex().id(key).gap(8).items_center().px(6).py(6).rounded(5).cursor_pointer()
     .hover((s) => s.bg(t.hover))
-    .on_click(() => open(c.id))
+    .on_click(() => open(c.ref))
     .child(div().w(56).flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
     .child(v_flex().flex_1().min_w(0).gap(3)
       .child(div().truncate().text_size(12.5).child(c.title))
@@ -63,7 +63,7 @@ export function renderDigest(m) {
   return v_flex().id("shepherd-digest").size_full().bg(t.surface).text_color(t.foreground).text_size(12)
     .child(h_flex().flex_none().px(18).py(16).gap(10).items_center().border_b(1).border_color(t.border)
       .child(div().text_size(15).font_semibold().child("Today"))
-      .child(div().text_color(t.dim).child(`${m.space()?.name ?? "—"} · ${date}`))
+      .child(div().text_color(t.dim).child(`${m.scopeName()} · ${date}`))
       .child(div().flex_1())
       .child(div().px(6).py(2).rounded(4).border(1).border_color(t.input).font_family(MONO).text_size(10.5).text_color(t.dim).child("esc")))
     .child(h_flex().flex_none().border_b(1).border_color(t.border)

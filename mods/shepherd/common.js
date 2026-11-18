@@ -23,6 +23,15 @@ export const HISTORY_OPEN = "shepherd.historyOpen"; // the open History's overla
 export const STEER_OPEN = "shepherd.steerOpen"; // the open steer menu's overlay id (no peek over it)
 export const TAB = "shepherd.detailTab"; // the task detail's open tab
 export const FILTERS = "shepherd.filters"; // the board and Pipeline's status filters: ["working", "blocked", "done"]
+export const SCOPE = "shepherd.scope"; // "all": the board, Needs you, History, bar, tab bar and digest read every Shepherd space
+
+/** A task or question across spaces: "<space id>/<id>" (task ids hold no "/"; remote space ids do,
+ *  so the last one splits). A bare id (no "/") means the copy's own space. */
+export const refOf = (sid, id) => (sid ? `${sid}/${id}` : String(id));
+export function parseRef(ref) {
+  const s = String(ref ?? ""), i = s.lastIndexOf("/");
+  return i < 0 ? { sid: null, id: s } : { sid: s.slice(0, i), id: s.slice(i + 1) };
+}
 
 /** The task detail's tabs, in order (1–6 switch them). */
 export const TABS = ["overview", "review", "changes", "files", "proof", "terminal"];

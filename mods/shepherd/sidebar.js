@@ -5,8 +5,8 @@
 
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { spaces, terminals, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
-import { MONO, palette } from "./common.js";
+import { spaces, terminals, focused, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
+import { MONO, SCOPE, SELECTED, palette, parseRef } from "./common.js";
 import { machineList, machineIcon, agentIcon, usageRows, startProbes } from "./machines.js";
 import { findNewSpace } from "./dialogs.js";
 import {
@@ -66,7 +66,8 @@ function loadAll(m, cx, remote) {
     // Only spaces with a Shepherd have a tasks.json.
     const all = terminals();
     const repos = spaces().filter((s) => Boolean(s.machine) === remote && m.shepherd(s, all)).map((s) => m.repo(s, all)).filter(Boolean);
-    await pool(repos, INFO_PARALLEL, (repo) => m.load(repo));
+    // Another machine's repo through the copies' shared read: one ssh read per REMOTE_MS between them.
+    await pool(repos, INFO_PARALLEL, (repo) => m.load(repo, remote ? REMOTE_MS : 0));
     placeNewSpace(m);
     cx.notify();
   });
@@ -186,7 +187,8 @@ export function renderSidebar(m) {
         // A drag released on its own row isn't a click.
         const dragged = m.drag?.moved || Date.now() - (m.dragEndedAt ?? 0) < 300;
         m.drag = null;
-        if (!dragged) run("space.select", { id: s.id });
+        // Picking a space shows it alone (All spaces off), as the design's space rows do.
+        if (!dragged) { run("space.select", { id: s.id }); setScope(false, s.id); }
         cx.notify();
       })
       .child(avatar(s, c.q))
@@ -263,6 +265,22 @@ export function renderSidebar(m) {
       .child("Drop here to take it out of the folder"));
   }
 
+  // This space | All spaces, the design's toggle at the top; All's badge is every space's open questions.
+  const isAll = shared(SCOPE) === "all";
+  const allQ = all.reduce((n, s) => n + counts.get(s.id).q, 0);
+  const seg = (id, label, on, onClick, extra = null) => h_flex().id(id).flex_1().h(24).gap(6).items_center().justify_center()
+    .rounded(4).cursor_pointer().text_size(12)
+    .bg(on ? t.raised : t.background).text_color(on ? t.foreground : t.dim)
+    .when(!on, (el) => el.hover((st) => st.text_color(t.foreground)))
+    .on_click(onClick)
+    .child(label)
+    .when(Boolean(extra), (el) => el.child(extra));
+  const toggle = div().pt(12).pb(4).px(10)
+    .child(h_flex().p(2).rounded(6).bg(t.background).border(1).border_color(t.border)
+      .child(seg("scope-space", "This space", !isAll, () => setScope(false)))
+      .child(seg("scope-all", "All spaces", isAll, () => setScope(true),
+        allQ > 0 ? badge(t, allQ).id("scope-all-q").tooltip(`${allQ} waiting on you`) : null)));
+
   const usage = usageRows();
   const footer = h_flex().px(10).py(8).gap(2).items_center().border_t(1).border_color(t.border)
     .children(ms.map((mc) => div().id(`mc-${mc.key || "local"}`).w(28).h(26).flex().items_center().justify_center().rounded(5)
@@ -290,7 +308,8 @@ export function renderSidebar(m) {
       if (m.drag?.moved) m.dragEndedAt = Date.now();
       if (m.drag) { m.drag = null; m.dragOver = null; cx.notify(); }
     })
-    .child(h_flex().pt(14).pb(4).pl(14).pr(8).items_center()
+    .child(toggle)
+    .child(h_flex().pt(10).pb(4).pl(14).pr(8).items_center()
       .child(div().flex_1().text_size(11).text_color(t.dim).child("SPACES"))
       .child(div().id("spaces-plus").size(22).flex().items_center().justify_center().rounded(4).cursor_pointer()
         .text_size(15).text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground))
@@ -298,6 +317,18 @@ export function renderSidebar(m) {
         .child("+")))
     .child(v_flex().id("space-list").flex_1().min_h(0).px(8).gap(2).overflow_y_scrollbar().children(rows))
     .child(footer);
+}
+
+/** All spaces on or off. Turning it off (or picking a space) closes an open task from another space
+ *  than the one shown (`shown`: the space just picked, else the focused one). */
+function setScope(all, shown = null) {
+  if (all === (shared(SCOPE) === "all")) return;
+  setShared(SCOPE, all ? "all" : null);
+  if (all) return;
+  const sel = shared(SELECTED);
+  const sid = typeof sel === "string" && sel.startsWith("task-") ? parseRef(sel.slice(5)).sid : null;
+  const here = shown ?? focused()?.space ?? spaces().find((s) => s.active)?.id ?? null;
+  if (sid && sid !== here) { setShared(SELECTED, null); run("layout.hide", { id: "detail" }); }
 }
 
 const badge = (t, n) => div().min_w(15).h(15).px(4).rounded(8).bg(t.blocked).text_color(t.background)
