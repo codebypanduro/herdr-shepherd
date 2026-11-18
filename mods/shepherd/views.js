@@ -3,8 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { shared } from "herdr";
-import { STAGES, ORDER, MONO, SELECTED, palette, stuckColor, tint, statusColor, loopDots } from "./common.js";
-import { statusFilters } from "./board.js";
+import { STAGES, ORDER, MONO, SELECTED, palette, stuckColor, tint, statusColor, loopDots, statusFilters } from "./common.js";
 
 /** Rows react like cards: click opens the task, right-click steers it. */
 const rowActions = (m, el, c) => el

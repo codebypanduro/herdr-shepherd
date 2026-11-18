@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { theme, shared } from "herdr";
+import { theme, shared, setShared } from "herdr";
 
 /** The theme, with the board's status colors on the design's hues: working blue, needs-you amber,
  *  done green. Herdr's own status colors differ by theme (graphite: working yellow, blocked red,
@@ -187,3 +187,36 @@ export const spanClock = (start, end) => {
   const a = Date.parse(start ?? ""), b = Date.parse(end ?? "");
   return a && b ? clock((b - a) / 1000) : "";
 };
+
+/** The status filters (● N working, ● N need you, ● N done, ✕ clear) after a view's header; the
+ *  board and Pipeline share them (shared FILTERS). `all`: the view's cards before filtering. */
+export function statusFilters(m, t, all, header) {
+  const filters = shared(FILTERS) ?? [];
+  const toggle = (s) => {
+    const f = shared(FILTERS) ?? [];
+    setShared(FILTERS, f.includes(s) ? f.filter((x) => x !== s) : [...f, s]);
+  };
+  const filter = (s, label) => {
+    const n = all.filter((c) => c.status === s).length;
+    const on = filters.includes(s);
+    return h_flex().id(`filter-${s}`).gap(5).items_center().px(7).h(22).rounded(5)
+      .when(on, (el) => el.bg(t.selected))
+      .hover((el) => el.bg(t.hover))
+      .on_click(() => toggle(s))
+      .child(div().size(6).rounded(3).bg(statusColor(t, s)))
+      .child(div().text_color(on ? t.foreground : t.muted).child(`${n} ${label}`));
+  };
+  return header
+    .child(filter("working", "working"))
+    .child(filter("blocked", "need you"))
+    .child(filter("done", "done"))
+    .when(filters.length > 0, (el) => el.child(
+      div().id("filter-clear").px(7).h(22).flex().items_center().rounded(5).text_color(t.dim)
+        .hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_click(() => setShared(FILTERS, []))
+        .child("✕ clear")));
+}
+
+/** What runs Proof, for its heading and the PR card's row: nothing by hand when the workflow's
+ *  `stages.proof.headless` is off, else its browser, else "headless browser". */
+export const proofBrowser = (proof) => (proof?.headless === false ? "run by hand" : String(proof?.browser || "headless browser"));

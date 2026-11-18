@@ -2,8 +2,8 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, run, shared, setShared } from "herdr";
-import { GROUPS, STAGES, MONO, SELECTED, FILTERS, groupColor, groupLabel, age, palette, stuckColor, tint, kTokens, taskTokens, statusColor as statusOf, loopDots as dots } from "./common.js";
+import { run, shared, setShared } from "herdr";
+import { GROUPS, STAGES, MONO, SELECTED, statusFilters, groupColor, groupLabel, age, palette, stuckColor, tint, kTokens, taskTokens, statusColor as statusOf, loopDots as dots } from "./common.js";
 import { hoverPeek, trackPeek, withPeek, closePeek } from "./peek.js";
 
 const COL_MIN = 172;
@@ -112,31 +112,3 @@ function timeTooltip(c, now) {
   return `${age(now - c.since)} in ${STAGES[c.stage]?.title ?? c.stage}${tok ? `${tok} so far` : ""}`;
 }
 
-/** The status filters (● N working, ● N need you, ● N done, ✕ clear) after a view's header; the
- *  board and Pipeline share them (shared FILTERS). `all`: the view's cards before filtering. */
-export function statusFilters(m, t, all, header) {
-  const filters = shared(FILTERS) ?? [];
-  const toggle = (s) => {
-    const f = shared(FILTERS) ?? [];
-    setShared(FILTERS, f.includes(s) ? f.filter((x) => x !== s) : [...f, s]);
-  };
-  const filter = (s, label) => {
-    const n = all.filter((c) => c.status === s).length;
-    const on = filters.includes(s);
-    return h_flex().id(`filter-${s}`).gap(5).items_center().px(7).h(22).rounded(5)
-      .when(on, (el) => el.bg(t.selected))
-      .hover((el) => el.bg(t.hover))
-      .on_click(() => toggle(s))
-      .child(div().size(6).rounded(3).bg(statusOf(t, s)))
-      .child(div().text_color(on ? t.foreground : t.muted).child(`${n} ${label}`));
-  };
-  return header
-    .child(filter("working", "working"))
-    .child(filter("blocked", "need you"))
-    .child(filter("done", "done"))
-    .when(filters.length > 0, (el) => el.child(
-      div().id("filter-clear").px(7).h(22).flex().items_center().rounded(5).text_color(t.dim)
-        .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_click(() => setShared(FILTERS, []))
-        .child("✕ clear")));
-}

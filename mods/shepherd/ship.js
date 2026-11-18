@@ -4,7 +4,7 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, readTextFile, appHome } from "herdr";
-import { MONO, tint, plural, clock, spanClock, sectionHeading, stateColor } from "./common.js";
+import { MONO, tint, plural, clock, spanClock, sectionHeading, stateColor, proofBrowser } from "./common.js";
 import { answerButton } from "./needs.js";
 
 /** Where a task's proof lives: what Shepherd recorded, else the conventional folder. */
@@ -76,7 +76,7 @@ export function renderPrCard(m, task, t) {
       time: spanClock(c.startedAt, c.completedAt),
     })),
     ...(ci ? [{ state: resultState(ci), name: "CI", cmd: stageSetting("ci", "command"), meta: ci.note || ci.result, time: runTime(ci) }] : []),
-    ...(proof ? [{ state: resultState(proof), name: "Proof", cmd: stageSetting("proof", "browser") || "headless browser", meta: proof.note || proof.result, time: runTime(proof) }] : []),
+    ...(proof ? [{ state: resultState(proof), name: "Proof", cmd: proofBrowser(m.settings().stages?.proof), meta: proof.note || proof.result, time: runTime(proof) }] : []),
   ];
   const failing = checks.filter((c) => c.state === "fail").length;
   const running = checks.filter((c) => c.state === "run").length;
@@ -137,11 +137,10 @@ export function renderProof(m, task, t) {
   if (p.error) return empty(p.error);
   if (p.none) return empty("Screenshots, checks and a recording show up here when the task reaches Proof.");
   const heading = (text) => sectionHeading(t, text);
-  const browser = m.settings().stages?.proof?.browser;
 
-  return v_flex().id("proof-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).py(16).pb(120).gap(16)
+  return v_flex().id("proof-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(18).py(16).gap(16)
     .child(v_flex()
-      .child(div().pb(6).child(heading(`CHECKS · ${String(browser || "headless browser").toUpperCase()}`)))
+      .child(div().pb(6).child(heading(`CHECKS · ${proofBrowser(m.settings().stages?.proof).toUpperCase()}`)))
       .when(p.checks.length === 0, (el) => el.child(div().py(6).border_t(1).border_color(t.border).text_color(t.dim).child("No checks recorded.")))
       .children(p.checks.map((c, i) => h_flex().id(`pc-${i}`).gap(10).py(6).items_start().border_t(1).border_color(t.border)
         .child(div().w(16).flex_none().font_family(MONO).text_color(stateColor(t, c.pass ? "pass" : "fail")).child(c.pass ? "✓" : "✕"))

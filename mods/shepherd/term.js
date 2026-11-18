@@ -209,7 +209,7 @@ export function renderTerm(m, task, t) {
   const term = tt?.mirror?.taskId === task.id ? tt.mirror : null;
   const { address, state } = termState(m, task);
   const lines = term?.lines ?? (tt?.last?.address === address ? tt.last.lines : null);
-  const root = v_flex().id("term-tab").flex_1().min_h(0).p(14).pb(120).gap(8);
+  const root = v_flex().id("term-tab").flex_1().min_h(0).p(14).gap(8);
 
   // Not live: it ended. The core may list it as finished or not at all; another machine's terminal
   // it doesn't list may only be out of reach, so that one isn't running as far as this window knows.

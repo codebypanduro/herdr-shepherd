@@ -131,8 +131,9 @@ export function renderWorkflow(m) {
       .child(row(t, "08", title(t, "Proof"), "Tests the app in a headless browser and records what it saw.",
         v_flex().gap(6).items_start()
           .child(check(t, "wf-headless", "Headless browser run", proof.headless !== false, set(["stages", "proof", "headless"], proof.headless === false)))
-          .child(check(t, "wf-shots", "Screenshots", proof.screenshots !== false, set(["stages", "proof", "screenshots"], proof.screenshots === false)))
-          .child(check(t, "wf-video", "Screen recording", proof.recording !== false, set(["stages", "proof", "recording"], proof.recording === false)))))
+          // Without a browser run there are no screenshots or recording (PROMPT): greyed while it's off.
+          .child(check(t, "wf-shots", "Screenshots", proof.screenshots !== false, set(["stages", "proof", "screenshots"], proof.screenshots === false), { disabled: proof.headless === false }))
+          .child(check(t, "wf-video", "Screen recording", proof.recording !== false, set(["stages", "proof", "recording"], proof.recording === false), { disabled: proof.headless === false }))))
       .child(row(t, "↻", title(t, "Max build loops"), "Implement → review → CI → proof. After this, Shepherd asks you.",
         h_flex().gap(4).children([1, 2, 3, 4, 5].map((n) => chip(t, `wf-loops-${n}`, String(n), n === (wf.maxLoops ?? MAX_LOOPS), set(["maxLoops"], n))))))
       .child(row(t, "!", title(t, "When an agent needs you"), alerts.phone && !alerts.ntfy ? "Phone push needs alerts.ntfy (an ntfy.sh topic) in workflow.json."

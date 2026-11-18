@@ -616,8 +616,8 @@ export default class Shepherd extends View {
   }
 
   /** The newest thing that happened, for the bar: a stage run's start or result ({task: "T-2",
-   *  text: "code review fail · 1 finding", result: "fail"}) or a question asked ({…, text: "asks: …",
-   *  result: "ask"}). The bar tints the task id by `result`, as the History does. */
+   *  text: "code review fail · 1 finding", result: "fail"}), an open question ({…, text: "asks: …",
+   *  result: "ask"}) or an answer ({…, text: "you answered: Merge", result: "done"}). The bar tints the task id by `result`, as the History does. */
   lastEvent() {
     let best = null;
     const take = (at, ev) => { if (!best || at > best.at) best = { at, ...ev }; };
@@ -627,7 +627,11 @@ export default class Shepherd extends View {
           { task: task.id, result: r.result, text: `${STAGES[r.stage]?.title.toLowerCase() ?? r.stage} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
       }
     }
-    for (const q of this.state().questions ?? []) take(Date.parse(q.asked ?? "") || 0, { task: q.task, result: "ask", text: `asks: ${q.text}` });
+    // A question is an event when asked (only while it's open) and when answered ("you answered: Merge", done green).
+    for (const q of this.state().questions ?? []) {
+      if (q.answer == null) take(Date.parse(q.asked ?? "") || 0, { task: q.task, result: "ask", text: `asks: ${q.text}` });
+      else take(Date.parse(q.answered ?? q.asked ?? "") || 0, { task: q.task, result: "done", text: `you answered: ${q.answer}` });
+    }
     return best;
   }
 
