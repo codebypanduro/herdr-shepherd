@@ -57,6 +57,10 @@ export function screenLines(text) {
 /** The main views, in the tab bar's order. */
 export const VIEW_LIST = [["board", "Board"], ["pipeline", "Pipeline"], ["deps", "Dependencies"], ["needs", "Needs you"]];
 export const VIEWS = VIEW_LIST.map(([k]) => k);
+/** The board's keys the palette shows as chips: G then a letter for a view, and plain letters that
+ *  open an overlay (main.js boardKey reads both). */
+export const GO_KEYS = { b: "board", p: "pipeline", d: "deps", n: "needs" };
+export const LETTER_KEYS = { n: "new-space", f: "new-folder", w: "workflow", u: "usage" };
 export const MAX_LOOPS = 3;
 export const MONO = "JetBrains Mono";
 

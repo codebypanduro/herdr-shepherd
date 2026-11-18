@@ -13,7 +13,7 @@ import { folders, folderOf, setFolder } from "./sidebar.js";
 import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, checkStartable, openSetup } from "./ui.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
-const MODELS = ["opus", "sonnet", "haiku"];
+export const MODELS = ["opus", "sonnet", "haiku"];
 /** The Grill stage's skills: the default (common.js, /grill-with-docs, which also keeps a glossary and
  *  decisions) and /grill-me. */
 const GRILL_SKILLS = [STAGES.grill.skill, "/grill-me"];
@@ -66,23 +66,29 @@ async function reloadWorkflow(m) {
   if (r.error) m.wf.error = r.error;
 }
 
-/** Sets one key path in the person's workflow.json, reloads, and tells the Shepherds here. */
+/** Sets one key path in the person's workflow.json, then `before()` (Workflow settings re-reads it),
+ *  tells the Shepherds here, and reloads the copy's shown repo. Resolves with an error line, or null;
+ *  never rejects. The palette's Workflow rows use it too (through the board copy: shepherd.workflow-set). */
+export async function writeWorkflow(m, path, value, before = null) {
+  try {
+    const h = await shepherdHome(m);
+    if (!h) return "mods/shepherd isn't inside a checkout with shepherd/: no workflow file to write.";
+    await editJson(m, h.workflow, null, (o) => {
+      let at = o;
+      for (const k of path.slice(0, -1)) at = (at[k] = { ...(at[k] ?? {}) });
+      at[path[path.length - 1]] = value;
+    }, h.example);
+    if (before) await before();
+    tellWorkflowChanged(h.workflow);
+    const repo = m.repo();
+    if (repo) await m.load(repo);
+    return null;
+  } catch (e) { return `workflow.json: ${e?.message ?? e}`; }
+}
+
 function setWorkflow(m, cx, path, value) {
   cx.spawn(async (cx) => {
-    const h = await shepherdHome(m);
-    if (!h) { m.wf.error = "mods/shepherd isn't inside a checkout with shepherd/: no workflow file to write."; cx.notify(); return; }
-    try {
-      await editJson(m, h.workflow, null, (o) => {
-        let at = o;
-        for (const k of path.slice(0, -1)) at = (at[k] = { ...(at[k] ?? {}) });
-        at[path[path.length - 1]] = value;
-      }, h.example);
-      m.wf.error = null;
-      await reloadWorkflow(m);
-      tellWorkflowChanged(h.workflow);
-      const repo = m.repo();
-      if (repo) await m.load(repo);
-    } catch (e) { m.wf.error = `workflow.json: ${e.message ?? e}`; }
+    m.wf.error = await writeWorkflow(m, path, value, () => reloadWorkflow(m));
     cx.notify();
   });
 }
