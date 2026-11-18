@@ -38,7 +38,6 @@ import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
 
 const STAGES = ["triage", "grill", "spec", "tickets", "implement", "review", "ci", "proof", "merge", "done"];
 const STATUSES = ["working", "blocked", "queued", "paused", "parked", "done"];
