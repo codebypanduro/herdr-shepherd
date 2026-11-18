@@ -14,7 +14,7 @@ import {
 } from "herdr";
 import {
   TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
-  SCOPE, localId, machineOf, palette, mins, tint, recAnswer, pendingId, refOf, parseRef,
+  SCOPE, PENDING, REMOTE_MS, localId, machineOf, palette, mins, tint, recAnswer, pendingId, refOf, parseRef,
   currentTab,
 } from "./common.js";
 import { renderBoard } from "./board.js";
@@ -43,7 +43,6 @@ import { renderSetup, renderNewTab, initSetup } from "./start.js";
 import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } from "./toast.js";
 
 const REFRESH_MS = 5000;
-const PENDING = "shepherd.pending"; // question ids answered here that tasks.json hasn't caught up with
 const ALERTED = "shepherd.alerted"; // "<repo key>#<question id>" already alerted
 const SENT_TEXT = "shepherd.sentText"; // "<repo key>#<question id>" → the answer text sent from here (History shows it at once)
 const ANSWERED = "shepherd.answered"; // "<repo key>#<question id>" answered here (never pruned by load; toasts read it)
@@ -61,7 +60,6 @@ const QUEUE_IDLE_MS = 5000; // queued lines go once Shepherd has been idle (or d
 const QUEUE_FALLBACK_MS = 90000; // a Shepherd that never reports a status gets queued lines after this
 const QUEUE_CLAIM_MS = 60000; // a copy sending a line holds it this long, so two copies never send it twice
 const REMOTE_FRESH_MS = 4000; // the shown space on another machine: one read per 5 s tick, whichever copy asks first
-const REMOTE_MS = 30000; // every other space on another machine (All spaces, the sidebar's badges)
 const EMPTY = Object.freeze({ tasks: [], questions: [], chat: [], alerts: {} });
 // Copies that show every Shepherd space in All spaces; the others (detail, steer, terminal window)
 // show one task's space.
@@ -106,7 +104,7 @@ function tagged(d, sid) {
   let x = bySpace.get(sid);
   if (!x) {
     const mark = (o) => ({ ...o, _sid: sid });
-    x = { ...d, sid,
+    x = { ...d, _sid: sid,
       tasks: (d.tasks ?? []).map((t) => ({ ...t, _sid: sid, _ref: refOf(sid, t.id) })),
       questions: (d.questions ?? []).map(mark),
       chat: (d.chat ?? []).map(mark) };
@@ -139,6 +137,7 @@ export default class Shepherd extends View {
     this.since = {}; // address -> { stage, since }: label-only cards' time in stage
     this.data = {}; // repo key -> { tasks, questions, alerts, error? }
     this.watching = new Set();
+    this.loadedAt = {}; // repo key -> when load() last ran for it
     this.gitCache = {}; // "<repo key>#<task id>" -> { git, diffs: {path: text}, files: {path: {text, added}}, ui, loading }
     // Needs you's reply fields. No placeholder of their own: it differs by the question's kind, and
     // InputState can't change one, so needs.js draws it under the empty field (hence the redraw on change).
@@ -253,7 +252,7 @@ export default class Shepherd extends View {
   space() {
     const p = props() ?? {};
     const ctx = p.space && ["steer", "term", "termfoot"].includes(p.panel) ? p.space
-      : p.panel === "detail" && shared(SCOPE) === "all" ? parseRef(String(shared(SELECTED) ?? "").slice(5)).sid : null;
+      : p.panel === "detail" && shared(SCOPE) === "all" ? parseRef(this.selectedRef() ?? "").sid : null;
     return (ctx && this.spaceById(ctx)) || this.shownSpace();
   }
 
@@ -264,8 +263,11 @@ export default class Shepherd extends View {
 
   spaceById(id) { return id ? spaces().find((s) => s.id === id) ?? null : null; }
 
-  /** A task's, question's or chat line's space (marked `_sid` when read), else this copy's. */
+  /** A task's, question's, card's, event's or chat line's space (each carries it as `_sid`), else this copy's. */
   spaceOf(x) { return x?._sid ? this.spaceById(x._sid) : this.space(); }
+
+  /** The space's name to tag a card, question or line with while every space shows, else null. */
+  spaceTag(x) { return this.isAll() && x?._sid ? this.spaceById(x._sid)?.name ?? null : null; }
 
   /** All spaces is on and this copy shows every space (the board, Needs you, bar, tab bar, History, digest). */
   isAll() {
@@ -276,8 +278,21 @@ export default class Shepherd extends View {
   /** The spaces this copy shows: every space with a Shepherd plus the shown one (All spaces), else this copy's one. */
   scopeSpaces(all = terminals()) {
     if (!this.isAll()) { const s = this.space(); return s ? [s] : []; }
+    return this.allSpaces(all);
+  }
+
+  /** What All spaces shows: the shown space and every space with a live Shepherd, one per repo. The
+   *  sidebar's All spaces badge counts the same ones. */
+  allSpaces(all = terminals()) {
+    // One space per repo (two spaces on one folder would show every card twice); the shown one first.
     const shown = this.shownSpace();
-    return spaces().filter((s) => s.id === shown?.id || this.shepherd(s, all));
+    const repos = new Set();
+    return [shown, ...spaces().filter((s) => s.id !== shown?.id && this.shepherd(s, all))].filter((s) => {
+      const key = s && this.repo(s, all)?.key;
+      if (!s || (key && repos.has(key))) return false;
+      if (key) repos.add(key);
+      return true;
+    });
   }
 
   /** The repos of scopeSpaces, each once. */
@@ -331,7 +346,7 @@ export default class Shepherd extends View {
     return {
       tasks: parts.flatMap((x) => x.tasks), questions: parts.flatMap((x) => x.questions), chat: parts.flatMap((x) => x.chat),
       alerts: shown.alerts, settings: shown.settings,
-      error: err ? `${this.spaceById(err.sid)?.name ?? err.sid}: ${err.error}` : null,
+      error: err ? `${this.spaceById(err._sid)?.name ?? err._sid}: ${err.error}` : null,
     };
   }
 
@@ -347,8 +362,8 @@ export default class Shepherd extends View {
   scopeName() { return this.isAll() ? "all spaces" : this.space()?.name ?? "—"; }
 
   /** The workflow settings in force for a space, the shown one by default (defaults until loaded). */
-  settings(space = this.space()) {
-    return this.spaceState(space).settings ?? { maxLoops: MAX_LOOPS, limits: LIMITS, stuckMinutes: STUCK_MIN, stages: {} };
+  settings(space = this.space(), all = undefined) {
+    return this.spaceState(space, all).settings ?? { maxLoops: MAX_LOOPS, limits: LIMITS, stuckMinutes: STUCK_MIN, stages: {} };
   }
 
   // ---- loading ---------------------------------------------------------------------------
@@ -362,8 +377,9 @@ export default class Shepherd extends View {
     const repos = this.isAll() ? this.scopeRepos(all) : shown ? [shown] : [];
     for (const repo of repos) {
       const isShown = repo.key === shown?.key;
-      // A watched folder here reloads on change: the tick only reloads the shown space's (as before).
-      if (!isShown && !repo.machine && this.watching.has(repo.key) && repo.key in this.data) continue;
+      // A watched folder here reloads on change; the tick reloads it only every REMOTE_MS, for its
+      // settings (workflow.json lives in the shepherd checkout, outside the watched .herdr).
+      if (!isShown && !repo.machine && this.watching.has(repo.key) && Date.now() - (this.loadedAt[repo.key] ?? 0) < REMOTE_MS) continue;
       const maxAge = !repo.machine ? 0 : isShown ? REMOTE_FRESH_MS : REMOTE_MS;
       // Each load gets its own cx: a timer's cx is only good during its callback.
       cx.spawn(async (cx) => { await this.load(repo, maxAge); this.alert(repo); cx.notify(); });
@@ -430,10 +446,12 @@ export default class Shepherd extends View {
    *  made less than this long ago is used instead (sharedRead). */
   async load(repo, maxAge = 0) {
     const prev = this.data[repo.key] ?? { tasks: [], questions: [], alerts: {} };
+    this.loadedAt[repo.key] = Date.now();
     const raw = repo.machine
       ? await sharedRead(repo.key, maxAge, () => this.readRepo(repo), READ_PANELS.includes(props()?.panel))
       : await this.readRepo(repo);
     // A read that failed keeps all it had (tasks, chat, settings), with the error in the header.
+    this.frame = null; // the data changes below (after the await): drop this turn's memos
     if (raw.failed) { this.data[repo.key] = { ...prev, error: raw.error }; return; }
     let next;
     if (raw.error) {
@@ -484,8 +502,21 @@ export default class Shepherd extends View {
   }
 
   /** Open questions of the spaces this copy shows, oldest first, each with its task as taskObj and
-   *  `key` "<space id>/<question id>" (ids repeat across spaces). */
-  questions() {
+   *  `_ref` "<space id>/<question id>" (ids repeat across spaces). */
+  questions() { return this.memo("questions", () => this.readQuestions()); }
+
+  /** Values worked out once per synchronous turn (a render, or a handler): render asks for the
+   *  questions per card. A microtask drops them, and so do load() and answer(), which change them. */
+  memo(key, make) {
+    if (!this.frame) {
+      const f = (this.frame = new Map());
+      Promise.resolve().then(() => { if (this.frame === f) this.frame = null; });
+    }
+    if (!this.frame.has(key)) this.frame.set(key, make());
+    return this.frame.get(key);
+  }
+
+  readQuestions() {
     const all = terminals();
     const pending = new Set(shared(PENDING) ?? []);
     const out = [];
@@ -496,7 +527,7 @@ export default class Shepherd extends View {
       const { grillNo } = this.questionIndex(questions);
       for (const q of questions) {
         if (q.answer != null || pending.has(pendingId(repo.key, q.id))) continue;
-        out.push({ ...q, key: refOf(space.id, q.id), taskObj: tasks.find((x) => x.id === q.task) ?? null,
+        out.push({ ...q, _ref: refOf(space.id, q.id), taskObj: tasks.find((x) => x.id === q.task) ?? null,
           // A grilling question's number in its task's grilling (they come one at a time, no limit).
           grillNo: grillNo.get(q.id) ?? null });
       }
@@ -506,19 +537,29 @@ export default class Shepherd extends View {
 
   /** The open questions of one task (in its own space: ids repeat across spaces). */
   questionsOf(task) {
-    return task ? this.questions().filter((q) => q.task === task.id && (q._sid ?? null) === (task._sid ?? null)) : [];
+    if (!task) return [];
+    const byTask = this.memo("questionsByTask", () => {
+      const m = new Map();
+      for (const q of this.questions()) {
+        const k = refOf(q._sid, q.task);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(q);
+      }
+      return m;
+    });
+    return byTask.get(refOf(task._sid ?? null, task.id)) ?? [];
   }
 
-  questionById(key) { return key ? this.questions().find((q) => q.key === key) ?? null : null; }
+  questionById(ref) { return ref ? this.questions().find((q) => q._ref === ref) ?? null : null; }
 
-  /** The reply field for a question (by its key); questions keep their slot while open. */
-  replyInput(key) {
-    let slot = this.slots.find((s) => s.q === key);
+  /** The reply field for a question (by its `_ref`); questions keep their slot while open. */
+  replyInput(ref) {
+    let slot = this.slots.find((s) => s.q === ref);
     if (!slot) {
-      const open = new Set(this.questions().map((q) => q.key));
+      const open = new Set(this.questions().map((q) => q._ref));
       slot = this.slots.find((s) => !s.q || !open.has(s.q));
       if (!slot) return null;
-      slot.q = key;
+      slot.q = ref;
       slot.input.set_value("");
     }
     return slot.input;
@@ -537,6 +578,7 @@ export default class Shepherd extends View {
     const line = direct ? `answer ${q.id}: ${answer} (sent to ${asker})` : `answer ${q.id}: ${answer}`;
     // Only a sent answer is pending; a queued one shows as open until it goes.
     if (this.tell(line, q.task ?? null, space) !== "sent") return;
+    this.frame = null;
     if (direct) hc(["send", space.machine ? `${space.machine}/${asker}` : asker, `${q.ref} answer: ${answer}`]);
     const id = pendingId(repo.key, q.id);
     setShared(PENDING, [...(shared(PENDING) ?? []), id]);
@@ -570,7 +612,7 @@ export default class Shepherd extends View {
     if (!told) return;
     if (told === "queued") { this.askInput.set_value(""); delete this.askDrafts[ref]; cx.notify(); return; } // shown from QUEUED
     // Shown at once; chat.jsonl's copy replaces it (prunePending, for that repo), or it's marked when recording failed.
-    const p = { at: new Date().toISOString(), from: "you", text: line, task: task.id, ref, repo: this.repo(space)?.key ?? null, pending: true };
+    const p = { at: new Date().toISOString(), from: "you", text: line, task: task.id, _ref: ref, repo: this.repo(space)?.key ?? null, pending: true };
     this.askPending.push(p);
     this.lastRecord?.then((err) => { if (err) { p.failed = err; cx.notify(); } });
     this.askInput.set_value("");
@@ -604,7 +646,7 @@ export default class Shepherd extends View {
   taskChat(task) {
     const space = this.spaceOf(task);
     const mine = (c) => c.task === task.id && (c._sid ?? null) === (space?.id ?? null);
-    return [...this.spaceState(space).chat.filter(mine), ...(this.askPending ?? []).filter((p) => p.ref === task._ref),
+    return [...this.spaceState(space).chat.filter(mine), ...(this.askPending ?? []).filter((p) => p._ref === task._ref),
       ...(space ? this.queuedChat(space) : []).filter(mine)];
   }
 
@@ -658,11 +700,9 @@ export default class Shepherd extends View {
   spaceCtx(space, all = terminals()) {
     const st = this.spaceState(space, all);
     return {
-      space, tasks: st.tasks, settings: this.settings(space),
+      space, tasks: st.tasks, settings: this.settings(space, all),
       doneIds: new Set(st.tasks.filter((x) => x.stage === "done").map((x) => x.id)),
       answers: this.questionIndex(st.questions).answers,
-      // The space's name on its cards while every space shows (ids repeat across spaces).
-      tag: this.isAll() ? space?.name ?? null : null,
     };
   }
 
@@ -702,10 +742,9 @@ export default class Shepherd extends View {
       address,
       live: term?.state === "live",
       key: `task-${task._ref ?? task.id}`,
-      ref: task._ref ?? task.id,
+      _ref: task._ref ?? task.id,
+      _sid: task._sid ?? null,
       id: task.id,
-      sid: task._sid ?? null,
-      spaceTag: ctx.tag,
       title: task.title ?? task.id,
       stage: STAGES[task.stage] ? task.stage : "spec",
       // The run's own skill (Spec: /wayfinder for a big one), else the workflow's for the stage
@@ -784,8 +823,7 @@ export default class Shepherd extends View {
         live: x.state === "live",
         key: `term-${x.address}`,
         id: l["shepherd.task"] ?? x.name ?? x.address,
-        sid: space?.id ?? null,
-        spaceTag: this.isAll() ? space?.name ?? null : null,
+        _sid: space?.id ?? null,
         title: l["shepherd.title"] ?? x.title ?? x.name ?? (x.argv ?? []).join(" "),
         stage,
         skill: this.skillOf(stage, this.settings(space ?? this.space())),
@@ -812,13 +850,13 @@ export default class Shepherd extends View {
     for (const task of this.state().tasks ?? []) {
       for (const r of task.history ?? []) {
         take(Date.parse(r.end ?? r.start ?? "") || 0,
-          { task: task.id, sid: task._sid, result: r.result, text: `${STAGES[r.stage]?.title.toLowerCase() ?? r.stage} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
+          { task: task.id, _sid: task._sid, result: r.result, text: `${STAGES[r.stage]?.title.toLowerCase() ?? r.stage} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
       }
     }
     // A question is an event when asked (only while it's open) and when answered ("you answered: Merge", done green).
     for (const q of this.state().questions ?? []) {
-      if (q.answer == null) take(Date.parse(q.asked ?? "") || 0, { task: q.task, sid: q._sid, result: "ask", text: `asks: ${q.text}` });
-      else take(Date.parse(q.answered ?? q.asked ?? "") || 0, { task: q.task, sid: q._sid, result: "done", text: `you answered: ${q.answer}` });
+      if (q.answer == null) take(Date.parse(q.asked ?? "") || 0, { task: q.task, _sid: q._sid, result: "ask", text: `asks: ${q.text}` });
+      else take(Date.parse(q.answered ?? q.asked ?? "") || 0, { task: q.task, _sid: q._sid, result: "done", text: `you answered: ${q.answer}` });
     }
     return best;
   }
@@ -1044,7 +1082,7 @@ export default class Shepherd extends View {
     if (task && this.tell(`status ${task.id}?`, task.id, this.spaceOf(task))) this.toggleHistory(true);
   }
 
-  /** Opens a task in the detail pane by its ref (task._ref, card.ref). */
+  /** Opens a task in the detail pane by its ref (task._ref, card._ref). */
   openTask(ref) {
     setShared(SELECTED, `task-${ref}`);
     run("layout.show", { id: "detail" });
@@ -1166,7 +1204,10 @@ export default class Shepherd extends View {
 
   /** Needs you, in another space when `spaceId` names one (a toast's Open). */
   openNeeds(spaceId = null) {
-    if (spaceId && spaceId !== this.space()?.id && spaces().some((s) => s.id === spaceId)) run("space.select", { id: spaceId });
+    if (spaceId && spaces().some((s) => s.id === spaceId)) {
+      if (spaceId !== this.space()?.id) run("space.select", { id: spaceId });
+      setScope(false, spaceId); // a toast's Open shows that space alone, as the design does
+    }
     setShared(VIEW, "needs");
   }
 
@@ -1183,7 +1224,7 @@ export default class Shepherd extends View {
   replyNext(cx) {
     this.openNeeds();
     const q = this.questions()[0];
-    const input = q ? this.replyInput(q.key) : null;
+    const input = q ? this.replyInput(q._ref) : null;
     if (input) cx.spawn(async () => { input.focus(); });
   }
 
@@ -1338,10 +1379,30 @@ export default class Shepherd extends View {
 
   // ---- task detail ---------------------------------------------------------------------
 
-  selectedTask() {
-    // props.task opens a task without a click (a layout or overlay can pin one).
+  /** The open task's ref: the selection, else props.task (a layout or overlay can pin one). */
+  selectedRef() {
     const key = shared(SELECTED) ?? (props()?.task ? `task-${props().task}` : null);
-    return typeof key === "string" && key.startsWith("task-") ? this.taskById(key.slice(5)) : null;
+    return typeof key === "string" && key.startsWith("task-") ? key.slice(5) : null;
+  }
+
+  selectedTask() { return this.taskById(this.selectedRef()); }
+
+  /** The board copy, when the shown space changes (the sidebar, Herdr's own switcher, a toast): in
+   *  This space an open task from another space is closed, as the sidebar does when All goes off.
+   *  Render only notices; the change runs after the frame. */
+  dropStaleSelection(cx) {
+    const shown = this.shownSpace()?.id ?? null;
+    if (shown === this.lastShown) return;
+    this.lastShown = shown;
+    if (this.isAll()) return;
+    const sid = parseRef(this.selectedRef() ?? "").sid;
+    if (!sid || sid === shown) return;
+    cx.spawn(async (cx) => {
+      await cx.sleep(0); // a spawned task starts inside render: let the frame finish first
+      if (shared(SCOPE) === "all" || parseRef(this.selectedRef() ?? "").sid !== sid) return;
+      setShared(SELECTED, null);
+      run("layout.hide", { id: "detail" });
+    });
   }
 
   tint(c, a) { return tint(c, a); }
@@ -1445,6 +1506,7 @@ export default class Shepherd extends View {
     if (isToast(p)) return renderToast(this);
     // A space switch or All spaces shows another repo: load it now rather than on the next tick.
     this.ensureLoaded(cx);
+    if (!p.panel) this.dropStaleSelection(cx);
     if (p.panel === "status") return this.renderStatus();
     if (p.panel === "spaces") return renderSidebar(this);
     if (p.panel === "plus") return renderPlus();

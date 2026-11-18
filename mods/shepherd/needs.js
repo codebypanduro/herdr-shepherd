@@ -87,11 +87,11 @@ export function questionCard(m, q, t, { id = "q", now = Date.now(), viewTask = t
     ? `${STAGES[task.stage]?.title ?? task.stage}${["implement", "review", "ci", "proof"].includes(task.stage) ? ` · loop ${task.loop ?? 1}/${task.maxLoops ?? 3}` : ""}${q.grillNo ? ` · question ${q.grillNo}` : ""}`
     : "";
   const finding = (task?.findings ?? []).filter((f) => f.state !== "resolved").slice(-1)[0];
-  const input = m.replyInput(q.key);
-  // Ids repeat across spaces: elements go by the question's key ("<space id>/<id>").
-  const qk = q.key ?? q.id;
+  const input = m.replyInput(q._ref);
+  // Ids repeat across spaces: elements go by the question's ref ("<space id>/<id>").
+  const qk = q._ref ?? q.id;
   // All spaces: the question's space after its task's title (the design's spaceTag).
-  const tag = m.isAll() ? m.spaceOf(q)?.name ?? null : null;
+  const tag = m.spaceTag(q);
   return v_flex().id(`${id}-${qk}`).w_full().max_w(760).gap(10).p(14).rounded(8)
     .bg(t.surface).border(1).border_color(t.blocked)
     .child(h_flex().gap(8).items_center()

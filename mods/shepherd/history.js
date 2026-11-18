@@ -14,22 +14,22 @@ const toneOf = (t, result) => (result === "pass" ? t.done : result === "fail" ? 
 /** Every line of the History, sorted by time. */
 export function historyItems(m) {
   const { tasks = [], questions = [], chat = [] } = m.state();
-  // Every item keeps its space (`sid`): All spaces tags each line with it.
-  const items = [...chat, ...m.queuedChat()].map((c) => ({ at: Date.parse(c.at) || 0, kind: c.from === "you" ? "you" : "shepherd", text: c.text, task: c.task ?? null, queued: Boolean(c.queued), sid: c._sid ?? null }));
+  // Every item keeps its space (`_sid`): All spaces tags each line with it.
+  const items = [...chat, ...m.queuedChat()].map((c) => ({ at: Date.parse(c.at) || 0, kind: c.from === "you" ? "you" : "shepherd", text: c.text, task: c.task ?? null, queued: Boolean(c.queued), _sid: c._sid ?? null }));
   for (const task of tasks) {
     for (const r of task.history ?? []) {
       const title = STAGES[r.stage]?.title ?? r.stage;
       const start = Date.parse(r.start ?? "") || 0;
       const who = [r.model].filter(Boolean).join(" ");
-      items.push({ at: start, kind: "event", task: task.id, sid: task._sid ?? null, result: "running",
+      items.push({ at: start, kind: "event", task: task.id, _sid: task._sid ?? null, result: "running",
         text: `${title} started${r.loop > 1 ? ` · loop ${r.loop}` : ""}${who ? ` (${who})` : ""}` });
       if (r.end) {
-        items.push({ at: Date.parse(r.end) || start, kind: "event", task: task.id, sid: task._sid ?? null, result: r.result,
+        items.push({ at: Date.parse(r.end) || start, kind: "event", task: task.id, _sid: task._sid ?? null, result: r.result,
           text: `${title} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
       }
     }
   }
-  for (const q of questions) items.push({ at: Date.parse(q.asked) || 0, kind: "question", q, task: q.task, sid: q._sid ?? null });
+  for (const q of questions) items.push({ at: Date.parse(q.asked) || 0, kind: "question", q, task: q.task, _sid: q._sid ?? null });
   return items.sort((a, b) => a.at - b.at);
 }
 
@@ -46,7 +46,7 @@ export function renderHistory(m) {
   const mono = (el) => el.font_family(MONO).text_size(12.5).line_height(1.55);
   // All spaces: each line's space, dim, before it (the design's spaceTag).
   const isAll = m.isAll();
-  const tagOf = (it) => (isAll && it.sid ? m.spaceById(it.sid)?.name ?? it.sid : null);
+  const tagOf = (it) => m.spaceTag(it);
   const line = (it, i) => {
     if (it.kind === "you") {
       return mono(h_flex().id(`h-${i}`).gap(8).px(10).py(8).rounded(5).bg(t.raised).items_start())

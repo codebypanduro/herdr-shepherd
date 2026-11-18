@@ -23,6 +23,8 @@ export const HISTORY_OPEN = "shepherd.historyOpen"; // the open History's overla
 export const STEER_OPEN = "shepherd.steerOpen"; // the open steer menu's overlay id (no peek over it)
 export const TAB = "shepherd.detailTab"; // the task detail's open tab
 export const FILTERS = "shepherd.filters"; // the board and Pipeline's status filters: ["working", "blocked", "done"]
+export const PENDING = "shepherd.pending"; // "<repo key>#<question id>" answered here that tasks.json hasn't caught up with
+export const REMOTE_MS = 30000; // a space on another machine that isn't shown is read this often (All spaces, the sidebar's badges)
 export const SCOPE = "shepherd.scope"; // "all": the board, Needs you, History, bar, tab bar and digest read every Shepherd space
 
 /** A task or question across spaces: "<space id>/<id>" (task ids hold no "/"; remote space ids do,

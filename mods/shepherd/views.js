@@ -7,8 +7,8 @@ import { STAGES, ORDER, MONO, SELECTED, palette, stuckColor, tint, statusColor, 
 
 /** Rows react like cards: click opens the task, right-click steers it. */
 const rowActions = (m, el, c) => el
-  .on_click(() => { m.kf = c.key; m.openTask(c.ref); })
-  .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c.ref); });
+  .on_click(() => { m.kf = c.key; m.openTask(c._ref); })
+  .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c._ref); });
 
 export function renderPipeline(m) {
   const t = palette();
@@ -47,7 +47,7 @@ export function renderPipeline(m) {
     .child(v_flex().w(TASK_W).flex_none().min_w(0).gap(3).pr(8)
       .child(h_flex().gap(8).items_center().min_w(0)
         .child(div().flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
-        .when(Boolean(c.spaceTag), (el) => el.child(div().flex_none().max_w(80).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(c.spaceTag)))
+        .when(Boolean(m.spaceTag(c)), (el) => el.child(div().flex_none().max_w(80).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(m.spaceTag(c))))
         .child(div().flex_1().min_w(0).truncate().text_size(13).child(c.title)))
       .child(div().truncate().text_size(11.5).text_color(c.stuck ? stuckColor(t) : c.status === "blocked" ? t.blocked : t.muted)
         .child(c.stuckText ?? c.note)))
@@ -85,10 +85,10 @@ export function chains(tasks) {
 export function renderDeps(m) {
   const t = palette();
   const cards = m.cards().filter((c) => c.task);
-  const byRef = new Map(cards.map((c) => [c.ref, c]));
+  const byRef = new Map(cards.map((c) => [c._ref, c]));
   // Chains stay inside a space: blockedBy names ids of the task's own space (All spaces shows several).
   const bySpace = new Map();
-  for (const c of cards) { if (!bySpace.has(c.sid)) bySpace.set(c.sid, []); bySpace.get(c.sid).push(c.task); }
+  for (const c of cards) { if (!bySpace.has(c._sid)) bySpace.set(c._sid, []); bySpace.get(c._sid).push(c.task); }
   const rows = [...bySpace.values()].flatMap((tasks) => chains(tasks)).map((path) => {
     const nodes = path.map((x) => byRef.get(x._ref ?? x.id));
     // What holds the chain up: its first task that isn't done.
@@ -103,12 +103,12 @@ export function renderDeps(m) {
     return v_flex().id(id).w(210).gap(6).px(10).py(9).rounded(6).cursor_pointer()
       .bg(t.raised).border(1).border_color(yours ? tint(t.blocked, 0.45) : t.border)
       .hover((s) => s.bg(t.hover))
-      .on_click(() => { m.kf = c.key; m.openTask(c.ref); })
-      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c.ref); })
+      .on_click(() => { m.kf = c.key; m.openTask(c._ref); })
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); m.openSteer(c._ref); })
       .child(h_flex().gap(6).items_center()
         .child(div().size(6).rounded(3).bg(statusColor(t, c.status)))
         .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
-        .when(Boolean(c.spaceTag), (el) => el.child(div().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(c.spaceTag)))
+        .when(Boolean(m.spaceTag(c)), (el) => el.child(div().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(m.spaceTag(c))))
         .child(div().flex_1())
         .child(div().text_size(10.5).text_color(t.muted).child(STAGES[c.stage]?.title ?? c.stage)))
       .child(div().text_size(12.5).line_height(1.35).child(c.title))

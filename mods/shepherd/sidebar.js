@@ -6,7 +6,7 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { spaces, terminals, focused, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
-import { MONO, SCOPE, SELECTED, palette, parseRef, pendingId } from "./common.js";
+import { MONO, SCOPE, SELECTED, PENDING, REMOTE_MS, palette, parseRef, pendingId } from "./common.js";
 import { machineList, machineIcon, agentIcon, usageRows, startProbes } from "./machines.js";
 import { findNewSpace } from "./dialogs.js";
 import {
@@ -16,7 +16,6 @@ import {
 const INFO_MS = 60000; // org, branch and worktree count per space
 const INFO_PARALLEL = 6; // git runs at once (remote spaces go over ssh)
 const LOCAL_MS = 5000; // tasks.json of spaces here, for the badges
-const REMOTE_MS = 30000; // and of spaces on other machines
 const NEW_SPACE_WAIT_MS = 60000;
 const AVATARS = "data/shepherd-avatars"; // under the app's home: image() reads only there
 
@@ -141,7 +140,7 @@ export function spaceCounts(m, s, all = terminals()) {
   const repo = m.repo(s, all);
   const d = repo ? m.data[repo.key] : null;
   // Answers sent from here that tasks.json hasn't recorded yet don't count (as in Needs you).
-  const pending = new Set(shared("shepherd.pending") ?? []);
+  const pending = new Set(shared(PENDING) ?? []);
   const q = (d?.questions ?? []).filter((x) => x.answer == null && !pending.has(pendingId(repo.key, x.id))).length;
   const tasks = (d?.tasks ?? []).filter((x) => x.stage !== "done" && x.status !== "parked");
   const working = tasks.some((x) => x.status === "working");
@@ -269,7 +268,8 @@ export function renderSidebar(m) {
 
   // This space | All spaces, the design's toggle at the top; All's badge is every space's open questions.
   const isAll = shared(SCOPE) === "all";
-  const allQ = all.reduce((n, s) => n + counts.get(s.id).q, 0);
+  // Over the spaces All spaces shows (live Shepherds, one per repo), so the badge matches its Needs you.
+  const allQ = m.allSpaces(terms).reduce((n, s) => n + (counts.get(s.id)?.q ?? 0), 0);
   const seg = (id, label, on, onClick, extra = null) => h_flex().id(id).flex_1().h(24).gap(6).items_center().justify_center()
     .rounded(4).cursor_pointer().text_size(12)
     .bg(on ? t.raised : t.background).text_color(on ? t.foreground : t.dim)

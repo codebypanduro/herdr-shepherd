@@ -21,8 +21,8 @@ export function renderBar(m) {
   // All spaces: questions and events come from every space (tagged with it); the line still goes to
   // the shown space's Shepherd, the last one selected.
   const isAll = m.isAll();
-  const tagOf = (x) => (isAll && x?.sid ? m.spaceById(x.sid)?.name ?? null : null);
-  const qTag = isAll && q ? m.spaceOf(q)?.name ?? null : null;
+  const tagOf = (x) => m.spaceTag(x);
+  const qTag = m.spaceTag(q);
 
   // Short options (Merge, Send back) sit on the question's line; longer ones (a grilling
   // question's) get a row of their own under it and shrink with … to fit the bar.

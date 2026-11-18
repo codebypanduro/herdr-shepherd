@@ -45,7 +45,7 @@ export function renderDigest(m) {
     .child(div().truncate().text_size(11.5).text_color(t.muted).child(label));
   const row = (key, c, meta, color, bar) => h_flex().id(key).gap(8).items_center().px(6).py(6).rounded(5).cursor_pointer()
     .hover((s) => s.bg(t.hover))
-    .on_click(() => open(c.ref))
+    .on_click(() => open(c._ref))
     .child(div().w(56).flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(c.id))
     .child(v_flex().flex_1().min_w(0).gap(3)
       .child(div().truncate().text_size(12.5).child(c.title))
