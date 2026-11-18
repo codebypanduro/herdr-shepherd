@@ -11,7 +11,7 @@
 //   sub-agents) go there; focusing another agent's pane (clicking Shepherd) takes the block.
 // A tab that holds only Shepherd or task agents (and what they started) never gets a pill.
 
-import { spaces, terminals, panes, run, shared, setShared, focused } from "herdr";
+import { terminals, panes, run, shared, setShared, focused } from "herdr";
 import { TAB, SELECTED, currentTab } from "./common.js";
 
 export const LAST_TAB = "shepherd.lastTab"; // {space id: "shepherd" | tab id}

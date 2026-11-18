@@ -36,7 +36,7 @@ import { loadPr, loadProof } from "./ship.js";
 import { renderTabBar, renderCloseTab } from "./tabbar.js";
 import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer } from "./steer.js";
-import { syncMode, syncTaskTerm, showMode, spaceTabs, modeOf, openTaskTerminal } from "./mode.js";
+import { syncMode, syncTaskTerm, showMode, modeOf, openTaskTerminal } from "./mode.js";
 import { renderDigest } from "./digest.js";
 import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders, setScope } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
@@ -1253,6 +1253,19 @@ export default class Shepherd extends View {
     if (panel === "tabs") {
       if (name === "shepherd" || name === "history") this.openShepherd(this.shownSpace(), true);
       else if (name === "focus-bar") this.openShepherd(this.shownSpace());
+      // While a pill's tab shows, the board is hidden and gets no commands: a toast's answer and Open,
+      // and the task commands, come here; those that show something go back to ✻ Shepherd first.
+      else if (this.shownSpace() && modeOf(this.shownSpace()) !== "shepherd") {
+        const back = () => showMode(this, "shepherd");
+        if (name === "answer") this.answerFromToast(arg);
+        else if (name === "needs") { back(); this.openNeeds(arg || null); }
+        else if (["open", "terminal"].includes(name)) {
+          const task = arg ? this.taskById(arg) : null;
+          if (task) { back(); this.taskCommand(name, task); }
+        } else if (name === "view" && VIEWS.includes(arg)) { back(); setShared(VIEW, arg); }
+        else if (name === "palette") { back(); this.togglePalette(arg || null); }
+        else if (name === "digest") { back(); this.toggleDigest(); }
+      }
       return;
     }
     if (panel) return;
