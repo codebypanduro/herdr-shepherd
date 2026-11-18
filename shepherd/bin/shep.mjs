@@ -8,7 +8,9 @@
 //            [--blocked-by "T-4,T-5"] [--parent T-3] [--brief "…"]                       prints the id
 //   shep ready                        queued tasks whose blockers are all done, one id per line
 //   shep start <id> <stage> [--terminal t6] [--model M] [--note "…"]      opens a stage run (status working)
-//   shep end <id> pass|fail|ask [--note "…"] [--tokens N] [--cost N]      closes the open stage run
+//   shep end <id> pass|fail|ask [--note "…"] [--tokens N]                 closes the open stage run and records the
+//                                     tokens its agent used, read from the agent's own session log (see agentTokens;
+//                                     --tokens only overrides that by hand)
 //   shep loop <id>                    next build loop; exits 2 when maxLoops is used up (ask the person)
 //   shep set <id> key=value …         stage status terminal branch worktree pr prUrl proof summary title brief blockedBy
 //                                     loop maxLoops
@@ -30,7 +32,8 @@
 //   shep say [--from shepherd|you] [--task T-3] "<text>"   a line of the History (chat.jsonl beside tasks.json)
 //   shep get <id> | shep ls
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -91,6 +94,105 @@ function openRun(t) {
   return null;
 }
 
+// Tokens a stage run's agent used, from its own session log. The run's terminal (`start --terminal`) is asked for
+// its process (`hc get`); Claude Code keeps `<config>/sessions/<pid>.json` with the session id and folder while it
+// runs, and the session's messages in `<config>/projects/<folder with every non-alphanumeric as ->/<id>.jsonl`, with
+// sub-agents in `<id>/subagents/*.jsonl`. Each API response's usage is logged once per content block, so lines are
+// counted once per message id. tokens = input + cache writes + output; cache reads (the same context read again on
+// every turn) are kept apart in `usage.cacheRead` and not counted. Only lines after an earlier run of the same
+// session ended count, so an agent kept across runs isn't counted twice. Nothing from the log is printed or kept
+// but the counts, the model and the session id. Codex agents (10j) aren't read yet.
+const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+
+function claudeSession(address) {
+  let info;
+  try {
+    info = JSON.parse(execFileSync("hc", ["get", address], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 }));
+  } catch { return null; }
+  for (const pid of [info.foreground?.pid, info.pid].filter(Boolean)) {
+    try {
+      const s = JSON.parse(readFileSync(join(claudeHome(), "sessions", `${pid}.json`), "utf8"));
+      if (s.sessionId) return { id: String(s.sessionId), cwd: s.cwd ?? null };
+    } catch {}
+  }
+  return null;
+}
+
+function sessionLog(session) {
+  const projects = join(claudeHome(), "projects");
+  const name = `${session.id}.jsonl`;
+  if (session.cwd) {
+    const dir = join(projects, session.cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+    if (existsSync(join(dir, name))) return { dir, name };
+  }
+  // A long folder name is shortened by Claude Code; look for the session in every project instead.
+  try {
+    for (const d of readdirSync(projects)) if (existsSync(join(projects, d, name))) return { dir: join(projects, d), name };
+  } catch {}
+  return null;
+}
+
+function logUsage(files, after) {
+  const seen = new Map();
+  let model = null;
+  for (const f of files) {
+    let text;
+    try { text = readFileSync(f, "utf8"); } catch { continue; }
+    for (const line of text.split("\n")) {
+      if (!line.includes('"usage"')) continue;
+      let d;
+      try { d = JSON.parse(line); } catch { continue; }
+      const m = d?.message;
+      if (d?.type !== "assistant" || !m?.usage || m.model === "<synthetic>") continue;
+      if (after && !((Date.parse(d.timestamp ?? "") || 0) > after)) continue;
+      seen.set(m.id ?? d.requestId ?? d.uuid, m.usage);
+      if (!d.isSidechain && !f.includes("/subagents/")) model = m.model ?? model;
+    }
+  }
+  const u = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+  for (const x of seen.values()) {
+    u.input += x.input_tokens ?? 0;
+    u.cacheWrite += x.cache_creation_input_tokens ?? 0;
+    u.cacheRead += x.cache_read_input_tokens ?? 0;
+    u.output += x.output_tokens ?? 0;
+  }
+  return { usage: u, tokens: u.input + u.cacheWrite + u.output, model, messages: seen.size };
+}
+
+function agentTokens(t, run) {
+  const address = run.terminal ?? t.terminal;
+  const session = (address && claudeSession(address)) ?? (run.session ? { id: run.session, cwd: run.sessionCwd ?? null } : null);
+  if (!session) return { why: address ? `${address} isn't a running Claude Code agent` : "the run has no terminal" };
+  const log = sessionLog(session);
+  if (!log) return { why: `no session log for ${session.id}` };
+  const sub = join(log.dir, session.id, "subagents");
+  let files = [join(log.dir, log.name)];
+  try { files = files.concat(readdirSync(sub).filter((f) => f.endsWith(".jsonl")).map((f) => join(sub, f))); } catch {}
+  const after = t.history.filter((r) => r !== run && r.session === session.id && r.end)
+    .reduce((n, r) => Math.max(n, Date.parse(r.end) || 0), 0);
+  return { session, ...logUsage(files, after) };
+}
+
+// Closes a run: its end, and the tokens its agent used unless given by hand.
+function closeRun(t, run, given) {
+  run.end = now();
+  delete run.cost;
+  if (given !== undefined && !Number.isNaN(given)) { run.tokens = given; return; }
+  // CI is a plain program and Ready to merge waits on the person: no agent, no tokens.
+  if (run.stage === "ci" || run.stage === "merge") return;
+  const r = agentTokens(t, run);
+  if (r.why) {
+    if (run.terminal ?? t.terminal) process.stderr.write(`shep: ${t.id} ${run.stage}: tokens not recorded: ${r.why}\n`);
+    return;
+  }
+  run.session = r.session.id;
+  if (r.session.cwd) run.sessionCwd = r.session.cwd;
+  run.tokens = r.tokens;
+  run.usage = r.usage;
+  if (!run.model && r.model) run.model = r.model;
+  console.log(`${t.id} ${run.stage}: ${r.tokens} tokens (${r.messages} messages)`);
+}
+
 const { pos, opt } = parse(process.argv.slice(2));
 const [cmd, ...args] = pos;
 const file = fileFor(opt);
@@ -140,15 +242,23 @@ switch (cmd) {
     if (!STAGES.includes(stage)) die(`start <id> <stage>; stage one of ${STAGES.join(" ")}`);
     const t = task(state, id);
     const open = openRun(t);
-    if (open) { open.end = now(); open.result = open.result ?? "pass"; }
+    if (open) { closeRun(t, open); open.result = open.result === "running" ? "pass" : open.result ?? "pass"; }
     t.stage = stage;
     delete t.wait;
     // Ready to merge waits on the person.
     t.status = stage === "done" ? "done" : stage === "merge" ? "blocked" : "working";
     if (opt.terminal) t.terminal = opt.terminal;
     if (stage !== "done") {
-      t.history.push({ loop: t.loop, stage, result: "running", note: opt.note ?? "",
-        start: now(), end: null, model: opt.model ?? null, tokens: null, cost: null });
+      const run = { loop: t.loop, stage, result: "running", note: opt.note ?? "",
+        start: now(), end: null, model: opt.model ?? null, tokens: null };
+      // The run keeps its own terminal, so its tokens are read from that agent even after another takes the task's.
+      if (typeof opt.terminal === "string") {
+        run.terminal = opt.terminal;
+        // Its session now, in case the agent is gone by the time the run ends.
+        const session = claudeSession(opt.terminal);
+        if (session) { run.session = session.id; if (session.cwd) run.sessionCwd = session.cwd; }
+      }
+      t.history.push(run);
     }
     save(file, state);
     break;
@@ -160,11 +270,9 @@ switch (cmd) {
     const t = task(state, id);
     const open = openRun(t);
     if (!open) die(`${id} has no open stage run`);
-    open.end = now();
+    closeRun(t, open, num(opt.tokens));
     open.result = result;
     if (opt.note) open.note = opt.note;
-    if (num(opt.tokens) !== undefined) open.tokens = num(opt.tokens);
-    if (num(opt.cost) !== undefined) open.cost = num(opt.cost);
     if (result === "ask") t.status = "blocked";
     save(file, state);
     break;

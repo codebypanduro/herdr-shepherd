@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens, mins, runTokens } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, kTokens, mins, runTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
@@ -39,7 +39,7 @@ export function renderDetail(m) {
   }
   const tab = TABS.includes(shared(TAB)) ? shared(TAB) : "overview";
   const runs = task.history ?? [];
-  const cost = runs.reduce((n, r) => n + (r.cost ?? 0), 0);
+  const tokens = runTokens(runs);
   const color = groupColor(t, stageGroup(task.stage));
   const stageIcon = task.stage === "merge" ? "⑃ " : task.stage === "done" ? "✓ " : "";
 
@@ -57,7 +57,7 @@ export function renderDetail(m) {
       .child(chip(`${stageIcon}${STAGES[task.stage]?.title ?? task.stage}`, color))
       .when(BUILD.includes(task.stage), (el) => el.child(
         div().font_family(MONO).text_size(11).text_color(t.muted).child(`loop ${task.loop ?? 1}/${task.maxLoops ?? 3}`)))
-      .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(money(cost)))
+      .when(tokens > 0, (el) => el.child(div().font_family(MONO).text_size(11).text_color(t.muted).child(`${kTokens(tokens)} tokens`)))
       .when(Boolean(task.terminal), (el) => el.child(
         div().id("detail-term").px(7).h(20).flex().items_center().rounded(5).bg(t.raised).cursor_pointer()
           .font_family(MONO).text_size(11).text_color(t.foreground)
@@ -90,7 +90,7 @@ export function renderDetail(m) {
 const RESULT_COLOR = (t, r) => (r === "pass" ? t.done : r === "fail" ? t.ansi1 : r === "ask" ? t.blocked : t.working);
 
 /** A timeline segment's tooltip, as the design: "Loop 2 · Code review · fail · 12m · 45k tokens · opus — 1 finding".
- *  Plan stages have no loop; a running stage reads "run"; the model goes with the tokens (no $: 10e). */
+ *  Plan stages have no loop; a running stage reads "run"; the model goes with the tokens (no $). */
 export const segmentTitle = (r, now = Date.now()) => [
   stageGroup(r.stage) === "plan" ? null : `Loop ${r.loop ?? 1}`,
   STAGES[r.stage]?.title ?? r.stage,
@@ -104,7 +104,6 @@ function overview(m, task, t) {
   const runs = task.history ?? [];
   const total = runs.reduce((n, r) => n + ms(r, now), 0) || 1;
   const tokens = runTokens(runs);
-  const cost = runs.reduce((n, r) => n + (r.cost ?? 0), 0);
   const loops = [...new Set(runs.map((r) => r.loop ?? 1))];
 
   // Segments flex by their share of the time; a 2% floor keeps short stages visible.
@@ -182,7 +181,7 @@ function overview(m, task, t) {
       .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("TIMELINE"))
       .child(h_flex().gap(6).items_end().children(loops.map(loopGroup)))
       .child(h_flex().gap(12).font_family(MONO).text_size(10.5).text_color(t.muted)
-        .child(dur(total)).child(`${kTokens(tokens)} tokens`).child(money(cost)))))
+        .child(dur(total)).child(`${kTokens(tokens)} tokens`))))
     .child(v_flex().gap(8)
       .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("COMMENTS"))
       .when(comments.length === 0, (el) => el.child(div().text_color(t.dim).child("No comments yet.")))

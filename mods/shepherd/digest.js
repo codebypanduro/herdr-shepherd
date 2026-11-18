@@ -1,10 +1,10 @@
-// The digest (D, a 720px dialog): today's shipped, in flight, waiting on you and spend, then
+// The digest (D, a 720px dialog): today's shipped, in flight, waiting on you and tokens, then
 // Shipped, Stuck, Most expensive and Needed more than one loop. "Today" is local midnight on.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay } from "herdr";
-import { STAGES, MONO, age, palette, stuckColor, money, kTokens, runTokens } from "./common.js";
+import { STAGES, MONO, age, palette, stuckColor, kTokens, runTokens } from "./common.js";
 
 export function renderDigest(m) {
   const t = palette();
@@ -15,13 +15,12 @@ export function renderDigest(m) {
   if (m.repo() && !m.state().settings) return v_flex().size_full().bg(t.surface).items_center().justify_center()
     .child(div().text_color(t.dim).child("Reading tasks…"));
 
-  // Each task's runs today, their cost and tokens; a task counts when it did anything today.
+  // Each task's runs today and their tokens; a task counts when it did anything today.
   const rows = cards.map((c) => {
     const runs = (c.task.history ?? []).filter((r) => today(r.start) || today(r.end));
     const last = (c.task.history ?? []).slice(-1)[0];
     return {
       c, runs,
-      cost: runs.reduce((n, r) => n + (r.cost ?? 0), 0),
       tokens: runTokens(runs),
       shipped: c.stage === "done" && today(last?.end ?? last?.start),
     };
@@ -32,11 +31,11 @@ export function renderDigest(m) {
   // Waiting on you: an open question, or Ready to merge (not an agent that is merely blocked).
   const waiting = cards.filter((c) => c.asked || c.stage === "merge");
   const oldest = waiting.reduce((a, c) => Math.max(a, Date.now() - c.since), 0);
-  const spent = rows.reduce((n, x) => n + x.cost, 0);
   const tokens = rows.reduce((n, x) => n + x.tokens, 0);
   const stuck = cards.filter((c) => c.stuck);
-  const pricey = rows.filter((x) => x.cost > 0).sort((a, b) => b.cost - a.cost).slice(0, 4);
-  const top = pricey[0]?.cost || 1;
+  // Most expensive: the most tokens today (tokens only, no $).
+  const pricey = rows.filter((x) => x.tokens > 0).sort((a, b) => b.tokens - a.tokens).slice(0, 4);
+  const top = pricey[0]?.tokens || 1;
   const loops = rows.filter((x) => (x.c.task.loop ?? 1) > 1);
 
   const open = (id) => { closeOverlay(p.overlay); m.openTask(id); };
@@ -71,12 +70,12 @@ export function renderDigest(m) {
       .child(stat(String(shipped.length), "shipped", t.done, true))
       .child(stat(String(inFlight.length), "in flight", t.working))
       .child(stat(String(waiting.length), `waiting on you${waiting.length ? ` · oldest ${age(oldest)}` : ""}`, t.blocked))
-      .child(stat(money(spent), `${kTokens(tokens)} tokens`, t.foreground)))
+      .child(stat(kTokens(tokens), "tokens today", t.foreground)))
     .child(v_flex().id("digest-scroll").flex_1().min_h(0).overflow_y_scrollbar()
       .child(h_flex().items_start()
-        .child(section("SHIPPED", shipped.map((x, i) => row(`dg-s-${i}`, x.c, `loop ${x.c.task.loop ?? 1} · ${money(x.cost)}`, t.done)), "Nothing shipped yet today.", 0))
+        .child(section("SHIPPED", shipped.map((x, i) => row(`dg-s-${i}`, x.c, `loop ${x.c.task.loop ?? 1}${x.tokens ? ` · ${kTokens(x.tokens)} tokens` : ""}`, t.done)), "Nothing shipped yet today.", 0))
         .child(section("STUCK", stuck.map((c, i) => row(`dg-k-${i}`, c, `${age(Date.now() - c.since)} in ${STAGES[c.stage]?.title ?? c.stage}`, stuckColor(t))), "Nothing is stuck.", 1)))
       .child(h_flex().items_start().border_t(1).border_color(t.border)
-        .child(section("MOST EXPENSIVE", pricey.map((x, i) => row(`dg-e-${i}`, x.c, money(x.cost), t.foreground, x.cost / top)), "No spend recorded today.", 2))
+        .child(section("MOST EXPENSIVE", pricey.map((x, i) => row(`dg-e-${i}`, x.c, `${kTokens(x.tokens)} tokens`, t.foreground, x.tokens / top)), "No tokens recorded today.", 2))
         .child(section("NEEDED MORE THAN ONE LOOP", loops.map((x, i) => row(`dg-l-${i}`, x.c, `${x.c.task.loop} loops`, t.blocked)), "Everything passed review first time.", 3))));
 }

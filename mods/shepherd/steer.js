@@ -5,7 +5,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { props, terminals, closeOverlay, run } from "herdr";
-import { STAGES, ROLE, MONO, age, palette, money, kTokens, runTokens } from "./common.js";
+import { STAGES, ROLE, MONO, age, palette, kTokens, runTokens } from "./common.js";
 import { closeTermWindow } from "./ui.js";
 
 export function renderSteer(m) {
@@ -116,9 +116,8 @@ export function renderTermFoot(m) {
   const cur = [...runs].reverse().find((r) => r.stage === task?.stage);
   const since = Date.parse(cur?.start ?? "");
   const tokens = runTokens(runs);
-  const cost = runs.reduce((n, r) => n + (r.cost ?? 0), 0);
   const right = task
-    ? `${since ? `${age(Date.now() - since)} in ${STAGES[task.stage]?.title ?? task.stage} · ` : ""}${kTokens(tokens)} tokens · ${money(cost)}`
+    ? `${since ? `${age(Date.now() - since)} in ${STAGES[task.stage]?.title ?? task.stage} · ` : ""}${kTokens(tokens)} tokens`
     : "";
   return h_flex().id("shepherd-termfoot").size_full().px(14).gap(10).items_center()
     .bg(t.chrome).border_t(1).border_color(t.border).font_family(MONO).text_size(11).text_color(t.dim)

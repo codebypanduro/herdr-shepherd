@@ -103,7 +103,6 @@ export function mins(m) {
   return m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
 }
 
-export const money = (n) => `$${(n ?? 0).toFixed(2)}`;
 /** Tokens of stage runs (null until runs record them), and of a whole task. */
 export const runTokens = (runs) => (runs ?? []).reduce((n, r) => n + (r.tokens ?? 0), 0);
 export const taskTokens = (task) => runTokens(task?.history);
