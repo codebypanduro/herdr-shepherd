@@ -9,7 +9,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, ScrollHandle } from "gpui-base";
 import {
-  props, terminals, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
+  props, terminals, panes, spaces, focused, theme, shared, setShared, readTextFile, watchFolder,
   hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
 import {
@@ -181,16 +181,21 @@ export default class Shepherd extends View {
 
   /** Where the space's tasks live: { machine, dir, key, workflow }, or null. */
   /** The folder a space works in: its own, else (a space Herdr lists without one, as remote spaces
-   *  can be) the folder most of its live terminals run in, leaving out worktrees under .local/share. */
+   *  can be) where its panes are now (`panes()[i].cwd`, what Herdr itself goes by), else its live
+   *  terminals' folders; the most common one, leaving out task worktrees. */
   spaceDir(space, all = terminals()) {
-    if (space?.folder) return space.folder;
-    const n = {};
-    for (const x of all) {
-      if (x.state !== "live" || x.labels?.["herdr.space"] !== localId(space) || machineOf(x) !== (space?.machine ?? null)) continue;
-      if (!x.cwd || /\/\.local\/share\/|\/worktrees\//.test(x.cwd)) continue;
-      n[x.cwd] = (n[x.cwd] ?? 0) + 1;
-    }
-    return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    if (!space) return null;
+    if (space.folder) return space.folder;
+    const skip = (d) => !d || /\/\.local\/share\/|\/worktrees\//.test(d);
+    const most = (dirs) => {
+      const n = {};
+      for (const d of dirs) if (!skip(d)) n[d] = (n[d] ?? 0) + 1;
+      return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    };
+    const tabs = new Set((space.tabs ?? []).map((t) => t.id));
+    return most(panes().filter((p) => p.terminal && tabs.has(p.tab)).map((p) => p.cwd))
+      ?? most(all.filter((x) => x.state === "live" && x.labels?.["herdr.space"] === localId(space)
+        && machineOf(x) === (space.machine ?? null)).map((x) => x.cwd));
   }
 
   repo(space = this.space(), all = undefined) {
