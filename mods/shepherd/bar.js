@@ -5,7 +5,7 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, setShared } from "herdr";
 import { MONO, VIEW, palette } from "./common.js";
 import { answerButton } from "./needs.js";
-import { startAction } from "./start.js";
+import { startAction, programIcon } from "./start.js";
 import { waitsText } from "./ui.js";
 
 const WIDTH = 780;
@@ -47,8 +47,17 @@ export function renderBar(m) {
   const dot = div().absolute().right(-2).bottom(-2).size(9).rounded(5).border(2).border_color(t.popover)
     .bg(!sh ? t.idle : t[status] ?? t.idle)
     .when(status === "working", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }));
-  const avatar = div().relative().size(32).flex_none().rounded(8).bg(t.accent).text_color(t.accent_foreground)
-    .flex().items_center().justify_center().text_size(16).child("✻").child(dot);
+  // The agent Shepherd runs, by its program icon (Claude Code's, Codex's), as the design draws it;
+  // the ✻ mark until there is one.
+  const avatar = (sh?.program?.icon
+    ? div().relative().size(32).flex_none().rounded(8).bg(t.raised).border(1).border_color(t.border)
+      .flex().items_center().justify_center().child(programIcon(t, sh.program, 20))
+    : div().relative().size(32).flex_none().rounded(8).bg(t.accent).text_color(t.accent_foreground)
+      .flex().items_center().justify_center().text_size(16).child("✻"))
+    .id("bar-avatar").cursor_pointer().tooltip(sh ? `Shepherd · ${sh.program?.name ?? "agent"} (⌘J)` : "Shepherd")
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .on_click(() => m.toggleHistory(true))
+    .child(dot);
 
   // Without a Shepherd: Start Shepherd (or why not), and the lines that wait for it.
   const waiting = m.queued(space).length;
