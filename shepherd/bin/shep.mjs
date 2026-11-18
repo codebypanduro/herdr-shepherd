@@ -328,9 +328,11 @@ switch (cmd) {
     break;
   }
   case "trust": {
-    // trust <worktree>: mark a task worktree trusted in Claude Code (~/.claude.json) before its agent
-    // starts, so it doesn't stop at "Do you trust this folder?". Only when the person already trusts
-    // its repo, or another worktree of that repo under the same folder: never anything else.
+    // trust <worktree>: a task worktree is a new folder to Claude Code, so its agent would stop at
+    // "Do you trust this folder?" and at "New MCP server found" again. Copy the person's own answers
+    // (~/.claude.json projects[…]: trust and the project MCP choices) from its repo, else from another
+    // worktree of it in the same folder. Never decides anything they haven't: without an earlier
+    // answer the agent asks.
     const wt = args[0];
     if (!wt || !existsSync(wt)) die("trust <worktree folder>");
     const real = (d) => { try { return execFileSync("realpath", [d], { encoding: "utf8" }).trim(); } catch { return d; } };
@@ -343,18 +345,28 @@ switch (cmd) {
     let c;
     try { c = JSON.parse(readFileSync(cfg, "utf8")); } catch (e) { die(`trust: can't read ${cfg}: ${e.message}`); }
     const projects = c.projects ?? {};
-    const ok = (k) => projects[k]?.hasTrustDialogAccepted === true;
-    if (ok(dir)) { console.log(`trusted already: ${dir}`); break; }
+    const KEYS = ["hasTrustDialogAccepted", "enabledMcpjsonServers", "disabledMcpjsonServers", "enableAllProjectMcpServers"];
+    const answered = (k) => projects[k]?.hasTrustDialogAccepted === true;
     const siblings = dirname(dir);
-    const why = ok(repo) || ok(real(repo)) ? `its repo ${repo} is trusted`
-      : Object.keys(projects).find((k) => dirname(k) === siblings && ok(k) && k !== dir) ? `another worktree in ${siblings} is trusted` : null;
-    if (!why) { console.log(`not trusted: ${repo} isn't trusted in Claude; the agent will ask`); break; }
-    // Claude Code rewrites this file itself: read, change one key, replace atomically.
-    c.projects = { ...projects, [dir]: { ...(projects[dir] ?? {}), hasTrustDialogAccepted: true } };
+    // The repo's answers first; then the most complete sibling worktree's (MCP answers are made there too).
+    const from = [repo, real(repo)].find(answered)
+      ?? Object.keys(projects).filter((k) => k !== dir && dirname(k) === siblings && answered(k))
+        .sort((x, y) => KEYS.filter((k) => projects[y][k] !== undefined).length - KEYS.filter((k) => projects[x][k] !== undefined).length)[0];
+    if (!from) { console.log(`not trusted: ${repo} isn't trusted in Claude; the agent will ask`); break; }
+    const mine = projects[dir] ?? {};
+    const add = {};
+    for (const k of KEYS) {
+      const v = projects[from][k];
+      if (v === undefined || (Array.isArray(v) && !v.length && Array.isArray(mine[k]) && mine[k].length)) continue;
+      if (JSON.stringify(mine[k]) !== JSON.stringify(v)) add[k] = v;
+    }
+    if (!Object.keys(add).length) { console.log(`trusted already: ${dir}`); break; }
+    // Claude Code rewrites this file itself: read, change these keys, replace atomically.
+    c.projects = { ...projects, [dir]: { ...mine, ...add } };
     const tmp = `${cfg}.shep-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(c, null, 2));
     renameSync(tmp, cfg);
-    console.log(`trusted ${dir}: ${why}`);
+    console.log(`trusted ${dir} as ${from}: ${Object.keys(add).join(", ")}`);
     break;
   }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;
