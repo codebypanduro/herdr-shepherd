@@ -3,7 +3,7 @@
 
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, readTextFile, appHome } from "herdr";
+import { exec, readTextFile, writeTextFile, appHome } from "herdr";
 import { MONO, tint, plural, clock, spanClock, sectionHeading, stateColor, proofBrowser } from "./common.js";
 import { answerButton } from "./needs.js";
 
@@ -19,7 +19,18 @@ export async function loadPr(repo, task) {
   try { return { ...JSON.parse(r.stdout), at: Date.now() }; } catch { return { error: "gh gave no JSON", at: Date.now() }; }
 }
 
-/** proof.json, with its screenshots copied under the app's home so image() can show them. */
+/** Copies a file from another machine to `dest` here: base64 over exec (binary-safe), decoded locally. */
+async function fetchRemote(machine, src, dest, timeout = 60000) {
+  const r = await exec("sh", ["-c", 'base64 < "$1"', "fetch", src], { on: machine, timeout }).catch(() => null);
+  if (!r || r.code !== 0) return false;
+  const b64 = `${dest}.b64`;
+  await writeTextFile(b64, r.stdout.replace(/\s+/g, "")).catch(() => null);
+  const d = await exec("sh", ["-c", 'base64 -d < "$1" > "$2"; c=$?; rm -f "$1"; exit $c', "decode", b64, dest]).catch(() => ({ code: 1 }));
+  return d.code === 0;
+}
+
+/** proof.json, with its screenshots copied under the app's home so image() can show them. A space on
+ *  another machine has them copied over once per proof.json (a changed proof.json starts a fresh copy). */
 export async function loadProof(repo, task) {
   const dir = proofDir(repo, task);
   if (!dir) return { none: true, at: Date.now() };
@@ -28,14 +39,22 @@ export async function loadProof(repo, task) {
   let p;
   try { p = JSON.parse(text); } catch (e) { return { error: `proof.json: ${e.message ?? e}`, at: Date.now() }; }
   const rel = `data/shepherd-proof/${encodeURIComponent(repo.key)}/${task.id}`;
+  const local = `${appHome()}/${rel}`;
   const shots = [];
-  if (!repo.machine) {
-    await exec("mkdir", ["-p", `${appHome()}/${rel}`]).catch(() => null);
-    for (const f of p.screenshots ?? []) {
-      const name = String(f).split("/").pop();
-      const r = await exec("cp", [`${dir}/${f}`, `${appHome()}/${rel}/${name}`]).catch(() => ({ code: 1 }));
-      if (r.code === 0) shots.push({ name, rel: `${rel}/${name}` });
+  if (repo.machine) {
+    const seen = await readTextFile(`${local}/proof.json`).catch(() => null);
+    if (seen !== text) {
+      await exec("sh", ["-c", 'rm -rf "$1" && mkdir -p "$1"', "fresh", local]).catch(() => null);
+      await writeTextFile(`${local}/proof.json`, text).catch(() => null);
     }
+  } else await exec("mkdir", ["-p", local]).catch(() => null);
+  for (const f of p.screenshots ?? []) {
+    const name = String(f).split("/").pop();
+    const dest = `${local}/${name}`;
+    const ok = repo.machine
+      ? (await exec("test", ["-s", dest]).catch(() => ({ code: 1 }))).code === 0 || await fetchRemote(repo.machine, `${dir}/${f}`, dest)
+      : (await exec("cp", [`${dir}/${f}`, dest]).catch(() => ({ code: 1 }))).code === 0;
+    if (ok) shots.push({ name, rel: `${rel}/${name}` });
   }
   return {
     checks: Array.isArray(p.checks) ? p.checks : [],
@@ -43,9 +62,36 @@ export async function loadProof(repo, task) {
     shots,
     shotCount: (p.screenshots ?? []).length,
     recording: p.recording ? `${dir}/${p.recording}` : null,
+    // Another machine's recording is copied here on ▶ (it can be large), then opened.
+    recordingLocal: p.recording && repo.machine ? `${local}/${String(p.recording).split("/").pop()}` : null,
+    machine: repo.machine ?? null,
     remote: Boolean(repo.machine),
     at: Date.now(),
   };
+}
+
+/** Opens a video in its default app; with none for the type (.webm on a stock Mac), in Chrome, then Safari. */
+async function openVideo(path) {
+  for (const args of [[path], ["-a", "Google Chrome", path], ["-a", "Safari", path]]) {
+    const r = await exec("open", args).catch(() => ({ code: 1 }));
+    if (r.code === 0) return true;
+  }
+  return false;
+}
+
+/** ▶ on the recording: open it here; another machine's is copied over first (once). */
+async function openRecording(m, p, notify) {
+  if (!p.recordingLocal) return openVideo(p.recording);
+  const have = (await exec("test", ["-s", p.recordingLocal]).catch(() => ({ code: 1 }))).code === 0;
+  if (!have) {
+    m.recFetch = { path: p.recording, state: "copying" };
+    notify();
+    const ok = await fetchRemote(p.machine, p.recording, p.recordingLocal, 300000);
+    m.recFetch = ok ? null : { path: p.recording, state: "failed" };
+    notify();
+    if (!ok) return null;
+  }
+  return openVideo(p.recordingLocal);
 }
 
 /** A GitHub check's state: "pass", "fail" or "run". */
@@ -151,7 +197,7 @@ export function renderProof(m, task, t) {
     .when(p.shotCount > 0, (el) => el.child(v_flex().gap(8)
       .child(heading("SCREENSHOTS"))
       .when(p.remote, (e2) => e2.child(div().text_size(11.5).text_color(t.dim)
-        .child("Screenshots are on another machine; they show only for this computer's spaces.")))
+        .when(p.shots.length < p.shotCount, (e3) => e3.child("Copying screenshots from the other machine…"))))
       .child(h_flex().flex_wrap().gap(10).children(p.shots.map((s) => v_flex().id(`shot-${s.name}`).w(260).gap(4)
         .child(div().w(260).h(162).rounded(6).overflow_hidden().border(1).border_color(t.border).bg(t.background)
           .child(image(s.rel).size_full()))
@@ -159,11 +205,13 @@ export function renderProof(m, task, t) {
     // The recording as a row: ▶, "Screen recording", its file and length; a click opens it.
     .when(Boolean(p.recording), (el) => el.child(h_flex().id("proof-rec").gap(10).px(12).py(10).items_center()
       .rounded(6).border(1).border_color(t.border).cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click(() => exec("open", [p.recording]).catch(() => null))
+      .on_click((_e, cx) => cx.spawn(async (cx) => { await openRecording(m, p, () => cx.notify()); }))
       .child(div().size(28).flex_none().rounded(14).bg(t.raised).flex().items_center().justify_center()
         .text_size(10).text_color(t.foreground).child("▶"))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().text_size(13).child("Screen recording"))
         .child(div().truncate().font_family(MONO).text_size(11).text_color(t.dim)
-          .child([p.recording.split("/").pop(), p.recordingLength].filter(Boolean).join(" · "))))));
+          .child([p.recording.split("/").pop(), p.recordingLength,
+            m.recFetch?.path === p.recording ? (m.recFetch.state === "copying" ? "copying from the other machine…" : "couldn't copy it from the other machine") : null]
+            .filter(Boolean).join(" · "))))));
 }
