@@ -102,6 +102,12 @@ export function renderTabBar(m) {
     .when(status === "working", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }));
   // What a terminal runs, for its pill: its program's name, else "shell".
   const progName = (x) => (x?.program && !x.program.shell && x.program.name ? x.program.name : "shell");
+  // An agent's pill shows what it works on: the terminal title it sets (Claude Code names it after the
+  // conversation), minus spinner glyphs; else its program's name. Shells keep "shell" (their titles are paths).
+  const termName = (x) => {
+    const title = String(x?.title ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+    return x?.program && !x.program.shell && title && title !== x.program.name ? title : progName(x);
+  };
 
   const pills = [];
   // Shepherd first, whether or not its tab sorts first; without one, its pill starts one.
@@ -122,9 +128,9 @@ export function renderTabBar(m) {
     // never closes; anything split beside Shepherd gets a pill of its own, closed by its pane.
     if (ts.some(isShepherd)) {
       for (const x of ts.filter((y) => !isShepherd(y))) {
-        const name = progName(x);
+        const name = termName(x);
         const pane = paneOf(x);
-        pills.push(pill(`tab-${tab.id}-${x.address}`, [programIcon(t, x.program), dot(x.status), div().text_color(t.muted).child(name)],
+        pills.push(pill(`tab-${tab.id}-${x.address}`, [programIcon(t, x.program), dot(x.status), div().max_w(220).truncate().text_color(t.muted).child(name)],
           { onClick: () => m.openTerminal(x.address, null, `The ${name} beside Shepherd`),
             onClose: pane ? () => closeTarget({ space, pane, terms: [x], name }) : null }));
       }
@@ -142,9 +148,9 @@ export function renderTabBar(m) {
         onClose: () => { for (const x of ts) run("terminal.park", { terminal: x.address }); },
         closeTip: "Put away: the tab goes, its agents keep running" }));
     } else {
-      // Named by the tab's name, else what it runs (Claude Code, Codex, sleep), else "shell".
-      const name = tab.named ? tab.name : progName(first);
-      pills.push(pill(`tab-${tab.id}`, [programIcon(t, first?.program), dot(tab.status), div().text_color(t.muted).child(name)],
+      // Named by the tab's name, else what its agent works on, else what it runs (Claude Code, Codex, sleep), else "shell".
+      const name = tab.named ? tab.name : termName(first);
+      pills.push(pill(`tab-${tab.id}`, [programIcon(t, first?.program), dot(tab.status), div().max_w(220).truncate().text_color(t.muted).child(name)],
         { onClick: () => first && m.openTerminal(first.address, null, `The ${name} tab`), onClose: () => closeTarget({ space, tab, terms: ts, name }) }));
     }
   }
