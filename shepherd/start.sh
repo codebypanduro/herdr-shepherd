@@ -43,7 +43,7 @@ OUT=$(hc run --json --bg --keep --outlive-parent --no-parent --name "shepherd-$(
   --cwd "$REPO" \
   --label herdr.space="$SPACE" --label herdr.tab="shepherd-$SPACE" \
   --label herdr.role=shepherd --label shepherd.dir="$REPO" --label shepherd.workflow="$CONFIG" \
-  -- env PATH="$PATH" SHEP_FILE="$FILE" SHEP_WORKFLOW="$CONFIG" "$CLAUDE" --model "$MODEL" --disallowedTools AskUserQuestion --append-system-prompt-file "$PROMPT" \
+  -- env PATH="$PATH" SHEP_FILE="$FILE" SHEP_WORKFLOW="$CONFIG" "$CLAUDE" --model "$MODEL" --disallowedTools AskUserQuestion --allowedTools "Bash(node $HERE/bin/shep.mjs trust:*)" --append-system-prompt-file "$PROMPT" \
   "You are Shepherd for $REPO. Read $CONFIG, run: node $HERE/bin/shep.mjs ls, then wait for the person.")
 ADDR=$(printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).address??"")}catch{}})')
 # A Shepherd that dies at once (a bad PATH, a missing flag) would otherwise leave every panel on
