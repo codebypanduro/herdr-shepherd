@@ -110,7 +110,8 @@ function openRun(t) {
 const NO_AGENT = new Set(["ci", "merge"]); // CI is a plain program; Ready to merge waits on the person.
 const AGENTS = ["claude", "codex"];
 /** The program a run's agent is: what `start --agent` said, else Codex for a gpt/codex model, else Claude Code.
- *  The mods guess the same way for runs saved before 10j (common.js agentOf). */
+ *  common.js agentOf guesses the same from agent and model, but gives null with neither (the board draws no mark
+ *  then), where shep reads Claude Code's log. */
 const agentOfRun = (run) => (AGENTS.includes(run.agent) ? run.agent : /codex|gpt/i.test(run.model ?? "") ? "codex" : "claude");
 const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 
@@ -197,8 +198,11 @@ async function agentTokens(t, run) {
 
 // Codex keeps every session in `<CODEX_HOME or ~/.codex>/sessions/<yyyy>/<mm>/<dd>/rollout-<time>-<id>.jsonl`; the first
 // line is its `session_meta` (id, cwd, start time), and sub-agents are rollouts of their own with the root's
-// `session_id`. Nothing ties a rollout to a pid, so a run's session is the root rollout in the agent's folder that
-// began closest to the run's start (an implementer and a reviewer share a worktree, but never start together).
+// `session_id`. Codex writes a rollout only when its first prompt goes in, which can be minutes after the agent started
+// (behind a first-run screen). Nothing ties a rollout to a pid, so a run's session is a root rollout in the agent's
+// folder that no run of any task already has: one whose first prompt names the task (`$<skill> <id>: …`, every brief
+// does) before one that doesn't, then the first started after the run began, else the latest before. Planners of
+// different tasks share the repo's folder; an implementer and a reviewer share a worktree but never run together.
 // Each model response is a `token_usage_record` with its usage and `response_id`; a forked sub-agent repeats its
 // parent's records, so they count once per response id. Codex's input_tokens include the cached ones: tokens = input
 // − cached + cache writes + output (reasoning is part of output), the cached ones kept apart in `usage.cacheRead`, as
@@ -211,6 +215,19 @@ async function firstLine(f) {
   const lines = createInterface({ input: createReadStream(f, { encoding: "utf8" }), crlfDelay: Infinity });
   try { for await (const line of lines) return line; } catch {} finally { lines.close(); }
   return null;
+}
+
+/** Whether a rollout's first prompts (its first 200 lines) name the task as `<id>:`. */
+async function namesTask(f, id) {
+  const lines = createInterface({ input: createReadStream(f, { encoding: "utf8" }), crlfDelay: Infinity });
+  let n = 0;
+  try {
+    for await (const line of lines) {
+      if (++n > 200) break;
+      if (line.includes('"role":"user"') && line.includes(`${id}:`)) return true;
+    }
+  } catch {} finally { lines.close(); }
+  return false;
 }
 
 /** Rollouts started between `from` and `to` (ms), as [{file, meta}], from the day folders around them. */
@@ -238,22 +255,25 @@ async function codexRollouts(from, to) {
   return out;
 }
 
-async function codexSession(run, cwd, taken = new Set()) {
+/** A session's files from `all`: its root rollout first (codexUsage reads the model and running totals from it),
+ *  then its sub-agents'. */
+const sessionFiles = (all, root) => [root.file,
+  ...all.filter((r) => r !== root && r.meta.session_id === String(root.meta.id) && r.meta.parent_thread_id).map((r) => r.file)];
+
+async function codexSession(t, run, cwd, taken) {
   const start = Date.parse(run.start) || 0;
   const end = Date.parse(run.end ?? "") || Date.now();
-  // The agent starts a little before `shep start` (hc run first). Codex writes the rollout only when its first
-  // prompt goes in, which can be minutes later (behind a first-run screen), so a session that began after the run
-  // did wins over one before it; sessions other runs of the task already have are never this one.
   const all = await codexRollouts(start - 300000, end);
   const want = realDir(cwd);
   const roots = all.filter((r) => !r.meta.parent_thread_id && !r.meta.source?.subagent && r.meta.cwd
     && realDir(r.meta.cwd) === want && !taken.has(String(r.meta.id)));
   if (!roots.length) return null;
-  const after = roots.filter((r) => r.at >= start - 60000).sort((a, b) => a.at - b.at);
-  const root = after[0] ?? roots.sort((a, b) => b.at - a.at)[0];
-  const id = root.meta.session_id ?? root.meta.id;
-  return { id: String(root.meta.id), cwd: root.meta.cwd, agent: "codex",
-    files: all.filter((r) => r === root || (r.meta.session_id === id && r.meta.parent_thread_id)).map((r) => r.file) };
+  const mine = [];
+  for (const r of roots) if (await namesTask(r.file, t.id)) mine.push(r);
+  const pool = mine.length ? mine : roots;
+  const after = pool.filter((r) => r.at >= start - 60000).sort((a, b) => a.at - b.at);
+  const root = after[0] ?? pool.sort((a, b) => b.at - a.at)[0];
+  return { id: String(root.meta.id), cwd: root.meta.cwd, agent: "codex", files: sessionFiles(all, root) };
 }
 
 async function codexUsage(files, after) {
@@ -314,24 +334,30 @@ async function codexTokens(t, run) {
   // The folder noted at start (the agent may be gone by now), else its terminal's, else the task's worktree.
   const cwd = run.session?.cwd ?? run.cwd ?? terminalCwd(address) ?? t.worktree;
   if (!cwd) return { why: "the run has no folder to find its Codex session by" };
+  // Sessions earlier runs (of every task) already have.
+  const runs = state.tasks.flatMap((x) => x.history ?? []);
+  const after = (id) => runs.filter((r) => r !== run && r.session?.id === id && r.end)
+    .reduce((n, r) => Math.max(n, Date.parse(r.end) || 0), 0);
+  const read = async (session) => {
+    const r = await codexUsage(session.files, after(session.id));
+    const { files: _files, ...kept } = session;
+    return r.messages ? { session: kept, ...r } : null;
+  };
   // A session already known: this run's, or an earlier run's by the same agent (a planner kept from Spec to Tickets
-  // began its session before this run did).
+  // began its session before this run did). An address hc reused for a new agent lends a session with nothing new in
+  // it: then the run's own is looked for as for any other.
   const known = run.session?.agent === "codex" ? run
     : t.history.filter((r) => r !== run && run.terminal && r.terminal === run.terminal && r.session?.agent === "codex").pop();
-  let session = null;
   if (known) {
     const all = await codexRollouts((Date.parse(known.start) || 0) - 300000, Date.parse(run.end ?? "") || Date.now());
     const root = all.find((r) => r.meta.id === known.session.id);
-    if (root) session = { ...known.session, files: [root.file, ...all.filter((r) => r !== root && r.meta.session_id === known.session.id && r.meta.parent_thread_id).map((r) => r.file)] };
+    const got = root && await read({ ...known.session, files: sessionFiles(all, root) });
+    if (got) return got;
   }
-  session ??= await codexSession(run, cwd, new Set(t.history.filter((r) => r !== run && r.session?.agent === "codex").map((r) => String(r.session.id))));
+  const taken = new Set(runs.filter((r) => r !== run && r.session?.agent === "codex").map((r) => String(r.session.id)));
+  const session = await codexSession(t, run, cwd, taken);
   if (!session) return { why: `no Codex session in ${cwd} since the run began` };
-  const after = t.history.filter((r) => r !== run && r.session?.id === session.id && r.end)
-    .reduce((n, r) => Math.max(n, Date.parse(r.end) || 0), 0);
-  const r = await codexUsage(session.files, after);
-  if (!r.messages) return { why: `no usage in Codex session ${session.id} since the run began` };
-  const { files: _files, ...kept } = session;
-  return { session: kept, ...r };
+  return await read(session) ?? { why: `no usage in Codex session ${session.id} since the run began` };
 }
 
 // Closes a run: its end, and the tokens its agent used unless given by hand. Returns what it recorded, for `end`
@@ -342,17 +368,27 @@ async function closeRun(t, run, given) {
   if (given !== undefined && !Number.isNaN(given)) { run.tokens = given; return null; }
   if (NO_AGENT.has(run.stage)) return null;
   const r = agentOfRun(run) === "codex" ? await codexTokens(t, run) : await agentTokens(t, run);
+  // The folder a Codex run noted at start is only for finding its session here.
+  delete run.cwd;
   if (r.why) {
     process.stderr.write(`shep: ${t.id} ${run.stage}: tokens not recorded: ${r.why}\n`);
     return null;
   }
   run.session = r.session;
   delete run.sessionCwd;
-  delete run.cwd;
   run.tokens = r.tokens;
   run.usage = r.usage;
   if (!run.model && r.model) run.model = r.model;
   return `${t.id} ${run.stage}: ${r.tokens} tokens (${r.messages} messages)`;
+}
+
+/** The person's workflow ($SHEP_WORKFLOW or --workflow; workflow.json beside workflow.example.json wins, since
+ *  Workflow settings writes it) and the space's orchestra.json (its keys win). */
+function settings(opt) {
+  const read = (f) => { try { return f && existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {}; } catch { return {}; } };
+  const named = typeof opt.workflow === "string" ? opt.workflow : process.env.SHEP_WORKFLOW;
+  const mine = named?.replace(/workflow\.example\.json$/, "workflow.json");
+  return { wf: read(mine && existsSync(mine) ? mine : named), orch: read(join(dirname(dirname(file)), "orchestra.json")) };
 }
 
 const { pos, opt } = parse(process.argv.slice(2));
@@ -423,10 +459,9 @@ switch (cmd) {
       // address reused by the time the run ends.
       if (typeof opt.terminal === "string") {
         run.terminal = opt.terminal;
-        if (NO_AGENT.has(stage)) {}
         // A Codex session can't be found by pid: note the agent's folder now, the session is matched at the end.
-        else if (agentOfRun(run) === "codex") { const cwd = terminalCwd(opt.terminal); if (cwd) run.cwd = cwd; }
-        else { const session = claudeSession(opt.terminal); if (session) run.session = session; }
+        if (!NO_AGENT.has(stage) && agentOfRun(run) === "codex") { const cwd = terminalCwd(opt.terminal); if (cwd) run.cwd = cwd; }
+        else if (!NO_AGENT.has(stage)) { const session = claudeSession(opt.terminal); if (session) run.session = session; }
       }
       t.history.push(run);
     }
@@ -569,14 +604,9 @@ switch (cmd) {
     break;
   }
   case "room": {
-    // Limits: the person's workflow ($SHEP_WORKFLOW or --workflow), the space's orchestra.json on top.
-    const read = (f) => { try { return f && existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {}; } catch { return {}; } };
-    // workflow.json beside workflow.example.json wins: Workflow settings writes it (mods/shepherd/settings.js).
-    const named = typeof opt.workflow === "string" ? opt.workflow : process.env.SHEP_WORKFLOW;
-    const mine = named?.replace(/workflow\.example\.json$/, "workflow.json");
-    const wf = mine && existsSync(mine) ? mine : named;
+    const { wf, orch } = settings(opt);
     // Defaults match LIMITS in mods/shepherd/common.js: change both together.
-    const limits = { maxCpu: 80, maxMem: 85, ...read(wf).limits, ...read(join(dirname(dirname(file)), "orchestra.json")).limits };
+    const limits = { maxCpu: 80, maxMem: 85, ...wf.limits, ...orch.limits };
     const loadSh = join(dirname(fileURLToPath(import.meta.url)), "load.sh");
     const sample = () => {
       let out;
@@ -621,15 +651,36 @@ switch (cmd) {
       repo = dirname(execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim());
     } catch { die(`trust: ${wt} isn't a git worktree`); }
     // Codex keeps its trust per repo root (a worktree counts as its repo) in config.toml; nothing to copy there,
-    // only whether its agents will stop at "Trust this folder?" (PROMPT, Codex agents).
-    const codexLine = () => {
+    // only whether its agents will stop at "Trust this folder?" (PROMPT, Codex agents). And the skills the briefs of
+    // the workflow's Codex stages name (`$code-review`): Codex finds them in its own skills folder, ~/.agents/skills
+    // or the repo's .agents/skills; one missing means that agent works without it.
+    const codexLines = () => {
       let toml = "";
-      try { toml = readFileSync(join(codexHome(), "config.toml"), "utf8"); } catch { return null; }
-      const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const trusted = [repo, real(repo)].some((r) => new RegExp(`^\\[projects\\."${esc(r)}"\\]\\s*\\n\\s*trust_level\\s*=\\s*"trusted"`, "m").test(toml));
-      return trusted ? `codex: ${repo} is trusted` : `codex: ${repo} isn't trusted in Codex; a Codex agent will ask`;
+      try { toml = readFileSync(join(codexHome(), "config.toml"), "utf8"); } catch { return []; }
+      const trustedIn = (r) => {
+        const lines = toml.split("\n");
+        const at = lines.findIndex((l) => l.trim() === `[projects."${r}"]` || l.trim() === `[projects.'${r}']`);
+        if (at < 0) return false;
+        for (const l of lines.slice(at + 1)) {
+          if (l.trim().startsWith("[")) return false;
+          if (/^\s*trust_level\s*=\s*"trusted"/.test(l)) return true;
+        }
+        return false;
+      };
+      const out = [[repo, real(repo)].some(trustedIn) ? `codex: ${repo} is trusted` : `codex: ${repo} isn't trusted in Codex; a Codex agent will ask`];
+      const { wf, orch } = settings(opt);
+      const skills = new Set();
+      for (const k of new Set([...Object.keys(wf.stages ?? {}), ...Object.keys(orch.stages ?? {})])) {
+        const st = { ...wf.stages?.[k], ...orch.stages?.[k] };
+        if (!st.model || agentOfRun({ agent: st.agent, model: st.model }) !== "codex") continue;
+        for (const sk of [st.skill, st.big]) if (typeof sk === "string" && sk.startsWith("/")) skills.add(sk.slice(1));
+      }
+      const roots = [join(codexHome(), "skills"), join(homedir(), ".agents", "skills"), join(repo, ".agents", "skills"), join(repo, ".codex", "skills")];
+      const missing = [...skills].filter((n) => !roots.some((d) => existsSync(join(d, n, "SKILL.md"))));
+      if (missing.length) out.push(`codex: skills Codex can't find: ${missing.map((n) => "$" + n).join(" ")}; its agents work without them`);
+      return out;
     };
-    const done = (line) => { console.log(line); const c = codexLine(); if (c) console.log(c); };
+    const done = (line) => { console.log(line); for (const c of codexLines()) console.log(c); };
     const cfg = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
     let c;
     try { c = JSON.parse(readFileSync(cfg, "utf8")); } catch (e) { die(`trust: can't read ${cfg}: ${e.message}`); }
