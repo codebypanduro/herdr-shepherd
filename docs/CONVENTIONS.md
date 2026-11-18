@@ -4,11 +4,12 @@ How Shepherd, its sub-agents and the mods find each other. Everything here is pl
 
 ## Roles and labels
 
-Every terminal Shepherd starts carries `herdr.space` and these. Shepherd's own terminal also has `herdr.tab=shepherd-<space>`, so it gets a tab; sub-agents have no `herdr.tab` and get one only when you **Keep as tab** in the terminal window.
+Every terminal Shepherd starts carries these. Shepherd's own terminal has `herdr.space` and `herdr.tab=shepherd-<space>`, so it gets a tab (the one ✻ Shepherd shows under the views). Sub-agents carry `shepherd.space=<space id>` instead of `herdr.space`, and Shepherd starts them from its own terminal, so they are its sub-agents with no tab or pane of their own (Herdr gives a terminal with `herdr.space` and no `herdr.tab` a tab); the task's Terminal tab shows them in the layout's `taskterm` block.
 
 | label | values | on |
 |---|---|---|
 | `herdr.role` | `shepherd`, `triager`, `griller`, `planner`, `implementer`, `reviewer`, `ci`, `qa` | every agent |
+| `shepherd.space` | the space id (local to its machine) | every sub-agent (Shepherd's own terminal has `herdr.space`) |
 | `shepherd.task` | task id, e.g. `HRD-144` | build-loop agents (implementer, reviewer, ci, qa) |
 | `shepherd.stage` | `triage` `grill` `spec` `tickets` `implement` `review` `ci` `proof` `merge` | every sub-agent |
 | `shepherd.loop` | `1`…`n` | build-loop agents |
@@ -18,7 +19,7 @@ Every terminal Shepherd starts carries `herdr.space` and these. Shepherd's own t
 
 ```
 hc run --bg --keep --name hrd-144-impl-2 \
-  --label herdr.space=<id> --label herdr.role=implementer \
+  --label shepherd.space=<id> --label herdr.role=implementer \
   --label shepherd.task=HRD-144 --label shepherd.stage=implement --label shepherd.loop=2 \
   --label shepherd.title="Timer on each tab" \
   --cwd ~/.herdr/worktrees/herdr-app/hrd-144-timer-on-each-tab \
@@ -77,7 +78,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
 
 ## The chat: `.herdr/shepherd/chat.jsonl`
 
-The chat's lines (a task's Comments, the bar's last event, the digest; there is no History window: ⌘J opens Shepherd's terminal), one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd except grilling rounds, Shepherd for everything it tells the person.
+The chat's lines (a task's Comments and the digest; there is no History window and no bar: ⌘J puts the keyboard in Shepherd's terminal under the views), one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd except grilling rounds, Shepherd for everything it tells the person.
 
 ## Talking to Shepherd
 
@@ -97,7 +98,7 @@ With no Shepherd in the space, a line isn't sent or dropped: it waits in shared 
 
 A question's toast (RECIPE "Toasts") and the ⌘K palette's Needs you rows answer with the same `answer <qid>: <text>` line, sent to the Shepherd of the space the question came from. Its notification carries `action: {name: "shepherd.needs:<space id>", args: {shepherd: {space, key, q, task, rec, sound, phone}}}`; its answer button runs `shepherd.answer:<json {space, q, task, text}>`, which the board copy sends. The toasts up are shared as `shepherd.toasts` (`[{id, at}]`, at most 3), and answers sent from this screen as `shepherd.answered` (`"<repo key>#<qid>"`, the newest 200; a toast closes when its question shows up there). The text of each answer sent from here is kept in `shepherd.sentText` (`{"<repo key>#<qid>": text}`, the newest 50) so Needs you and Comments show it as answered before tasks.json records it. A grilling question carries `ref` (its file name, `grill-<n>`, set by `shep ask --question`); when its griller is live, the board sends the answer straight to it as `grill-<n> answer: <text>` and tells Shepherd `answer <qid>: <text> (sent to <address>)`, which Shepherd only records.
 
-Inside the mods a task (and a question) is named by its ref, `<space id>/<task id>` (the last `/` splits: remote space ids hold one), in This space as in **All spaces** (shared `shepherd.scope` = `"all"`), since ids repeat across repos. Shared `shepherd.selected` holds `task-<ref>`; a bare `task-<id>` (from before 10h) means the shown space. In This space a selection from another space isn't shown, and the board closes it when the shown space changes. Lines to Shepherd still name the bare id and go to the task's own space's Shepherd.
+Inside the mods a task (and a question) is named by its ref, `<space id>/<task id>` (the last `/` splits: remote space ids hold one), in This space as in **All spaces** (shared `shepherd.scope` = `"all"`), since ids repeat across repos. Shared `shepherd.lastTab` (`{space id: "shepherd" | tab id}`) is what each space's work area shows: ✻ Shepherd or one of its own tabs (mode.js). Shared `shepherd.selected` holds `task-<ref>`; a bare `task-<id>` (from before 10h) means the shown space. In This space a selection from another space isn't shown, and the board closes it when the shown space changes. Lines to Shepherd still name the bare id and go to the task's own space's Shepherd.
 
 Every line the board sends is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause, status and `re` with their task). A task's Overview shows the chat lines with its task among its Comments.
 

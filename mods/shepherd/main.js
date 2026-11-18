@@ -807,7 +807,7 @@ export default class Shepherd extends View {
       const stage = l["shepherd.stage"];
       if (!STAGES[stage] || l["herdr.role"] === "shepherd") continue;
       if (x.state === "finished" && stage !== "done") continue;
-      const sp = l["herdr.space"];
+      const sp = l["shepherd.space"] ?? l["herdr.space"]; // task agents carry shepherd.space (older ones herdr.space)
       const space = sp ? scope.find((s) => sp === localId(s) && machineOf(x) === (s.machine ?? null)) : null;
       if (sp && !space) continue;
       if ((space ? [claimed.get(space.id)] : [...claimed.values()]).some((ids) => ids?.has(l["shepherd.task"]))) continue;

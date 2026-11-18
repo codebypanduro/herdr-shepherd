@@ -117,11 +117,13 @@ A ticket starts when `{{SHEP}} ready` lists it (all blockers done). Make its wor
 
 ## The build loop
 
+Every agent you start is your sub-agent: `hc run` from your terminal, with `--label shepherd.space={{SPACE}}` and never `herdr.space` (with `herdr.space`, Herdr gives the agent a tab of its own; without it, it stays under you, and the board's Terminal tab can show its real terminal).
+
 ### Implement
 
 ```
 hc run --bg --keep --name <id lowercased>-impl-<loop> --cwd <worktree> \
-  --label herdr.space={{SPACE}} --label herdr.role=implementer \
+  --label shepherd.space={{SPACE}} --label herdr.role=implementer \
   --label shepherd.task=<id> --label shepherd.stage=implement --label shepherd.loop=<loop> \
   --label shepherd.title="<title>" \
   -- env PATH="$PATH" claude --model <implement model> "<skill> <id>: <brief>. Work only in this folder and commit when done. Don't start other agents. When done, report with: hc send $HC_TERMINAL_ID 'done <id>: <one line of what changed>'. If you need a decision, report with: hc send $HC_TERMINAL_ID 'ask <id>: <question> Options: a / b. Recommended: a'."
@@ -145,7 +147,7 @@ MSG
 
 ```
 hc run --bg --keep --name <id lowercased>-review-<loop> --cwd <worktree> \
-  --label herdr.space={{SPACE}} --label herdr.role=reviewer \
+  --label shepherd.space={{SPACE}} --label herdr.role=reviewer \
   --label shepherd.task=<id> --label shepherd.stage=review --label shepherd.loop=<loop> \
   --label shepherd.title="<title>" \
   -- env PATH="$PATH" claude --model <review model> "<skill> the changes on this branch against main for <id>: <title>. Read-only: don't edit files or start agents. Report with: hc send $HC_TERMINAL_ID 'review <id>: pass' or 'review <id>: findings' followed by one finding per line as file:line text."
@@ -168,7 +170,7 @@ The command is `stages.ci.command` from settings (the space's `.herdr/orchestra.
 
 ```
 hc run --bg --name <id lowercased>-ci-<loop> --cwd <worktree> \
-  --label herdr.space={{SPACE}} --label herdr.role=ci \
+  --label shepherd.space={{SPACE}} --label herdr.role=ci \
   --label shepherd.task=<id> --label shepherd.stage=ci --label shepherd.loop=<loop> \
   -- sh -c "<command>"
 ```
@@ -177,7 +179,7 @@ hc run --bg --name <id lowercased>-ci-<loop> --cwd <worktree> \
 
 ### Proof
 
-Start a qa agent in the worktree (`--name <id lowercased>-proof-<loop> --label herdr.space={{SPACE}} --label herdr.role=qa --label shepherd.task=<id> --label shepherd.stage=proof --label shepherd.loop=<loop>`, the implement model and agent): "Prove <id> works: <brief>. If it has a UI, run it and use a headless browser (Playwright, or `<stages.proof.browser>`) to take screenshots of what changed and, if you can, a short recording. Otherwise run it the way a person would and keep the output. Write everything to {{REPO}}/.herdr/shepherd/proof/<id>/: PNG screenshots, the recording (webm, mp4 or gif), and proof.json: {"checks": [{"name": "…", "pass": true, "note": "…", "time": <seconds it took>}], "screenshots": ["file.png"], "recording": "file.webm" or null, "recordingLength": <the recording's seconds>}. Don't edit code or start agents. Report with: hc send $HC_TERMINAL_ID 'proof <id>: pass|fail <one line>'." `start <id> proof --terminal <address> --agent <agent> --model <model>` (the implement stage's).
+Start a qa agent in the worktree (`--name <id lowercased>-proof-<loop> --label shepherd.space={{SPACE}} --label herdr.role=qa --label shepherd.task=<id> --label shepherd.stage=proof --label shepherd.loop=<loop>`, the implement model and agent): "Prove <id> works: <brief>. If it has a UI, run it and use a headless browser (Playwright, or `<stages.proof.browser>`) to take screenshots of what changed and, if you can, a short recording. Otherwise run it the way a person would and keep the output. Write everything to {{REPO}}/.herdr/shepherd/proof/<id>/: PNG screenshots, the recording (webm, mp4 or gif), and proof.json: {"checks": [{"name": "…", "pass": true, "note": "…", "time": <seconds it took>}], "screenshots": ["file.png"], "recording": "file.webm" or null, "recordingLength": <the recording's seconds>}. Don't edit code or start agents. Report with: hc send $HC_TERMINAL_ID 'proof <id>: pass|fail <one line>'." `start <id> proof --terminal <address> --agent <agent> --model <model>` (the implement stage's).
 The workflow's `stages.proof` switches (each on unless `false`) change that message: with `headless` off, don't use a browser: run it the way a person would and keep the output (no screenshots or recording); with `screenshots` off, take none (`"screenshots": []`); with `recording` off, make none (`"recording": null`).
 
 On `pass`: `end <id> pass --note "<its line>"`, `set <id> proof={{REPO}}/.herdr/shepherd/proof/<id>`, kill and remove it, then Ship. On `fail`: each failed check is a finding.

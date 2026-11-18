@@ -12,7 +12,7 @@ Ship         Ready to merge → Done
 
 ## Status
 
-Built: slices 1–9 and 10a–10j in [docs/SLICES.md](docs/SLICES.md). Each slice's **Built:** line says what was checked live and what wasn't. [RECIPE.md](RECIPE.md) describes the build as it is, including what isn't built (*Watch out*).
+Built: slices 1–9 and 10a–10k in [docs/SLICES.md](docs/SLICES.md). Each slice's **Built:** line says what was checked live and what wasn't. [RECIPE.md](RECIPE.md) describes the build as it is, including what isn't built (*Watch out*).
 
 ## Start here (for an agent working on it)
 
@@ -51,7 +51,7 @@ Merge the `layout:shepherd` section of `keys.json` into `~/.config/herdr-app/key
 ❯ Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/codebypanduro/herdr-shepherd. Clone it and link mods/shepherd and layouts/shepherd.json instead of copying them.
 ```
 
-To start a space's Shepherd, click **Start Shepherd** on the tab bar's Shepherd pill (also in the bar, ⌘J and Space settings; a message written with no Shepherd starts one too), or run `~/code/herdr-shepherd/shepherd/start.sh` in a terminal of that space. On another machine it needs a checkout there: **Set up Shepherd on <machine>** clones this repo into `~/.herdr-shepherd` on it after asking. It needs `node`, `hc`, `claude` and `git`, and `gh` for PRs. Your settings go to `shepherd/workflow.json` (made from `workflow.example.json`, git-ignored).
+To start a space's Shepherd, click **Start Shepherd** under the board on ✻ Shepherd (also ⌘J, the + menu and Space settings; a message written with no Shepherd starts one too), or run `~/code/herdr-shepherd/shepherd/start.sh` in a terminal of that space. On another machine it needs a checkout there: **Set up Shepherd on <machine>** clones this repo into `~/.herdr-shepherd` on it after asking. It needs `node`, `hc`, `claude` and `git`, and `gh` for PRs. Your settings go to `shepherd/workflow.json` (made from `workflow.example.json`, git-ignored).
 
 ## Sharing
 
@@ -60,9 +60,9 @@ Add the GitHub topic `herdr-layout`, keep `RECIPE.md` and `preview.png` current,
 ## Repo
 
 ```
-layouts/shepherd.json          the window: sidebar · tab bar · board + detail · status bar · floating bar
+layouts/shepherd.json          the window: sidebar · tab bar · board + detail over Shepherd's terminal (or a tab, full size) · status bar
 mods/shepherd/                 one mod, every panel (props.view / props.panel): board, pipeline, dependencies,
-                               needs you, task detail, bar, digest, steer, terminal window, the spaces
+                               needs you, task detail (its Terminal tab the agent's own terminal), digest, steer, the spaces
                                sidebar with machines and usage, New space, Add machine, Workflow and Space settings
 keys.json                      the layout:shepherd keys to merge into ~/.config/herdr-app/keys.json
 shepherd/                      the Shepherd agent: PROMPT.md, start.sh, workflow.example.json, bin/shep.mjs, bin/load.sh,
