@@ -671,7 +671,9 @@ switch (cmd) {
       const { wf, orch } = settings(opt);
       const skills = new Set();
       for (const k of new Set([...Object.keys(wf.stages ?? {}), ...Object.keys(orch.stages ?? {})])) {
+        // As the board's mergeStage: orchestra's model without an agent drops the workflow's agent.
         const st = { ...wf.stages?.[k], ...orch.stages?.[k] };
+        if (orch.stages?.[k]?.model && !orch.stages[k].agent) delete st.agent;
         if (!st.model || agentOfRun({ agent: st.agent, model: st.model }) !== "codex") continue;
         for (const sk of [st.skill, st.big]) if (typeof sk === "string" && sk.startsWith("/")) skills.add(sk.slice(1));
       }

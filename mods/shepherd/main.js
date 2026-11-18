@@ -15,7 +15,7 @@ import {
 import {
   GO_KEYS, LETTER_KEYS, TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, STEER_OPEN,
   SCOPE, PENDING, REMOTE_MS, localId, machineOf, palette, mins, tint, recAnswer, pendingId, refOf, parseRef,
-  currentTab,
+  currentTab, mergeStage,
 } from "./common.js";
 import { renderBoard } from "./board.js";
 
@@ -474,7 +474,7 @@ export default class Shepherd extends View {
       stuckMinutes: { ...STUCK_MIN, ...wf.stuckMinutes, ...orch.stuckMinutes },
       // Per stage, the space's keys win over the person's (a space may set only its CI command).
       stages: Object.fromEntries([...new Set([...Object.keys(wf.stages ?? {}), ...Object.keys(orch.stages ?? {})])]
-        .map((k) => [k, { ...wf.stages?.[k], ...orch.stages?.[k] }])),
+        .map((k) => [k, mergeStage(wf.stages?.[k], orch.stages?.[k])])),
     };
     this.data[repo.key] = { ...next, alerts, settings, wf, orch };
     // Answers tasks.json has recorded are no longer pending.

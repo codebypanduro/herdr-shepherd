@@ -27,7 +27,7 @@ hc run --bg --keep --name hrd-144-impl-2 \
 
 ## Task state: `.herdr/shepherd/tasks.json`
 
-Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; the top of shep.mjs lists its commands, and `shep` with none names them). The schema below is what the board reads; shep also writes `answered` (time) on an answered question, and an open stage run's history `result` is `"running"`. A run's `tokens` (input + cache writes + output) and `usage` are what its agent's own Claude Code session log says, read by `shep end` from the agent's Claude Code or Codex session log (RECIPE.md, *Tokens*); a run's `agent` (`claude` | `codex`, `shep start --agent`) says which; shep also keeps the run's `session` (`{id, cwd}`, noted at `start --terminal`) to find the log again. There is no `cost`. Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
+Shepherd owns this file and is the only writer, always through `shepherd/bin/shep.mjs` (atomic writes; the top of shep.mjs lists its commands, and `shep` with none names them). The schema below is what the board reads; shep also writes `answered` (time) on an answered question, and an open stage run's history `result` is `"running"`. A run's `tokens` (input + cache writes + output) and `usage` are what the agent's own session log says (Claude Code's or Codex's), read by `shep end` (RECIPE.md, *Tokens*); a run's `agent` (`claude` | `codex`, `shep start --agent`) says which; shep also keeps the run's `session` (`{id, cwd}`, noted at `start --terminal`) to find the log again. There is no `cost`. Mods read it with `watchFolder`. A task in `merge` is `blocked`: it waits on the person.
 
 ```json
 {
@@ -107,7 +107,7 @@ Planners report with `grill <id>: <path>` (one grilling question, `{q, options, 
 
 ## Workflow: `shepherd/workflow.json` (per person) and `.herdr/orchestra.json` (per space)
 
-See `shepherd/workflow.example.json`. Per-space keys override per-person ones. Workflow settings writes the person's `shepherd/workflow.json` (git-ignored; made from the example the first time) in the checkout `~/.config/herdr-app/mods/shepherd` links to, then sends every Shepherd on this computer `workflow changed: read <file>`. Space settings writes `.herdr/orchestra.json`; `stages.ci.command: ""` there means no CI for that space. A stage's `agent` is `claude` or `codex` (without one, a gpt/codex `model` means Codex); Workflow settings writes both together. `shepherd.agent` stays `claude`.
+See `shepherd/workflow.example.json`. Per-space keys override per-person ones. Workflow settings writes the person's `shepherd/workflow.json` (git-ignored; made from the example the first time) in the checkout `~/.config/herdr-app/mods/shepherd` links to, then sends every Shepherd on this computer `workflow changed: read <file>`. Space settings writes `.herdr/orchestra.json`; `stages.ci.command: ""` there means no CI for that space. A stage's `agent` is `claude` or `codex` (without one, a gpt/codex `model` means Codex); Workflow settings writes both together, and an orchestra.json stage with a `model` but no `agent` takes its agent from that model, not from the workflow (`mergeStage` in common.js). `shepherd.agent` stays `claude`.
 
 ## Colors
 

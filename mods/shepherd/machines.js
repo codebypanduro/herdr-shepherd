@@ -7,8 +7,6 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { machines, terminals, shared, setShared, exec, knownAgents, readTextFile, appHome, props } from "herdr";
 import { MONO, palette, machineOf, agentIcon } from "./common.js";
-
-export { agentIcon };
 import { MACHINE_INFO, MACHINE_KINDS, USAGE, readWorkflow, shepherdHome, shepherdOn } from "./ui.js";
 
 export const KINDS = [["server", "Server"], ["laptop", "MacBook"], ["mini", "Mac mini"], ["tower", "Desktop"]];
@@ -226,7 +224,6 @@ export function machineIcon(t, mc, { size = 1, dotRing = t.chrome } = {}) {
     .child(svg(`mods/shepherd/icons/${mc.kind}.svg`).w(18 * size).h(13 * size).text_color(t.muted))
     .child(div().absolute().right(-2).bottom(-1).size(6).rounded(3).bg(dot).border(1.5).border_color(dotRing));
 }
-
 
 /** The machine popover (sidebar footer or a space row's machine): model, agents, meters, installed. */
 export function renderMachinePop(m) {

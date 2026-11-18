@@ -236,7 +236,8 @@ export function statusFilters(m, t, all, header) {
 export const proofBrowser = (proof) => (proof?.headless === false ? "run by hand" : String(proof?.browser || "headless browser"));
 
 /** The program a stage run's agent is: what shep recorded (`start --agent`), else Codex for a gpt or
- *  codex model, else Claude Code; null with neither. shep.mjs (agentOfRun) guesses the same way. */
+ *  codex model, else Claude Code; null with neither, so the board draws no mark. shep.mjs agentOfRun
+ *  guesses the same from agent and model but says Claude Code with neither (it reads Claude's log then). */
 export const agentOf = (run) => (run?.agent === "claude" || run?.agent === "codex" ? run.agent
   : !run?.model ? null : /codex|gpt/i.test(run.model) ? "codex" : "claude");
 
@@ -249,4 +250,13 @@ export function agentIcon(t, tool, size = 13) {
     ? image("icons/claude.svg").size(size).flex_none()
     : div().size(size).flex_none().rounded(3).bg(t.foreground).text_color(t.background).font_family(MONO)
       .text_size(Math.max(7, Math.round(size * 0.55))).font_semibold().flex().items_center().justify_center().child(">_");
+}
+
+/** A stage's settings with the space's orchestra.json over the person's workflow: key by key, except
+ *  that an agent goes with its model, so orchestra's model without an agent doesn't run in the
+ *  workflow's agent (PROMPT, Settings; shep's settings() for `trust` does the same). */
+export function mergeStage(wf, orch) {
+  const st = { ...wf, ...orch };
+  if (orch?.model && !orch.agent) delete st.agent;
+  return st;
 }

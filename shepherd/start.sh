@@ -34,8 +34,9 @@ node "$HERE/bin/shep.mjs" --tasks "$FILE" init "$SPACE" >/dev/null
 # ~/.local/bin, nvm and the like: give Shepherd this shell's PATH and claude's full path.
 CLAUDE=$(command -v claude || true)
 [ -n "$CLAUDE" ] || { echo "start.sh: claude isn't on PATH here ($PATH)" >&2; exit 1; }
-# Codex is optional: stages set to a Codex model run it by this path; without it there, Shepherd's
-# hc run fails and it tells the person.
+# Codex is optional: stages set to a Codex model run it by this path. Without Codex here the agent's
+# terminal exits at once (hc run itself succeeds); Shepherd sees that when it checks the agent started
+# and asks the person (PROMPT, Codex agents).
 CODEX=$(command -v codex || echo codex)
 
 PROMPT=$(mktemp "${TMPDIR:-/tmp}/shepherd-prompt.XXXXXX")

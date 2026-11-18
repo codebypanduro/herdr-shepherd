@@ -6,8 +6,8 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { spaces, terminals, focused, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
-import { MONO, SCOPE, SELECTED, PENDING, REMOTE_MS, palette, parseRef, pendingId } from "./common.js";
-import { machineList, machineIcon, agentIcon, usageRows, startProbes } from "./machines.js";
+import { MONO, SCOPE, SELECTED, PENDING, REMOTE_MS, palette, parseRef, pendingId, agentIcon } from "./common.js";
+import { machineList, machineIcon, usageRows, startProbes } from "./machines.js";
 import { findNewSpace } from "./dialogs.js";
 import {
   FOLDERS, SPACE_FOLDERS, NEW_SPACE, gitFacts, openNewSpace, openAddMachine, openSpaceSettings, openMachine, openUsage, openPlus,

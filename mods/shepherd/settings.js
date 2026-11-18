@@ -6,7 +6,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { spaces, terminals, run, closeOverlay, props, exec } from "herdr";
+import { spaces, terminals, run, closeOverlay, props, readTextFile, home } from "herdr";
 import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf, agentIcon, stageAgent } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
@@ -14,7 +14,7 @@ import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHer
 
 const BUILD = ["implement", "review", "ci", "proof"];
 export const MODELS = ["opus", "sonnet", "haiku"];
-/** How many of Codex's own models to offer per stage: its newest, as its models cache lists them. */
+/** How many of Codex's own models to offer per stage: the first ones its models cache lists. */
 export const CODEX_SHOWN = 3;
 /** The Grill stage's skills: the default (common.js, /grill-with-docs, which also keeps a glossary and
  *  decisions) and /grill-me. */
@@ -62,14 +62,14 @@ export function initWorkflow(m, cx) {
   cx.spawn(async (cx) => { m.wf.codex = await codexModels(); cx.notify(); });
 }
 
-/** Codex's models on this computer, from the cache Codex keeps of its model list (the ones it shows
- *  in its own picker), newest first; [] without Codex. */
+/** Codex's models on this computer, in the order of the cache Codex keeps of its model list
+ *  (`~/.codex/models_cache.json`: the ones its own picker lists); [] without Codex. A space on another
+ *  machine runs that machine's Codex, which may lack one of these (Shepherd asks when it can't start). */
 export async function codexModels() {
-  const code = 'try{const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));'
-    + 'process.stdout.write((d.models??[]).filter((x)=>x.visibility==="list"&&x.slug).map((x)=>x.slug).join("\\n"))}catch{}';
-  const r = await exec("sh", ["-c", 'node -e "$1" "${CODEX_HOME:-$HOME/.codex}/models_cache.json"', "codex", code], { timeout: 10000 })
-    .catch(() => null);
-  return (r?.stdout ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
+  try {
+    const d = JSON.parse(await readTextFile(`${home()}/.codex/models_cache.json`) ?? "{}");
+    return (d.models ?? []).filter((x) => x?.visibility === "list" && typeof x.slug === "string").map((x) => x.slug);
+  } catch { return []; }
 }
 
 async function reloadWorkflow(m) {
