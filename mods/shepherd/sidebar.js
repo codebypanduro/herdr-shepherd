@@ -6,7 +6,7 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { spaces, terminals, focused, shared, setShared, exec, appHome, run, closeOverlay, props, notify } from "herdr";
-import { MONO, SCOPE, SELECTED, palette, parseRef } from "./common.js";
+import { MONO, SCOPE, SELECTED, palette, parseRef, pendingId } from "./common.js";
 import { machineList, machineIcon, agentIcon, usageRows, startProbes } from "./machines.js";
 import { findNewSpace } from "./dialogs.js";
 import {
@@ -140,7 +140,9 @@ export function startNewFolder(m, cx) {
 export function spaceCounts(m, s, all = terminals()) {
   const repo = m.repo(s, all);
   const d = repo ? m.data[repo.key] : null;
-  const q = (d?.questions ?? []).filter((x) => x.answer == null).length;
+  // Answers sent from here that tasks.json hasn't recorded yet don't count (as in Needs you).
+  const pending = new Set(shared("shepherd.pending") ?? []);
+  const q = (d?.questions ?? []).filter((x) => x.answer == null && !pending.has(pendingId(repo.key, x.id))).length;
   const tasks = (d?.tasks ?? []).filter((x) => x.stage !== "done" && x.status !== "parked");
   const working = tasks.some((x) => x.status === "working");
   return { q, open: tasks.length, status: q ? "blocked" : working ? "working" : tasks.length ? "idle" : (s.status ?? "idle") };
@@ -321,7 +323,7 @@ export function renderSidebar(m) {
 
 /** All spaces on or off. Turning it off (or picking a space) closes an open task from another space
  *  than the one shown (`shown`: the space just picked, else the focused one). */
-function setScope(all, shown = null) {
+export function setScope(all, shown = null) {
   if (all === (shared(SCOPE) === "all")) return;
   setShared(SCOPE, all ? "all" : null);
   if (all) return;

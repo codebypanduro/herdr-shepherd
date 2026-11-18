@@ -30,7 +30,7 @@ import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
 import { renderDigest } from "./digest.js";
 import { renderHistory } from "./history.js";
-import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders } from "./sidebar.js";
+import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders, setScope } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
 import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./dialogs.js";
 import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings } from "./settings.js";
@@ -1166,7 +1166,7 @@ export default class Shepherd extends View {
   focusBar() { run("shepherd.focus-bar"); }
 
   /** A key command (keys.json `shepherd.<command>`, delivered to every shown copy): digest, history,
-   *  focus, focus-bar, steer, terminal, pause, open, view:<v>, tab:<1-5>, next, prev. The board copy
+   *  focus, focus-bar, steer, terminal, pause, open, view:<v>, scope[:all|space], tab:<1-5>, next, prev. The board copy
    *  acts on all but focus-bar, which only the bar copy takes. Task commands act on the keyboard
    *  focus, else the open task; `:<id>` names one. */
   command(c, cx) {
@@ -1192,6 +1192,7 @@ export default class Shepherd extends View {
     else if (name === "digest") this.toggleDigest();
     else if (name === "history") this.toggleHistory();
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
+    else if (name === "scope") setScope(arg === "all" || (arg !== "space" && shared(SCOPE) !== "all")); // all | space | toggle
     else if (name === "needs") this.openNeeds(arg || null);
     else if (name === "answer") this.answerFromToast(arg);
     else if (name === "reply") this.replyNext(cx);
