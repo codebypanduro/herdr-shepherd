@@ -162,7 +162,8 @@ export function syncTaskTerm(m, task, address, cx) {
     && !tt.failed.has(address) && Boolean(m.headH);
   const attached = ok && focused()?.agent === address;
   const pending = ok && tt.pending?.address === address && Date.now() - tt.pending.at < CHOOSE_GRACE_MS;
-  const open = onTab && shared(TERM_OPEN) === task._ref;
+  // The open request waits for a render that can decide (the detail's header measured, the task loaded).
+  const open = onTab && Boolean(m.headH) && shared(TERM_OPEN) === task._ref;
   const choose = ok && open;
   // A choice that didn't take: this address goes to the mirror.
   const gaveUp = ok && !attached && !pending && tt.pending?.address === address;
