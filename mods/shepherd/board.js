@@ -4,6 +4,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
 import { GROUPS, STAGES, MONO, SELECTED, groupColor, age, palette, stuckColor, tint, statusColor as statusOf, loopDots as dots } from "./common.js";
+import { hoverPeek, trackPeek, withPeek, closePeek, timeTooltip } from "./peek.js";
 
 const COL_MIN = 172;
 const FILTERS = "shepherd.filters";
@@ -53,10 +54,12 @@ export function renderBoard(m) {
     const minutes = (now - c.since) / 60000;
     const timeColor = c.stuck ? stuckColor(t) : blocked && minutes > 30 ? t.blocked : t.dim;
     // ⋯, S or right-click: the steer menu for a task; a label-only card just peeks at its terminal.
-    const steer = () => (c.task ? m.openSteer(c.id) : c.address && run("terminal.peek", { terminal: c.address }));
-    return v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
+    const steer = () => { closePeek(m); return c.task ? m.openSteer(c.id) : c.address && run("terminal.peek", { terminal: c.address }); };
+    return withPeek(m, t, c, v_flex().id(`card-${c.key}`).flex_none().gap(6).p(10).rounded(6)
       .bg(blocked ? tint(t.blocked, 0.07) : t.surface).border(1).border_color(isKf ? t.accent : border)
       .hover((s) => s.border_color(isSel || isKf ? t.accent : t.input))
+      .on_hover((on, cx) => hoverPeek(m, c, on, cx))
+      .on_mouse_move((e) => trackPeek(m, c, e))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); steer(); })
       .on_click(() => {
         m.kf = c.key;
@@ -80,14 +83,15 @@ export function renderBoard(m) {
           ? div().size(6).rounded(3).bg(t.working).loop("opacity", { from: 0.35, to: 1, period: 1200 })
           : div().size(6).rounded(3).bg(statusColor(c.status)))
         .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(c.note))
-        .child(div().font_family(MONO).text_size(10.5).text_color(timeColor).child(age(now - c.since))))
+        .child(div().id(`time-${c.key}`).font_family(MONO).text_size(10.5).text_color(timeColor)
+          .tooltip(timeTooltip(c, now)).child(age(now - c.since))))
       .when(Boolean(c.stuckText), (el) => el.child(h_flex().gap(6).items_center()
         .child(div().size(5).bg(stuckColor(t)))
         .child(div().text_size(11).text_color(stuckColor(t)).child(c.stuckText))))
       .when(c.after.length > 0 && c.status !== "idle", (el) => el.child(
         div().font_family(MONO).text_size(10.5).text_color(t.dim).child(`after ${c.after.join(", ")}`)))
       .when(c.asked, (el) => el.child(
-        div().text_size(11).text_color(t.blocked).child("↳ asked you via shepherd")));
+        div().text_size(11).text_color(t.blocked).child("↳ asked you via shepherd"))), now);
   };
 
   const column = (stage, group, first) => {

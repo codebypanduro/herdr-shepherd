@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { theme, run, shared, setShared } from "herdr";
-import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens } from "./common.js";
+import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens, mins } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 
@@ -88,6 +88,17 @@ export function renderDetail(m) {
 
 const RESULT_COLOR = (t, r) => (r === "pass" ? t.done : r === "fail" ? t.ansi1 : r === "ask" ? t.blocked : t.working);
 
+/** A timeline segment's tooltip: "Loop 2 · Code review · fail · 12m · 45k tokens · opus — 1 finding".
+ *  Plan stages have no loop. */
+export const segmentTitle = (r, now = Date.now()) => [
+  stageGroup(r.stage) === "plan" ? null : `Loop ${r.loop ?? 1}`,
+  STAGES[r.stage]?.title ?? r.stage,
+  r.result ?? "running",
+  mins(ms(r, now) / 60000),
+  r.tokens ? `${kTokens(r.tokens)} tokens` : null,
+  r.model ?? null,
+].filter(Boolean).join(" · ") + (r.note ? ` — ${r.note}` : "");
+
 function overview(m, task, t) {
   const now = Date.now();
   const runs = task.history ?? [];
@@ -100,6 +111,7 @@ function overview(m, task, t) {
   const segment = (r, i) => {
     const c = RESULT_COLOR(t, r.result);
     return div().id(`seg-${i}`).h_full().flex_basis(0).flex_grow(Math.max(0.02, ms(r, now) / total)).min_w(4).rounded(3).bg(c)
+      .tooltip(segmentTitle(r, now))
       .when(r.result === "running", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 }));
   };
   const loopGroup = (l) => {

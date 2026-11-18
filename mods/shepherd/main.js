@@ -17,6 +17,7 @@ import {
   localId, machineOf, palette, mins, tint, recAnswer, pendingId,
 } from "./common.js";
 import { renderBoard } from "./board.js";
+import { peekedKey, closePeek } from "./peek.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
 import { renderDetail, TAB, TABS } from "./detail.js";
@@ -493,6 +494,7 @@ export default class Shepherd extends View {
       : (last?.note || (term?.report ?? "") || task.status);
     return {
       address: task.terminal ?? null,
+      live: term?.state === "live",
       key: `task-${task.id}`,
       id: task.id,
       title: task.title ?? task.id,
@@ -538,6 +540,7 @@ export default class Shepherd extends View {
       if (!prev || prev.stage !== stage) this.since[x.address] = { stage, since: prev ? now : (x.created_ms ?? now) };
       out.push({
         address: x.address,
+        live: x.state === "live",
         key: `term-${x.address}`,
         id: l["shepherd.task"] ?? x.name ?? x.address,
         title: l["shepherd.title"] ?? x.title ?? x.name ?? (x.argv ?? []).join(" "),
@@ -856,9 +859,9 @@ export default class Shepherd extends View {
     return [...cards].sort((a, b) => rank(a) - rank(b) || ORDER.indexOf(b.stage) - ORDER.indexOf(a.stage));
   }
 
-  /** The task keys act on: the keyboard focus, else the open one. */
+  /** The task keys act on: the peeked card (its footer names S / T / ↵), the keyboard focus, else the open one. */
   keyTask() {
-    const key = this.kf ?? shared(SELECTED);
+    const key = peekedKey(this) ?? this.kf ?? shared(SELECTED);
     return typeof key === "string" && key.startsWith("task-") ? this.taskById(key.slice(5)) : null;
   }
 
@@ -995,7 +998,8 @@ export default class Shepherd extends View {
     const sel = shared(SELECTED);
     if (["1", "2", "3", "4", "5"].includes(k)) { if (this.detailTab(k)) done(); return; }
     if (k === "j" || k === "k" || k === "down" || k === "up") { if (this.moveFocus(k === "j" || k === "down" ? 1 : -1)) done(); return; }
-    if (k === "enter" && this.kf) { this.openTask(this.kf.slice(5)); done(); return; }
+    const enterKey = peekedKey(this) ?? this.kf;
+    if (k === "enter" && enterKey?.startsWith("task-")) { this.openTask(enterKey.slice(5)); done(); return; }
     if (k === "escape") {
       if (typeof sel === "string") { setShared(SELECTED, null); run("layout.hide", { id: "detail" }); } else this.kf = null;
       done();
@@ -1009,6 +1013,7 @@ export default class Shepherd extends View {
     if (key && this.overlayCommand(key)) { done(); return; }
     const task = this.keyTask();
     if (!task) return;
+    if (k === "s" || k === "t") closePeek(this);
     if (k === "s") this.openSteer(task.id, false);
     else if (k === "p") this.togglePause(task);
     else if (k === "t") this.openTerminal(task.terminal, task.id);
