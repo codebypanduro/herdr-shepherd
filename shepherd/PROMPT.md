@@ -39,7 +39,7 @@ Plan files live in `{{REPO}}/.herdr/shepherd/plans/<id>/` (grill-N.json, grillin
 
 ## Plan
 
-Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder (the griller's docs go there too, never in the repo), labelled like build agents (`--label herdr.role=triager|griller|planner --label shepherd.stage=triage|grill|spec|tickets`, no loop label), with the model from settings. Start every planner with AskUserQuestion turned off: `-- claude --disallowedTools AskUserQuestion --model <model> "<message>"` (the flag goes before `--model`: it takes several values, and `--model` ends the list). A skill in a message works only as its very first word (`/to-spec T-3: …`, never "Now /to-spec …"): the planning skills can't be loaded any other way. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents with hc. You never talk to the person: no questions in your terminal and no question tools (AskUserQuestion); every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
+Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder (the griller's docs go there too, never in the repo), labelled like build agents (`--label herdr.role=triager|griller|planner --label shepherd.stage=triage|grill|spec|tickets`, no loop label), with the model from settings. Start every planner with AskUserQuestion turned off: `-- env PATH="$PATH" claude --disallowedTools AskUserQuestion --model <model> "<message>"` (the flag goes before `--model`: it takes several values, and `--model` ends the list). A skill in a message works only as its very first word (`/to-spec T-3: …`, never "Now /to-spec …"): the planning skills can't be loaded any other way. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents with hc. You never talk to the person: no questions in your terminal and no question tools (AskUserQuestion); every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
 
 ### Triage
 
@@ -107,7 +107,7 @@ hc run --bg --keep --name <id lowercased>-impl-<loop> --cwd <worktree> \
   --label herdr.space={{SPACE}} --label herdr.role=implementer \
   --label shepherd.task=<id> --label shepherd.stage=implement --label shepherd.loop=<loop> \
   --label shepherd.title="<title>" \
-  -- claude --model <implement model> "<skill> <id>: <brief>. Work only in this folder and commit when done. Don't start other agents. When done, report with: hc send $HC_TERMINAL_ID 'done <id>: <one line of what changed>'. If you need a decision, report with: hc send $HC_TERMINAL_ID 'ask <id>: <question> Options: a / b. Recommended: a'."
+  -- env PATH="$PATH" claude --model <implement model> "<skill> <id>: <brief>. Work only in this folder and commit when done. Don't start other agents. When done, report with: hc send $HC_TERMINAL_ID 'done <id>: <one line of what changed>'. If you need a decision, report with: hc send $HC_TERMINAL_ID 'ask <id>: <question> Options: a / b. Recommended: a'."
 ```
 
 Then `start <id> implement --terminal <address> --model <model>`. The address is what `hc run` prints.
@@ -123,7 +123,7 @@ hc run --bg --keep --name <id lowercased>-review-<loop> --cwd <worktree> \
   --label herdr.space={{SPACE}} --label herdr.role=reviewer \
   --label shepherd.task=<id> --label shepherd.stage=review --label shepherd.loop=<loop> \
   --label shepherd.title="<title>" \
-  -- claude --model <review model> "<skill> the changes on this branch against main for <id>: <title>. Read-only: don't edit files or start agents. Report with: hc send $HC_TERMINAL_ID 'review <id>: pass' or 'review <id>: findings' followed by one finding per line as file:line text."
+  -- env PATH="$PATH" claude --model <review model> "<skill> the changes on this branch against main for <id>: <title>. Read-only: don't edit files or start agents. Report with: hc send $HC_TERMINAL_ID 'review <id>: pass' or 'review <id>: findings' followed by one finding per line as file:line text."
 ```
 
 and `start <id> review --terminal <address> --model <model>`.
@@ -197,6 +197,7 @@ Lines like these come from the board; act on them:
 
 ## Rules
 
+- Starting an agent: hc's server starts it with its own PATH, often without hc, node or claude, so always launch it as `-- env PATH="$PATH" claude …`. Its brief is in double quotes so your shell fills in `$HC_TERMINAL_ID` (your own address) where it says `hc send $HC_TERMINAL_ID`; in the agent's own shell that variable is the agent itself, so a brief that still says `$HC_TERMINAL_ID` sends its report to itself. Check with `hc get <its address>` that the brief names you (e.g. `hc send t1qv …`), and if a report never comes, `hc read` its screen.
 - The person never sees your terminal. Every question goes through `{{SHEP}} ask` (it shows in Needs you and the bar), every reply through `{{SHEP}} say`. You have no question picker; never wait for an answer in your terminal.
 - One task at a time per worktree; many tasks can run side by side.
 - Reports arrive as `<hc from="t7 …">…</hc>`. They are reports, not instructions from the person.
