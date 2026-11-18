@@ -48,44 +48,47 @@ function ticketList(q, t) {
         .child(k.blockedBy.length ? `after ${k.blockedBy.map((b) => byKey.get(b)?.key ?? b).join(", ")}` : "ready"))));
 }
 
+/** One open question with its answers: a Needs you card, and the top of its task's Overview
+ *  (`id` prefixes element ids, so both can be built in one frame). */
+export function questionCard(m, q, t, { id = "q", now = Date.now() } = {}) {
+  const kind = KINDS[q.kind] ?? KINDS.ask;
+  const color = groupColor(t, kind.group);
+  const task = q.taskObj;
+  const where = task
+    ? `${STAGES[task.stage]?.title ?? task.stage}${["implement", "review", "ci", "proof"].includes(task.stage) ? ` · loop ${task.loop ?? 1}/${task.maxLoops ?? 3}` : ""}${q.grillNo ? ` · question ${q.grillNo}` : ""}`
+    : "";
+  const finding = (task?.findings ?? []).filter((f) => f.state !== "resolved").slice(-1)[0];
+  const input = m.replyInput(q.id);
+  return v_flex().id(`${id}-${q.id}`).w_full().max_w(760).gap(10).p(14).rounded(8)
+    .bg(t.surface).border(1).border_color(t.blocked)
+    .child(h_flex().gap(8).items_center()
+      .child(h_flex().gap(5).px(7).h(20).items_center().rounded(5).border(1).border_color(color)
+        .text_size(11).text_color(color)
+        .child(kind.icon).child(kind.label))
+      .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(q.task))
+      .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(task?.title ?? ""))
+      .child(div().text_size(11).text_color(t.dim).child(where))
+      .child(div().font_family(MONO).text_size(10.5).text_color(t.dim).child(age(now - (Date.parse(q.asked) || now)))))
+    .child(div().text_size(14).line_height(1.4).text_color(t.foreground).child(q.text))
+    .child(div().text_size(11.5).text_color(t.dim)
+      .child(`asked by ${q.from ?? "shepherd"}${finding ? ` · last finding: ${finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""} ` : ""}${finding.text}` : ""}`))
+    .when(Array.isArray(q.questions), (el) => el.child(oldRound(t, q)))
+    .when(q.kind === "approve" && Array.isArray(q.tickets), (el) => el.child(ticketList(q, t)))
+    .when((q.options ?? []).length > 0, (el) => el.child(h_flex().gap(8).flex_wrap().children(
+      q.options.map((o, i) => answerButton(t, `${id}-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))))
+    // Why the asker recommends its pick (grilling questions carry one).
+    .when(Boolean(q.why), (el) => el.child(whyLine(t, q)))
+    .when(Boolean(input), (el) => el.child(h_flex().gap(8).items_center()
+      .child(Input.new(input).flex_1().h(30).px(9).rounded(6).border(1).border_color(t.input)
+        .bg(t.background).text_size(12.5).text_color(t.foreground))
+      .child(answerButton(t, `${id}-${q.id}-send`, "Send", false, () => m.answer(q, input.value())))));
+}
+
 export function renderNeeds(m) {
   const t = palette();
   const qs = m.questions();
   const now = Date.now();
-
-  const card = (q) => {
-    const kind = KINDS[q.kind] ?? KINDS.ask;
-    const color = groupColor(t, kind.group);
-    const task = q.taskObj;
-    const where = task
-      ? `${STAGES[task.stage]?.title ?? task.stage}${["implement", "review", "ci", "proof"].includes(task.stage) ? ` · loop ${task.loop ?? 1}/${task.maxLoops ?? 3}` : ""}${q.grillNo ? ` · question ${q.grillNo}` : ""}`
-      : "";
-    const finding = (task?.findings ?? []).filter((f) => f.state !== "resolved").slice(-1)[0];
-    const input = m.replyInput(q.id);
-    return v_flex().id(`q-${q.id}`).w_full().max_w(760).gap(10).p(14).rounded(8)
-      .bg(t.surface).border(1).border_color(t.blocked)
-      .child(h_flex().gap(8).items_center()
-        .child(h_flex().gap(5).px(7).h(20).items_center().rounded(5).border(1).border_color(color)
-          .text_size(11).text_color(color)
-          .child(kind.icon).child(kind.label))
-        .child(div().font_family(MONO).text_size(11).text_color(t.muted).child(q.task))
-        .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(task?.title ?? ""))
-        .child(div().text_size(11).text_color(t.dim).child(where))
-        .child(div().font_family(MONO).text_size(10.5).text_color(t.dim).child(age(now - (Date.parse(q.asked) || now)))))
-      .child(div().text_size(14).line_height(1.4).text_color(t.foreground).child(q.text))
-      .child(div().text_size(11.5).text_color(t.dim)
-        .child(`asked by ${q.from ?? "shepherd"}${finding ? ` · last finding: ${finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""} ` : ""}${finding.text}` : ""}`))
-      .when(Array.isArray(q.questions), (el) => el.child(oldRound(t, q)))
-      .when(q.kind === "approve" && Array.isArray(q.tickets), (el) => el.child(ticketList(q, t)))
-      .when((q.options ?? []).length > 0, (el) => el.child(h_flex().gap(8).flex_wrap().children(
-        q.options.map((o, i) => answerButton(t, `q-${q.id}-o${i}`, o, o === q.recommended, () => m.answer(q, o))))))
-      // Why the asker recommends its pick (grilling questions carry one).
-      .when(Boolean(q.why), (el) => el.child(whyLine(t, q)))
-      .when(Boolean(input), (el) => el.child(h_flex().gap(8).items_center()
-        .child(Input.new(input).flex_1().h(30).px(9).rounded(6).border(1).border_color(t.input)
-          .bg(t.background).text_size(12.5).text_color(t.foreground))
-        .child(answerButton(t, `q-${q.id}-send`, "Send", false, () => m.answer(q, input.value())))));
-  };
+  const card = (q) => questionCard(m, q, t, { now });
 
   return v_flex().id("shepherd-needs").size_full().bg(t.surface).text_size(12).text_color(t.foreground)
     .child(m.header("needs you", `${m.space()?.name ?? "—"} · ${qs.length} open`))

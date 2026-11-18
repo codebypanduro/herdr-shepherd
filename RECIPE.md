@@ -63,6 +63,7 @@ Each group's label sits above its first column, and the column header (title and
 - Worktree line: ⑂ branch · machine:~/.herdr/worktrees/<repo>/<branch>.
 - Tabs (switch with 1–5): **Overview · Review · Changes · Files · Proof**.
   - **Overview**:
+    - First, each open question of the task (not a merge question: that's the PR card's), drawn and answered exactly as its Needs you card (`questionCard` in needs.js): kind, text, asker, the ticket list for approve, the options with the recommended one, why, and a reply field.
     - Ready-to-merge tasks start with a PR card: PR number (or "Local merge · no remote"), branch → main, diff size, every GitHub check with its time, Shepherd's CI and Proof results, then **Squash and merge** and **Send back** (once Shepherd has asked) and "Open on GitHub ↗".
     - Shepherd's summary (14px).
     - A timeline bar: one segment per stage per loop, width ∝ time, colored by result (pass green, fail red, running blue and pulsing, asking amber). Loop labels sit above it, each loop's stage names under it, and totals (time, tokens, $) below.

@@ -7,6 +7,7 @@ import { theme, run, shared, setShared } from "herdr";
 import { STAGES, MONO, ROLE, SELECTED, groupColor, stageGroup, age, ago, escRe, palette, tint, money, kTokens, mins, runTokens } from "./common.js";
 import { renderChanges, renderFiles } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
+import { questionCard } from "./needs.js";
 
 export const TAB = "shepherd.detailTab";
 export const TABS = ["overview", "review", "changes", "files", "proof"];
@@ -172,6 +173,8 @@ function overview(m, task, t) {
 
   // 120px under the Ask field: the floating bar covers the pane's bottom, and the field is last.
   return v_flex().id("ov-scroll").flex_1().min_h(0).overflow_y_scrollbar().p(14).pb(120).gap(16)
+    // What the task waits on you for, answerable here as in Needs you (a merge question is the PR card's).
+    .children(m.questions().filter((q) => q.task === task.id && q.kind !== "merge").map((q) => questionCard(m, q, t, { id: "ov-q" })))
     .when(task.stage === "merge", (el) => el.child(renderPrCard(m, task, t)))
     .child(div().text_size(14).line_height(1.45).text_color(task.summary ? t.foreground : t.dim)
       .child(task.summary || "Shepherd hasn't written a summary yet."))
