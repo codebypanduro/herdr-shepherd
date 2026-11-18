@@ -19,14 +19,29 @@ export async function loadPr(repo, task) {
   try { return { ...JSON.parse(r.stdout), at: Date.now() }; } catch { return { error: "gh gave no JSON", at: Date.now() }; }
 }
 
-/** Copies a file from another machine to `dest` here: base64 over exec (binary-safe), decoded locally. */
+/** Copies a file from another machine to `dest` here: base64 over exec (binary-safe), decoded locally.
+ *  In 600 KB pieces: a remote exec's output is cut short well under its 8 MiB (a 1.2 MB file failed whole). */
+const PIECE = 600000;
 async function fetchRemote(machine, src, dest, timeout = 60000) {
-  const r = await exec("sh", ["-c", 'base64 < "$1"', "fetch", src], { on: machine, timeout }).catch(() => null);
-  if (!r || r.code !== 0) return false;
-  const b64 = `${dest}.b64`;
-  await writeTextFile(b64, r.stdout.replace(/\s+/g, "")).catch(() => null);
-  const d = await exec("sh", ["-c", 'base64 -d < "$1" > "$2"; c=$?; rm -f "$1"; exit $c', "decode", b64, dest]).catch(() => ({ code: 1 }));
-  return d.code === 0;
+  const size = await exec("sh", ["-c", 'wc -c < "$1"', "size", src], { on: machine, timeout: 15000 }).catch(() => null);
+  const bytes = Number(size?.code === 0 ? size.stdout.trim() : NaN);
+  if (!Number.isFinite(bytes) || bytes <= 0) return false;
+  const tmp = `${dest}.part`, b64 = `${dest}.b64`;
+  await exec("rm", ["-f", tmp, b64]).catch(() => null);
+  for (let i = 0; i * PIECE < bytes; i++) {
+    const r = await exec("sh", ["-c", 'dd if="$1" bs=$2 skip=$3 count=1 2>/dev/null | base64', "fetch", src, String(PIECE), String(i)],
+      { on: machine, timeout }).catch(() => null);
+    if (!r || r.code !== 0) return false;
+    // writeTextFile only creates a file with expected = null: each piece's file is removed after use.
+    const w = await writeTextFile(b64, r.stdout.replace(/\s+/g, ""), null).then(() => true, () => false);
+    if (!w) return false;
+    const d = await exec("sh", ["-c", 'base64 -d < "$1" >> "$2"', "decode", b64, tmp]).catch(() => ({ code: 1 }));
+    await exec("rm", ["-f", b64]).catch(() => null);
+    if (d.code !== 0) return false;
+  }
+  const n = await exec("sh", ["-c", 'wc -c < "$1"', "size", tmp]).catch(() => null);
+  if (Number(n?.stdout?.trim()) !== bytes) { await exec("rm", ["-f", tmp]).catch(() => null); return false; }
+  return (await exec("mv", ["-f", tmp, dest]).catch(() => ({ code: 1 }))).code === 0;
 }
 
 /** proof.json, with its screenshots copied under the app's home so image() can show them. A space on
@@ -45,7 +60,7 @@ export async function loadProof(repo, task) {
     const seen = await readTextFile(`${local}/proof.json`).catch(() => null);
     if (seen !== text) {
       await exec("sh", ["-c", 'rm -rf "$1" && mkdir -p "$1"', "fresh", local]).catch(() => null);
-      await writeTextFile(`${local}/proof.json`, text).catch(() => null);
+      await writeTextFile(`${local}/proof.json`, text, null).catch(() => null);
     }
   } else await exec("mkdir", ["-p", local]).catch(() => null);
   for (const f of p.screenshots ?? []) {
