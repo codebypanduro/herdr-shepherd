@@ -10,7 +10,7 @@ import { terminals, run, setShared, knownAgents, openOverlay, closeOverlay, prop
 import { openWorkflow, button } from "./ui.js";
 import { shepherdMark, programIcon } from "./start.js";
 import { MONO, VIEW, VIEW_LIST, palette } from "./common.js";
-import { spaceTabs, modeOf, showMode } from "./mode.js";
+import { spaceTabs, modeOf, showMode, isShep } from "./mode.js";
 
 /** The + menu: Shepherd (when the space has none), Terminal, and each agent installed on the space's
  *  machine (knownAgents, at most 6 s; Herdr caches it a minute per machine), opened once known. */
@@ -35,14 +35,13 @@ function openNewTab(m, cx, space) {
   });
 }
 
-const isShepherd = (x) => x.labels?.["herdr.role"] === "shepherd";
 
 /** Closes a tab (`tab.close`) or one pane of Shepherd's tab (`pane.close`). Asks first, in the
  *  closetab dialog, when something besides a shell still runs there (a program in the foreground, or
  *  an agent working or waiting), as Herdr's own tabs do, and when it's the space's last tab, which
  *  closes the space. Never closes Shepherd: a tab holding it is refused. */
 function closeTarget({ space, tab, pane, terms, name }) {
-  if (terms.some(isShepherd)) return; // stopping Shepherd is its own, explicit thing
+  if (terms.some(isShep)) return; // stopping Shepherd is its own, explicit thing
   const busy = terms.filter((x) => (x.program && !x.program.shell) || ["working", "blocked"].includes(x.status));
   const last = !pane && (space?.tabs?.length ?? 0) <= 1;
   const cmd = pane ? { name: "pane.close", args: { pane } } : { name: "tab.close", args: { id: tab.id, confirmed: true } };

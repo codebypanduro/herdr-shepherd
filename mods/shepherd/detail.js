@@ -10,7 +10,7 @@ import { renderChanges, renderFiles, fileIcon, worktreeOf } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
 import { renderTerm, termBlocked, termState } from "./term.js";
-import { showAgent } from "./mode.js";
+import { showAgent, openTaskTerminal, requestTerminal } from "./mode.js";
 import { shepherdMark, programIcon } from "./start.js";
 
 export { TAB, TABS, currentTab };
@@ -65,7 +65,7 @@ export function renderDetail(m) {
     .tooltip(live ? "Open terminal (T)" : term.state === "none" ? "No agent running"
       : term.state === "unknown" ? `${task.terminal} isn't running` : `${task.terminal} has ended`)
     .when(live, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click(() => m.openTerminal(null, task._ref)))
+      .on_click(() => openTaskTerminal(m, task._ref)))
     .child(div().w(12).h(9).rounded(2).border(1).border_color(live ? t.muted : t.dim))
     .child(term.state === "none" ? "no agent" : live ? task.terminal : `${task.terminal} · ended`);
 
@@ -100,7 +100,7 @@ export function renderDetail(m) {
       .border_b(2).border_color(tab === k ? t.foreground : t.surface)
       .text_size(12.5).text_color(tab === k ? t.foreground : t.muted)
       .hover((s) => s.text_color(t.foreground))
-      .on_click(() => setShared(TAB, k))
+      .on_click(() => (k === "terminal" ? requestTerminal(task._ref) : setShared(TAB, k)))
       .child(TAB_TITLES[k])
       .when(counts[k] != null, (el) => el.child(div().px(5).rounded(8).bg(t.raised)
         .font_family(MONO).text_size(10.5).text_color(t.muted).child(String(counts[k]))))
@@ -121,7 +121,7 @@ export function renderDetail(m) {
       .child(div().child(`${address} runs ${task.id}'s ${STAGES[task.stage]?.title ?? task.stage}.`))
       .child(div().id("term-show").px(10).h(26).flex().items_center().rounded(5).border(1).border_color(t.input)
         .cursor_pointer().text_size(12).text_color(t.foreground).hover((s) => s.bg(t.hover))
-        .on_click(() => showAgent(m, address))
+        .on_click((_e, cx) => showAgent(m, address, cx))
         .child("Show its terminal here")));
   }
   const body = tab === "overview" ? overview(m, task, t, where)

@@ -56,7 +56,9 @@ Plan files live in `{{REPO}}/.herdr/shepherd/plans/<id>/` (grill-N.json, grillin
 
 ## Plan
 
-Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder (the griller's docs go there too, never in the repo), labelled like build agents (`--label herdr.role=triager|griller|planner --label shepherd.stage=triage|grill|spec|tickets`, no loop label), with the model from settings. Start every Claude planner with AskUserQuestion turned off: `-- env PATH="$PATH" claude --disallowedTools AskUserQuestion --model <model> "<message>"` (the flag goes before `--model`: it takes several values, and `--model` ends the list). A skill in a message works only as its very first word (`/to-spec T-3: …`, never "Now /to-spec …"): the planning skills can't be loaded any other way. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents with hc. You never talk to the person: no questions in your terminal and no question tools (AskUserQuestion); every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
+Every agent you start (planners, build agents, CI) is your sub-agent: `hc run` from your terminal, with `--label shepherd.space={{SPACE}}` and never `herdr.space` (with `herdr.space`, Herdr gives the agent a tab of its own; without it, it stays under you, and the board's Terminal tab can show its real terminal).
+
+Every planner runs in the repo itself (`--cwd {{REPO}}`), read-only apart from its plan folder (the griller's docs go there too, never in the repo), labelled like build agents (`--label shepherd.space={{SPACE}} --label herdr.role=triager|griller|planner --label shepherd.stage=triage|grill|spec|tickets`, no loop label), with the model from settings. Start every Claude planner with AskUserQuestion turned off: `-- env PATH="$PATH" claude --disallowedTools AskUserQuestion --model <model> "<message>"` (the flag goes before `--model`: it takes several values, and `--model` ends the list). A skill in a message works only as its very first word (`/to-spec T-3: …`, never "Now /to-spec …"): the planning skills can't be loaded any other way. Each brief ends with: "Don't publish to an issue tracker, don't edit code, don't start agents with hc. You never talk to the person: no questions in your terminal and no question tools (AskUserQuestion); every question goes to Shepherd as described. Report with hc send $HC_TERMINAL_ID."
 
 ### Triage
 
@@ -116,8 +118,6 @@ A ticket starts when `{{SHEP}} ready` lists it (all blockers done). Make its wor
 **Room on the machine.** Before starting a ticket's Implement, run `{{SHEP}} room`. Exit 0: start it. Exit 3 (the machine is over the CPU or memory limit in settings): don't start it; `set <id> wait="waiting for room on <machine name, or this mac>"`, and if no room-waiter is running yet, start one: `hc run --bg --rm --name room-wait --cwd {{REPO}} -- {{SHEP}} --tasks {{REPO}}/.herdr/shepherd/tasks.json room --wait --workflow {{WORKFLOW}}`. Its exit comes to you as a note: exit 0, run `room` again and start what fits, one ticket at a time, checking `room` before each. Exit 1 from `room` means the load couldn't be read: say so to the person and start the ticket anyway.
 
 ## The build loop
-
-Every agent you start is your sub-agent: `hc run` from your terminal, with `--label shepherd.space={{SPACE}}` and never `herdr.space` (with `herdr.space`, Herdr gives the agent a tab of its own; without it, it stays under you, and the board's Terminal tab can show its real terminal).
 
 ### Implement
 

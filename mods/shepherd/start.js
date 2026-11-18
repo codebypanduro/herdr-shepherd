@@ -10,7 +10,7 @@ import { spaces, run, props, closeOverlay } from "herdr";
 import { MONO, palette } from "./common.js";
 import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup, button } from "./ui.js";
 
-/** The ✻ Shepherd mark on an `accent` tile (the bar's avatar, small). */
+/** The ✻ Shepherd mark on an `accent` tile. */
 export const shepherdMark = (t, size = 16) => div().size(size).flex_none().rounded(Math.round(size / 4)).bg(t.accent)
   .text_color(t.accent_foreground).flex().items_center().justify_center().text_size(Math.round(size * 0.62)).child("✻");
 
@@ -55,12 +55,18 @@ export function startAction(m, t, space, idp, { size = 12 } = {}) {
 export function renderNoShepherd(m) {
   const t = palette();
   const space = m.shownSpace();
+  const waiting = space ? m.queued(space).length : 0;
   return v_flex().id("shepherd-noshep").size_full().items_center().justify_center().gap(10)
     .rounded(6).border(1).border_color(t.border).bg(t.background).text_color(t.foreground)
     .child(h_flex().gap(8).items_center()
       .child(div().opacity(0.6).child(shepherdMark(t, 18)))
       .child(div().text_size(13).text_color(t.muted).child("No Shepherd in this space")))
-    .when(Boolean(space), (el) => el.child(startAction(m, t, space, "noshep", { size: 12.5 })));
+    .when(Boolean(space), (el) => el.child(startAction(m, t, space, "noshep", { size: 12.5 })))
+    // Lines written while there's none (the Ask field, an answer, a steer) wait for it here.
+    .when(waiting > 0, (el) => el.child(h_flex().gap(8).items_center().text_size(12)
+      .child(div().text_color(t.blocked).child(`${waiting} message${waiting === 1 ? "" : "s"} wait for it`))
+      .child(div().id("noshep-discard").text_color(t.accent).cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .on_click((_e, cx) => { m.discardQueued(space); cx.notify(); }).child("Discard"))));
 }
 
 // ---- Set up Shepherd on <machine> ---------------------------------------------------------------

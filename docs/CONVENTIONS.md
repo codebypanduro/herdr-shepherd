@@ -4,7 +4,7 @@ How Shepherd, its sub-agents and the mods find each other. Everything here is pl
 
 ## Roles and labels
 
-Every terminal Shepherd starts carries these. Shepherd's own terminal has `herdr.space` and `herdr.tab=shepherd-<space>`, so it gets a tab (the one ✻ Shepherd shows under the views). Sub-agents carry `shepherd.space=<space id>` instead of `herdr.space`, and Shepherd starts them from its own terminal, so they are its sub-agents with no tab or pane of their own (Herdr gives a terminal with `herdr.space` and no `herdr.tab` a tab); the task's Terminal tab shows them in the layout's `taskterm` block.
+Every terminal Shepherd starts carries these. Shepherd's own terminal has `herdr.space` and `herdr.tab=shepherd-<space>`, so it gets a tab (the one ✻ Shepherd shows under the views). Sub-agents carry `shepherd.space=<space id>` instead of `herdr.space`, and Shepherd starts them from its own terminal, so they are its sub-agents with no tab or pane of their own (Herdr gives a terminal with `herdr.space` and no `herdr.tab` a tab); the task's Terminal tab shows them in the layout's `taskterm` block. Sub-agents start no agents of their own (PROMPT.md forbids it): with no tab, it's unknown where Herdr would show a grandchild, and the tab bar hides it only by walking `parent`.
 
 | label | values | on |
 |---|---|---|
@@ -78,7 +78,7 @@ Shepherd owns this file and is the only writer, always through `shepherd/bin/she
 
 ## The chat: `.herdr/shepherd/chat.jsonl`
 
-The chat's lines (a task's Comments and the digest; there is no History window and no bar: ⌘J puts the keyboard in Shepherd's terminal under the views), one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd except grilling rounds, Shepherd for everything it tells the person.
+The chat's lines (a task's Comments and the digest; there is no History window and no bar: ⌘J puts the keyboard in Shepherd's terminal under the views), one JSON object per line: `{"at": "<ISO time>", "from": "you" | "shepherd", "text": "…", "task": "T-3"?}`. Written only by appending, with `shep say [--from you] [--task <id>] "<text>"`: the board for every line it sends Shepherd except grilling rounds, Shepherd for everything it tells the person. What the person types straight into Shepherd's terminal (under the views) isn't recorded: Comments and the digest show only what goes through the board or `shep say`.
 
 ## Talking to Shepherd
 
@@ -94,7 +94,7 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 | `re HRD-144: why did loop 1 fail?` | a question or note about one task, from its Overview's Ask field; Shepherd answers with `shep say --task HRD-144` (forwarding an instruction to the task's agent), so the reply shows in the task's Comments |
 | anything else | a normal message to Shepherd |
 
-With no Shepherd in the space, a line isn't sent or dropped: it waits in shared `shepherd.queued` (`[{id, space, line, task, at, sending?: {by, at}}]`) while the mod starts one, and the bar sends it once that Shepherd is up (see RECIPE "Starting Shepherd"); it's recorded then. While lines wait, new ones queue behind them. Whether start.sh can run on a machine is shared as `shepherd.startable` (`{"<machine, '' here>": {dir, path, at} | {reason, unreachable, missing, at}}`), and a start asked for as `shepherd.starting` (`{space id: ms}`, until its Shepherd shows).
+With no Shepherd in the space, a line isn't sent or dropped: it waits in shared `shepherd.queued` (`[{id, space, line, task, at, sending?: {by, at}}]`) while the mod starts one, and the tab bar copy sends it once that Shepherd is up (see RECIPE "Starting Shepherd"); it's recorded then. While lines wait, new ones queue behind them. Whether start.sh can run on a machine is shared as `shepherd.startable` (`{"<machine, '' here>": {dir, path, at} | {reason, unreachable, missing, at}}`), and a start asked for as `shepherd.starting` (`{space id: ms}`, until its Shepherd shows).
 
 A question's toast (RECIPE "Toasts") and the ⌘K palette's Needs you rows answer with the same `answer <qid>: <text>` line, sent to the Shepherd of the space the question came from. Its notification carries `action: {name: "shepherd.needs:<space id>", args: {shepherd: {space, key, q, task, rec, sound, phone}}}`; its answer button runs `shepherd.answer:<json {space, q, task, text}>`, which the board copy sends. The toasts up are shared as `shepherd.toasts` (`[{id, at}]`, at most 3), and answers sent from this screen as `shepherd.answered` (`"<repo key>#<qid>"`, the newest 200; a toast closes when its question shows up there). The text of each answer sent from here is kept in `shepherd.sentText` (`{"<repo key>#<qid>": text}`, the newest 50) so Needs you and Comments show it as answered before tasks.json records it. A grilling question carries `ref` (its file name, `grill-<n>`, set by `shep ask --question`); when its griller is live, the board sends the answer straight to it as `grill-<n> answer: <text>` and tells Shepherd `answer <qid>: <text> (sent to <address>)`, which Shepherd only records.
 

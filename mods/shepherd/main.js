@@ -36,7 +36,7 @@ import { loadPr, loadProof } from "./ship.js";
 import { renderTabBar, renderCloseTab } from "./tabbar.js";
 import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer } from "./steer.js";
-import { syncMode, syncTaskTerm, showMode, modeOf, openTaskTerminal } from "./mode.js";
+import { syncMode, syncTaskTerm, showMode, setMode, modeOf, openTaskTerminal, requestTerminal, boardShown, BOARD_BACK_MS } from "./mode.js";
 import { renderDigest } from "./digest.js";
 import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders, setScope } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
@@ -53,7 +53,10 @@ import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } f
 
 const REFRESH_MS = 5000;
 const ALERTED = "shepherd.alerted"; // "<repo key>#<question id>" already alerted
-const SENT_TEXT = "shepherd.sentText"; // "<repo key>#<question id>" → the answer text sent from here (History shows it at once)
+const SENT_TEXT = "shepherd.sentText"; // "<repo key>#<question id>" → the answer text sent from here (Needs you and Comments show it at once)
+const TOAST_ANSWERS = "shepherd.toastAnswers"; // "<space id>#<qid>#<text>" sent from a toast: never twice
+// Commands that act without showing anything: while a pill hides the board, the tab bar copy runs them.
+const QUIET_COMMANDS = new Set(["answer", "workflow-set", "pause", "accept", "scope"]);
 const ANSWERED = "shepherd.answered"; // "<repo key>#<question id>" answered here (never pruned by load; toasts read it)
 const ALERT_WINDOW_MS = 15 * 60000; // older questions found on first sight are not news
 const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for Needs you cards
@@ -62,7 +65,7 @@ const GIT_COUNT_STALE_MS = 30000; // other tabs (Changes' count on the tab bar) 
 const PR_STALE_MS = 30000; // gh pr view, for the PR card's checks
 const PROOF_STALE_MS = 15000;
 const LOAD_MS = 15000; // the status bar's machine load
-const CHAT_MAX = 500; // History keeps the newest lines
+const CHAT_MAX = 500; // the chat keeps the newest lines (Comments, the digest)
 const QINDEX = new WeakMap(); // questions array → questionIndex(), so it is worked out once per load
 const START_STALE_MS = 120000; // a "starting" mark older than this (start.sh done, no Shepherd showed) is dropped
 const QUEUE_IDLE_MS = 5000; // queued lines go once Shepherd has been idle (or done) this long
@@ -70,7 +73,7 @@ const QUEUE_FALLBACK_MS = 90000; // a Shepherd that never reports a status gets 
 const QUEUE_CLAIM_MS = 60000; // a copy sending a line holds it this long, so two copies never send it twice
 const REMOTE_FRESH_MS = 4000; // the shown space on another machine: one read per 5 s tick, whichever copy asks first
 const EMPTY = Object.freeze({ tasks: [], questions: [], chat: [], alerts: {} });
-// Copies that show every Shepherd space in All spaces; the others (detail, steer, terminal window)
+// Copies that show every Shepherd space in All spaces; the others (detail, steer)
 // show one task's space.
 const ALL_PANELS = ["tabs", "digest", "palette"];
 
@@ -135,7 +138,7 @@ const statusOf = (x, stage) => {
 export default class Shepherd extends View {
   init(_props, cx) {
     // A notification (the layout's "toast" is this mod): no loading, keys or timers of its own, except
-    // closing a question's toast once it's answered here (Needs you, the bar, A, another toast).
+    // closing a question's toast once it's answered here (Needs you, A, another toast, the palette).
     // Read props(), not init's argument: a toast copy's argument doesn't carry the notification, and
     // a toast that missed this check ran the board's command loop and sent every toast answer twice.
     if (isToast(props() ?? {})) {
@@ -195,10 +198,10 @@ export default class Shepherd extends View {
     // A steer menu never outlives a restart, but its id in shared state would (close() didn't run).
     if (!p.panel && shared(STEER_OPEN)) setShared(STEER_OPEN, null);
     if (!p.panel && shared(PALETTE_OPEN)) setShared(PALETTE_OPEN, null); // same for the palette: ⌘K must open it first time
-    // Keys (J/K, S, P, T, …) go to these copies only while they hold the keyboard, so typing in the
-    // bar, a reply field or a terminal never triggers them. The board gets the keyboard when clicked
-    // or from "focus" (mod.json focusable: pane.go, or a popup over it closing); popups and the
-    // terminal window's title bar take it when they open (the footer takes it back when clicked).
+    // Keys (J/K, S, P, T, …) go to these copies only while they hold the keyboard, so typing in a
+    // field or a terminal never triggers them. The board gets the keyboard when clicked or from
+    // "focus" (mod.json focusable: pane.go, ⌘J back from Shepherd's terminal, a popup over it
+    // closing); the steer popup takes it when it opens.
     if (!p.panel || ["steer", "detail"].includes(p.panel)) {
       this.keys = cx.focus_handle();
       if (p.panel === "steer") cx.spawn(async () => { this.keys.focus(); });
@@ -260,7 +263,7 @@ export default class Shepherd extends View {
     return spaces().find((s) => s.id === id) ?? spaces().find((s) => s.active) ?? null;
   }
 
-  // Once per turn: History and the board call this per line/card, and spaces() copies every space.
+  // Once per turn: Comments and the board call this per line/card, and spaces() copies every space.
   spaceById(id) { return id ? this.memo("spacesById", () => new Map(spaces().map((s) => [s.id, s]))).get(id) ?? null : null; }
 
   /** A task's, question's, card's, event's or chat line's space (each carries it as `_sid`), else this copy's. */
@@ -269,7 +272,7 @@ export default class Shepherd extends View {
   /** The space's name to tag a card, question or line with while every space shows, else null. */
   spaceTag(x) { return this.isAll() && x?._sid ? this.spaceById(x._sid)?.name ?? null : null; }
 
-  /** All spaces is on and this copy shows every space (the board, Needs you, bar, tab bar, History, digest). */
+  /** All spaces is on and this copy shows every space (the board, Needs you, tab bar, digest, palette). */
   isAll() {
     const p = props() ?? {};
     return shared(SCOPE) === "all" && (!p.panel || ALL_PANELS.includes(p.panel));
@@ -459,7 +462,7 @@ export default class Shepherd extends View {
       next = { ...prev, error: raw.error };
     } else {
       next = { tasks: raw.tasksFile.tasks ?? [], questions: raw.tasksFile.questions ?? [] };
-      // The chat (History): JSON lines; a half-written last line is skipped until it's whole.
+      // The chat (chat.jsonl): JSON lines; a half-written last line is skipped until it's whole.
       next.chat = (raw.chat ?? "").split("\n").slice(-CHAT_MAX).flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } });
       this.prunePending(next.chat, repo.key);
     }
@@ -588,7 +591,7 @@ export default class Shepherd extends View {
 
   /** The answer sent from here for a question tasks.json hasn't recorded yet, else null. */
   sentAnswer(q, space = this.spaceOf(q)) {
-    // repo() reads every terminal: once per space per turn (History asks it for each question).
+    // repo() reads every terminal: once per space per turn (Needs you asks it for each question).
     const repo = space ? this.memo(`repo:${space.id}`, () => this.repo(space)) : null;
     if (!repo || q.answer != null || !(shared(PENDING) ?? []).includes(pendingId(repo.key, q.id))) return null;
     return (shared(SENT_TEXT) ?? {})[pendingId(repo.key, q.id)] ?? "…";
@@ -840,7 +843,7 @@ export default class Shepherd extends View {
   // ---- spaces ----------------------------------------------------------------------------
 
   /** shepherd/start.sh for a space, on its machine, in the background (it starts Shepherd in its
-   *  own tab): the one way every Start Shepherd (tab bar, + menu, bar, History, Space settings, New
+   *  own tab): the one way every Start Shepherd (the No Shepherd area, + menu, ⌘J, Space settings, New
    *  space, a toast, a message written with no Shepherd) starts one. Here the script is this mod's own
    *  checkout's, found through the mods/shepherd link; on another machine it's that machine's checkout,
    *  run with its login shell's PATH (checkStartable → shepherdOn; `known` is an answer already in
@@ -919,7 +922,7 @@ export default class Shepherd extends View {
     return space ? (shared(QUEUED) ?? []).filter((x) => x.space === space.id) : [];
   }
 
-  /** Throws away a space's waiting lines (the bar's Discard). */
+  /** Throws away a space's waiting lines (the No Shepherd area's Discard). */
   discardQueued(space = this.space()) {
     if (space) setShared(QUEUED, (shared(QUEUED) ?? []).filter((x) => x.space !== space.id));
   }
@@ -1074,9 +1077,6 @@ export default class Shepherd extends View {
       ...(atPointer ? {} : { at: { x: 420, y: 120 } }) });
   }
 
-  /** T, the ▭ chip, the steer menu's Open terminal: the task on its Terminal tab (mode.js). */
-  openTerminal(_address, taskRef) { openTaskTerminal(this, taskRef); }
-
   /** D and ⌘J toggle: an open overlay copy keeps its id in shared state until close(). */
   toggleOverlay(key, spec, open) {
     const id = shared(key);
@@ -1178,7 +1178,8 @@ export default class Shepherd extends View {
   detailTab(k) {
     const tab = TABS[Number(k) - 1];
     if (!tab || typeof shared(SELECTED) !== "string") return false;
-    setShared(TAB, tab);
+    if (tab === "terminal") requestTerminal(this.selectedRef()); // opening it chooses its agent
+    else setShared(TAB, tab);
     return true;
   }
 
@@ -1191,12 +1192,15 @@ export default class Shepherd extends View {
   /** Needs you, in another space when `spaceId` names one (a toast's Open). */
   openNeeds(spaceId = null) {
     this.showSpace(spaceId); // a toast's Open shows that space alone, as the design does
+    showMode(this, "shepherd", this.spaceById(spaceId) ?? this.shownSpace()); // the views show only on ✻ Shepherd
     setShared(VIEW, "needs");
   }
 
   /** Shows a space alone (All spaces off), as picking its sidebar row does: a toast's Open, the palette's Go to. */
   showSpace(spaceId) {
-    if (!spaceId || !spaces().some((s) => s.id === spaceId)) return;
+    const space = spaceId ? spaces().find((s) => s.id === spaceId) : null;
+    if (!space) return;
+    setMode(space, "shepherd"); // its views, not the pill it was last on
     if (spaceId !== this.shownSpace()?.id) run("space.select", { id: spaceId });
     setScope(false, spaceId);
   }
@@ -1208,6 +1212,10 @@ export default class Shepherd extends View {
     try { a = JSON.parse(arg); } catch { return; }
     const space = spaces().find((s) => s.id === a?.space);
     if (!space || !a.q || !a.text) return;
+    // While the work area switches, the board and the tab bar copy can both get it: send it once.
+    const key = `${a.space}#${a.q}#${a.text}`;
+    if ((shared(TOAST_ANSWERS) ?? []).includes(key)) return;
+    setShared(TOAST_ANSWERS, [...(shared(TOAST_ANSWERS) ?? []), key].slice(-50));
     // The question as loaded, when this copy has it (a grilling answer then goes straight to its griller).
     const q = this.spaceState(space).questions.find((x) => x.id === a.q && x.answer == null);
     this.answer(q ?? { id: a.q, task: a.task ?? null }, a.text, space);
@@ -1233,12 +1241,13 @@ export default class Shepherd extends View {
     if (input) cx.spawn(async () => { input.focus(); });
   }
 
-  /** C: Shepherd's terminal takes the keyboard (the bar it typed "add " into is gone). */
+  /** C: Shepherd's terminal takes the keyboard (there's no bar to type "add " into); the tab bar copy does it. */
   focusBar() { run("shepherd.focus-bar"); }
 
   /** A key command (keys.json `shepherd.<command>`, delivered to every shown copy): digest, history,
-   *  focus, focus-bar, steer, terminal, pause, accept, open, view:<v>, scope[:all|space], tab:<1-6>, next, prev, palette[:<text>], workflow-set:<json>. The board copy
-   *  acts on them all. Task commands act on the keyboard
+   *  focus, focus-bar, steer, terminal, pause, accept, open, view:<v>, scope[:all|space], tab:<1-6>, next, prev, palette[:<text>], workflow-set:<json>.
+   *  The board copy acts on them; the tab bar copy takes ⌘J and C, and, while a pill hides the board, runs
+   *  the quiet ones through the same switch and brings ✻ Shepherd back for the rest. Task commands act on the keyboard
    *  focus, else the open task; `:<id>` names one. */
   command(c, cx) {
     // Only the first ":" splits: an answer's JSON (shepherd.answer) has colons of its own.
@@ -1251,29 +1260,23 @@ export default class Shepherd extends View {
     }
     // ⌘J and C come here: the tab bar always shows, the board not while a pill's tab does.
     if (panel === "tabs") {
-      if (name === "shepherd" || name === "history") this.openShepherd(this.shownSpace(), true);
-      else if (name === "focus-bar") this.openShepherd(this.shownSpace());
-      // While a pill's tab shows, the board is hidden and gets no commands: a toast's answer and Open,
-      // and the task commands, come here; those that show something go back to ✻ Shepherd first.
-      else if (this.shownSpace() && modeOf(this.shownSpace()) !== "shepherd") {
-        const back = () => showMode(this, "shepherd");
-        if (name === "answer") this.answerFromToast(arg);
-        else if (name === "needs") { back(); this.openNeeds(arg || null); }
-        else if (["open", "terminal"].includes(name)) {
-          const task = arg ? this.taskById(arg) : null;
-          if (task) { back(); this.taskCommand(name, task); }
-        } else if (name === "view" && VIEWS.includes(arg)) { back(); setShared(VIEW, arg); }
-        else if (name === "palette") { back(); this.togglePalette(arg || null); }
-        else if (name === "digest") { back(); this.toggleDigest(); }
+      if (name === "shepherd" || name === "history") return this.openShepherd(this.shownSpace(), true);
+      if (name === "focus-bar") return this.openShepherd(this.shownSpace());
+      if (boardShown(this) || name === "focus" || name === "new-folder") return; // the board (or the sidebar) takes it
+      // A pill hides the board, and commands reach shown copies only. What acts without showing
+      // anything runs here, through the board's own switch below; the rest brings ✻ Shepherd back
+      // and goes to the board again once it shows.
+      if (!QUIET_COMMANDS.has(name) && !this.overlayCommand(name, arg, true)) {
+        showMode(this, "shepherd");
+        cx.spawn(async (cx) => { await cx.sleep(BOARD_BACK_MS); run(`shepherd.${str}`); });
+        return;
       }
-      return;
-    }
-    if (panel) return;
+    } else if (panel) return;
     // The spaces copy takes "new-folder"; the board re-sending it here would loop, since every
     // copy gets every command (the board's own F key calls overlayCommand directly).
     if (name === "new-folder") return;
     if (this.overlayCommand(name, arg)) return;
-    if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
+    if (name === "focus") this.keys?.focus(); // pane.go, or a popup over the board closed
     else if (name === "digest") this.toggleDigest();
     // "history" is the old name: keys.json copies merged before the History window went still send it.
     else if (["shepherd", "history", "focus-bar"].includes(name)) return; // the tab bar copy takes these
@@ -1301,7 +1304,7 @@ export default class Shepherd extends View {
 
   /** Commands that open the sidebar's overlays, from keys.json or the board's N, F, W, U.
    *  True when `name` was one of them. */
-  overlayCommand(name, arg) {
+  overlayCommand(name, arg, dryRun = false) {
     const act = {
       "new-space": () => openNewSpace(arg || null),
       "new-folder": () => { run("layout.show", { id: "sidebar" }); run("shepherd.new-folder"); },
@@ -1323,7 +1326,7 @@ export default class Shepherd extends View {
       },
     }[name];
     if (!act) return false;
-    act();
+    if (!dryRun) act();
     return true;
   }
 

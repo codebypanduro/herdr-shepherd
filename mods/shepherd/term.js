@@ -6,7 +6,7 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
-import { hc, terminals } from "herdr";
+import { hc, terminals, run } from "herdr";
 import { MONO, currentTab, screenLines } from "./common.js";
 
 const TERM_REFRESH_MS = 1000;
@@ -234,7 +234,8 @@ export function renderTerm(m, task, t) {
   if (empty) {
     return root
       .child(h_flex().gap(8).items_center().text_color(t.dim)
-        .child(div().flex_1().child(empty)))
+        .child(div().flex_1().child(empty))
+        .when(Boolean(address) && state !== "none", (el) => el.child(openButton(address, t))))
       .when(Boolean(lines?.length), (el) => el.child(shown));
   }
 
@@ -247,7 +248,8 @@ export function renderTerm(m, task, t) {
     .children(KEYS.map(keyBtn))
     .child(div().flex_1())
     .when(Boolean(term?.error) && Boolean(lines?.length), (el) => el.child(
-      div().truncate().min_w(0).font_family(MONO).text_size(10.5).text_color(t.ansi1).child(term.error)));
+      div().truncate().min_w(0).font_family(MONO).text_size(10.5).text_color(t.ansi1).child(term.error)))
+    .child(openButton(address, t));
 
   const draft = !(tt?.input.value() ?? "");
   const field = h_flex().id("term-field").flex_none().gap(8).px(10).py(8).items_center().rounded(6).border(1)
@@ -267,3 +269,11 @@ export function renderTerm(m, task, t) {
 
   return root.child(shown).child(keys).child(field);
 }
+
+/** The real terminal, peeked over the tab (Herdr's peek: keep it as a tab, or close it): for what the
+ *  Terminal tab can only mirror (CI, an agent with a tab of its own, another space's task). */
+const openButton = (address, t) => div().id("term-open").flex_none().px(9).h(24).flex().items_center().rounded(5)
+  .border(1).border_color(t.border).cursor_pointer().text_size(11).text_color(t.foreground)
+  .hover((s) => s.bg(t.hover))
+  .on_click(() => run("terminal.peek", { terminal: address }))
+  .child("Open terminal ↗");

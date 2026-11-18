@@ -245,7 +245,7 @@ export function initSpaceSettings(m, cx, InputState) {
 }
 
 /** Asks again whether start.sh can run on the space's machine (the dialog opening, Retry); the
- *  answer is shared (ui.js STARTABLE), so the tab bar, the bar and History see it too. */
+ *  answer is shared (ui.js STARTABLE), so the tab bar and the No Shepherd area see it too. */
 function checkShepherd(m, cx, s) {
   const asked = checkStartable(m, s.machine ?? null, true); // "Checking…" until it answers
   cx.spawn(async (cx) => { await asked; cx.notify(); });

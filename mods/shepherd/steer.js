@@ -5,6 +5,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
 import { props, closeOverlay } from "herdr";
 import { STAGES, ROLE, MONO, palette } from "./common.js";
+import { openTaskTerminal } from "./mode.js";
 
 export function renderSteer(m) {
   const t = palette();
@@ -50,6 +51,6 @@ export function renderSteer(m) {
     .child(item("redirect", "↪", "Redirect…", "R", true, input("redirect")))
     .child(item("context", "+", "Add context…", "C", true, input("context")))
     .child(item("status", "?", "Ask for status", "S", true, () => { close(); m.askStatus(task); }))
-    .child(item("terminal", "▭", "Open terminal", "T", Boolean(task.terminal), () => { close(); m.openTerminal(null, task._ref); }))
+    .child(item("terminal", "▭", "Open terminal", "T", Boolean(task.terminal), () => { close(); openTaskTerminal(m, task._ref); }))
     .child(item("open", "↗", "Open task", "↵", true, () => { close(); m.openTask(task._ref); }));
 }
