@@ -168,10 +168,23 @@ export default class Shepherd extends View {
   }
 
   /** Where the space's tasks live: { machine, dir, key, workflow }, or null. */
+  /** The folder a space works in: its own, else (a space Herdr lists without one, as remote spaces
+   *  can be) the folder most of its live terminals run in, leaving out worktrees under .local/share. */
+  spaceDir(space, all = terminals()) {
+    if (space?.folder) return space.folder;
+    const n = {};
+    for (const x of all) {
+      if (x.state !== "live" || x.labels?.["herdr.space"] !== localId(space) || machineOf(x) !== (space?.machine ?? null)) continue;
+      if (!x.cwd || /\/\.local\/share\/|\/worktrees\//.test(x.cwd)) continue;
+      n[x.cwd] = (n[x.cwd] ?? 0) + 1;
+    }
+    return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }
+
   repo(space = this.space(), all = undefined) {
     if (!space) return null;
     const sh = this.shepherd(space, all);
-    const dir = sh?.labels?.["shepherd.dir"] ?? space.folder ?? null;
+    const dir = sh?.labels?.["shepherd.dir"] || this.spaceDir(space, all ?? terminals());
     const machine = space.machine ?? null;
     return dir ? { machine, dir, key: `${machine ?? ""}:${dir}`, workflow: sh?.labels?.["shepherd.workflow"] ?? null } : null;
   }
@@ -523,7 +536,7 @@ export default class Shepherd extends View {
     if (!space || this.isStarting(space) || this.shepherd(space)) return Promise.resolve();
     const machine = space.machine ?? null;
     const fail = (body, action = null) => notify({ title: "Shepherd didn't start", body, level: "error", ...(action ? { action: { name: action } } : {}) });
-    const dir = space.folder || this.repo(space)?.dir;
+    const dir = this.repo(space)?.dir;
     if (!dir) { fail(`${space.name} has no folder to start Shepherd in.`); return Promise.resolve(); }
     this.markStarting(space.id, true);
     return (async () => {
