@@ -30,13 +30,28 @@ if [ -n "$EXCLUDE" ]; then
 fi
 node "$HERE/bin/shep.mjs" --tasks "$FILE" init "$SPACE" >/dev/null
 
+# hc's server starts the terminal with its own PATH, which on another machine often lacks
+# ~/.local/bin, nvm and the like: give Shepherd this shell's PATH and claude's full path.
+CLAUDE=$(command -v claude || true)
+[ -n "$CLAUDE" ] || { echo "start.sh: claude isn't on PATH here ($PATH)" >&2; exit 1; }
+
 PROMPT=$(mktemp "${TMPDIR:-/tmp}/shepherd-prompt.XXXXXX")
 sed -e "s#{{SHEP}}#node $HERE/bin/shep.mjs#g" -e "s#{{WORKFLOW}}#$CONFIG#g" -e "s#{{REPO}}#$REPO#g" -e "s#{{SPACE}}#$SPACE#g" \
   "$HERE/PROMPT.md" > "$PROMPT"
 
-hc run --bg --keep --outlive-parent --no-parent --name "shepherd-$(echo "$SPACE" | tr -cd 'a-z0-9' | cut -c1-20)" \
+OUT=$(hc run --json --bg --keep --outlive-parent --no-parent --name "shepherd-$(echo "$SPACE" | tr -cd 'a-z0-9' | cut -c1-20)" \
   --cwd "$REPO" \
   --label herdr.space="$SPACE" --label herdr.tab="shepherd-$SPACE" \
   --label herdr.role=shepherd --label shepherd.dir="$REPO" --label shepherd.workflow="$CONFIG" \
-  -- env SHEP_FILE="$FILE" SHEP_WORKFLOW="$CONFIG" claude --model "$MODEL" --disallowedTools AskUserQuestion --append-system-prompt-file "$PROMPT" \
-  "You are Shepherd for $REPO. Read $CONFIG, run: node $HERE/bin/shep.mjs ls, then wait for the person."
+  -- env PATH="$PATH" SHEP_FILE="$FILE" SHEP_WORKFLOW="$CONFIG" "$CLAUDE" --model "$MODEL" --disallowedTools AskUserQuestion --append-system-prompt-file "$PROMPT" \
+  "You are Shepherd for $REPO. Read $CONFIG, run: node $HERE/bin/shep.mjs ls, then wait for the person.")
+ADDR=$(printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).address??"")}catch{}})')
+# A Shepherd that dies at once (a bad PATH, a missing flag) would otherwise leave every panel on
+# "Starting…": look again after a few seconds and fail with its last line.
+sleep 4
+STATE=$(hc get "$ADDR" --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);process.stdout.write(t.state==="live"?"live":`exit ${t.exit_code}`)}catch{process.stdout.write("gone")}})')
+if [ "$STATE" != "live" ]; then
+  echo "start.sh: Shepherd ($ADDR) stopped at once ($STATE): $(hc read "$ADDR" --lines 5 2>/dev/null | grep -v '^\s*$' | tail -1)" >&2
+  exit 1
+fi
+echo "Shepherd started: $ADDR"
