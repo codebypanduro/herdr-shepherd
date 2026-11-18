@@ -753,7 +753,8 @@ export default class Shepherd extends View {
       loop: Math.max(1, task.loop ?? 1),
       maxLoops: Math.max(1, task.maxLoops ?? MAX_LOOPS),
       status,
-      note,
+      // A task without a status (or a note that isn't text) must not break the card's child().
+      note: typeof note === "string" ? note : note == null ? "" : String(note),
       since,
       after: blockers,
       blocks,
