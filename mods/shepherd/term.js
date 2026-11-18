@@ -1,7 +1,7 @@
-// The task detail's Terminal tab: a live mirror of the task's agent terminal. Herdr can't put a
-// terminal in a mod block, so the tab reads the screen with `hc read` every TERM_REFRESH_MS while
-// it's shown and the terminal is live, presses keys with `hc keys` and types with `hc send`.
-// "Open terminal ↗" opens the real one (T). All of it lives on the detail copy's `m.termTab`
+// The task detail's Terminal tab when the agent's own terminal can't be put under the header (mode.js:
+// a terminal with no agent status, such as CI, an ended one, or one whose agent couldn't be chosen):
+// a mirror that reads the screen with `hc read` every TERM_REFRESH_MS while it's shown and the
+// terminal is live, presses keys with `hc keys` and types with `hc send`. All of it lives on the detail copy's `m.termTab`
 // (initTerm); render only notices what should be mirrored and leaves the switch to a task (syncTerm).
 
 import { div } from "gpui-kit";
@@ -86,7 +86,7 @@ export function syncTerm(m, task, cx) {
   cx.spawn(async (cx) => {
     await cx.sleep(0);
     tt.switching = undefined;
-    const task2 = m.selectedTask();
+    const task2 = m.termMode && m.termMode !== "mirror" ? null : m.selectedTask(); // the real terminal shows: no mirror
     const now = wantOf(m, task2);
     if ((tt.mirror?.want ?? null) === now) return;
     stopTerm(m);
@@ -234,8 +234,7 @@ export function renderTerm(m, task, t) {
   if (empty) {
     return root
       .child(h_flex().gap(8).items_center().text_color(t.dim)
-        .child(div().flex_1().child(empty))
-        .when(Boolean(address), (el) => el.child(openButton(m, task, t))))
+        .child(div().flex_1().child(empty)))
       .when(Boolean(lines?.length), (el) => el.child(shown));
   }
 
@@ -248,8 +247,7 @@ export function renderTerm(m, task, t) {
     .children(KEYS.map(keyBtn))
     .child(div().flex_1())
     .when(Boolean(term?.error) && Boolean(lines?.length), (el) => el.child(
-      div().truncate().min_w(0).font_family(MONO).text_size(10.5).text_color(t.ansi1).child(term.error)))
-    .child(openButton(m, task, t));
+      div().truncate().min_w(0).font_family(MONO).text_size(10.5).text_color(t.ansi1).child(term.error)));
 
   const draft = !(tt?.input.value() ?? "");
   const field = h_flex().id("term-field").flex_none().gap(8).px(10).py(8).items_center().rounded(6).border(1)
@@ -269,10 +267,3 @@ export function renderTerm(m, task, t) {
 
   return root.child(shown).child(keys).child(field);
 }
-
-/** The real terminal in its window: the same call as T, with task.terminal as the task names it. */
-const openButton = (m, task, t) => div().id("term-open").flex_none().px(9).h(24).flex().items_center().rounded(5)
-  .border(1).border_color(t.border).cursor_pointer().text_size(11).text_color(t.foreground)
-  .hover((s) => s.bg(t.hover))
-  .on_click(() => m.openTerminal(task.terminal, task._ref))
-  .child("Open terminal ↗");

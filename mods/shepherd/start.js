@@ -1,4 +1,5 @@
-// Starting Shepherd from anywhere: the inline Start Shepherd action (tab bar, bar, History), the
+// Starting Shepherd from anywhere: the inline Start Shepherd action (the ✻ Shepherd area with no
+// Shepherd, panel "noshep"; the sidebar), the
 // "Set up Shepherd on <machine>" dialog (panel "setup": confirm, clone, check) and the tab bar's +
 // menu (panel "newtab": Shepherd, Terminal and each agent installed on the space's machine).
 // Every start goes through m.startShepherd().
@@ -48,6 +49,18 @@ export function startAction(m, t, space, idp, { size = 12 } = {}) {
       const asked = checkStartable(m, space.machine ?? null, true);
       cx.spawn(async (cx) => { await asked; cx.notify(); });
     })));
+}
+
+/** Panel "noshep": where Shepherd's terminal goes under the views, while the shown space has none. */
+export function renderNoShepherd(m) {
+  const t = palette();
+  const space = m.shownSpace();
+  return v_flex().id("shepherd-noshep").size_full().items_center().justify_center().gap(10)
+    .rounded(6).border(1).border_color(t.border).bg(t.background).text_color(t.foreground)
+    .child(h_flex().gap(8).items_center()
+      .child(div().opacity(0.6).child(shepherdMark(t, 18)))
+      .child(div().text_size(13).text_color(t.muted).child("No Shepherd in this space")))
+    .when(Boolean(space), (el) => el.child(startAction(m, t, space, "noshep", { size: 12.5 })));
 }
 
 // ---- Set up Shepherd on <machine> ---------------------------------------------------------------

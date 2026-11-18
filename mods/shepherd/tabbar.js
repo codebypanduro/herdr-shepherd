@@ -1,14 +1,16 @@
-// The tab bar (panel "tabs", 36px): the space's tabs as pills, then the view switch, Digest, ⌘K
-// and ⚙ Workflow. This layout has no terminal area, so a pill opens its terminal in a window.
-// The first pill is always Shepherd (✻): its terminal, or Start Shepherd when the space has none.
-// The other pills carry their program's icon; + opens a menu of what a new tab can run.
+// The tab bar (panel "tabs", 36px): ✻ Shepherd, then the space's own tabs as pills, then (on ✻
+// Shepherd only) the view switch, Digest, ⌘K and ⚙ Workflow. A pill swaps the whole work area for
+// its tab's terminals; ✻ Shepherd shows the views with Shepherd's terminal under them (mode.js).
+// Pills carry their program's icon; + opens a menu of what a new tab can run, and selects it.
+// The bar also keeps the layout and Herdr's selected tab in step with the mode (syncMode).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { terminals, panes, run, setShared, knownAgents, openOverlay, closeOverlay, props } from "herdr";
+import { terminals, run, setShared, knownAgents, openOverlay, closeOverlay, props } from "herdr";
 import { openWorkflow, button } from "./ui.js";
-import { shepherdMark, programIcon, startAction } from "./start.js";
-import { MONO, VIEW, VIEW_LIST, localId, machineOf, palette } from "./common.js";
+import { shepherdMark, programIcon } from "./start.js";
+import { MONO, VIEW, VIEW_LIST, palette } from "./common.js";
+import { spaceTabs, modeOf, showMode } from "./mode.js";
 
 /** The + menu: Shepherd (when the space has none), Terminal, and each agent installed on the space's
  *  machine (knownAgents, at most 6 s; Herdr caches it a minute per machine), opened once known. */
@@ -77,9 +79,6 @@ export function renderTabBar(m) {
   const all = terminals();
   const stop = (_e, cx) => cx.stop_propagation();
 
-  // A tab's terminals: the live ones labelled with its id, on the space's machine.
-  const termsOf = (tab) => all.filter((x) => x.state === "live" && x.labels?.["herdr.tab"] === localId({ id: tab.id, machine: space?.machine })
-    && machineOf(x) === (space?.machine ?? null));
 
   // A pill with onClose shows ✕ while hovered (its room is kept, so pills don't shift) and closes on a
   // middle click.
@@ -109,50 +108,22 @@ export function renderTabBar(m) {
     return x?.program && !x.program.shell && title && title !== x.program.name ? title : progName(x);
   };
 
+  const st = spaceTabs(space, all);
+  const mode = space ? modeOf(space, st) : "shepherd";
+  const onShep = mode === "shepherd";
   const pills = [];
-  // Shepherd first, whether or not its tab sorts first; without one, its pill starts one.
-  if (sh) {
-    pills.push(pill("tab-shepherd", [shepherdMark(t, 16), div().child("Shepherd"), dot(sh.status)],
-      { selected: true, onClick: () => m.openTerminal(sh.address, null) }));
-  } else if (space) {
-    pills.push(h_flex().id("tab-shepherd").h(24).pl(4).pr(10).gap(7).flex_none().items_center().rounded(12)
-      .border(1).border_color(t.border).text_size(12)
-      .child(div().opacity(0.6).child(shepherdMark(t, 16)))
-      .child(div().flex_none().text_color(t.dim).child("Shepherd"))
-      .child(startAction(m, t, space, "tab-shep")));
-  }
-  const paneOf = (x) => panes().find((p) => p.terminal === x.address)?.pane ?? null;
-  for (const tab of space?.tabs ?? []) {
-    const ts = termsOf(tab);
-    // Shepherd's tab (by its label, whether or not m.shepherd() matched it) is the Shepherd pill and
-    // never closes; anything split beside Shepherd gets a pill of its own, closed by its pane.
-    if (ts.some(isShepherd)) {
-      for (const x of ts.filter((y) => !isShepherd(y))) {
-        const name = termName(x);
-        const pane = paneOf(x);
-        pills.push(pill(`tab-${tab.id}-${x.address}`, [programIcon(t, x.program), dot(x.status), div().max_w(220).truncate().text_color(t.muted).child(name)],
-          { onClick: () => m.openTerminal(x.address, null, `The ${name} beside Shepherd`),
-            onClose: pane ? () => closeTarget({ space, pane, terms: [x], name }) : null }));
-      }
-      continue;
-    }
-    const first = ts[0];
-    const task = first?.labels?.["shepherd.task"];
-    if (task) {
-      // A sub-agent kept as a tab: its address and task. ✕ parks every terminal in the tab: the tab
-      // goes, the agents keep running (closing would end a task's agent mid-task).
-      pills.push(pill(`tab-${tab.id}`, [programIcon(t, first.program), dot(first.status),
-        div().font_family(MONO).text_size(11).child(first.address),
-        div().text_color(t.dim).child(task)],
-      { onClick: () => m.openTerminal(first.address, task, `${task}'s agent`),
-        onClose: () => { for (const x of ts) run("terminal.park", { terminal: x.address }); },
-        closeTip: "Put away: the tab goes, its agents keep running" }));
-    } else {
-      // Named by the tab's name, else what its agent works on, else what it runs (Claude Code, Codex, sleep), else "shell".
-      const name = tab.named ? tab.name : termName(first);
-      pills.push(pill(`tab-${tab.id}`, [programIcon(t, first?.program), dot(tab.status), div().max_w(220).truncate().text_color(t.muted).child(name)],
-        { onClick: () => first && m.openTerminal(first.address, null, `The ${name} tab`), onClose: () => closeTarget({ space, tab, terms: ts, name }) }));
-    }
+  // ✻ Shepherd first: the views and Shepherd's terminal under them; with no Shepherd, the same place
+  // says so and offers Start Shepherd.
+  pills.push(pill("tab-shepherd", [shepherdMark(t, 16), div().child("Shepherd"), sh ? dot(sh.status) : div().text_color(t.dim).text_size(11).child("not running")],
+    { selected: onShep, onClick: () => showMode(m, "shepherd", space) }));
+  // The space's own tabs (Claude sessions, shells, agents opened with +). Shepherd's tab and tabs holding
+  // only Shepherd's agents (task agents and what they started) never get one.
+  for (const { tab, terms } of st.own) {
+    const first = terms[0];
+    // Named by the tab's name, else what its agent works on, else what it runs (Claude Code, Codex, sleep), else "shell".
+    const name = tab.named ? tab.name : termName(first);
+    pills.push(pill(`tab-${tab.id}`, [programIcon(t, first?.program), dot(tab.status), div().max_w(220).truncate().text_color(t.muted).child(name)],
+      { selected: mode === tab.id, onClick: () => showMode(m, tab.id, space), onClose: () => closeTarget({ space, tab, terms, name }) }));
   }
 
   const seg = h_flex().p(2).rounded(6).bg(t.canvas).border(1).border_color(t.border)
@@ -179,9 +150,11 @@ export function renderTabBar(m) {
       .on_click((_e, cx) => openNewTab(m, cx, space))
       .child("+"))
     .child(div().flex_1())
-    .child(seg)
-    .child(button("open-digest", [div().child("Digest"), div().font_family(MONO).text_size(10.5).text_color(t.dim).child("D")], () => m.toggleDigest()))
-    .child(button("open-palette", [div().font_family(MONO).text_size(11).text_color(t.muted).child("⌘K")], () => m.togglePalette()))
-    .child(button("open-workflow", [div().font_family(MONO).text_color(t.dim).child("⚙"), div().child("Workflow")],
-      () => openWorkflow()));
+    // The views, Digest, ⌘K and Workflow belong to ✻ Shepherd: a pill's terminal has the whole area.
+    .when(onShep, (el) => el
+      .child(seg)
+      .child(button("open-digest", [div().child("Digest"), div().font_family(MONO).text_size(10.5).text_color(t.dim).child("D")], () => m.toggleDigest()))
+      .child(button("open-palette", [div().font_family(MONO).text_size(11).text_color(t.muted).child("⌘K")], () => m.togglePalette()))
+      .child(button("open-workflow", [div().font_family(MONO).text_color(t.dim).child("⚙"), div().child("Workflow")],
+        () => openWorkflow())));
 }

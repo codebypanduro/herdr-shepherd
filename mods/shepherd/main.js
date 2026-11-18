@@ -1,7 +1,8 @@
 // Shepherd: one mod, several roles. props.view picks the main view (board, pipeline, deps, needs;
 // the person's switch in shared "shepherd.view" wins), props.panel a side role (spaces, tabs,
-// detail, status, bar) or an overlay (steer, term, termfoot, digest, history, plus, machine, usage,
-// newspace, addmachine, workflow, spacesettings).
+// detail, status, noshep) or an overlay (steer, digest, plus, machine, usage, newspace, addmachine,
+// workflow, spacesettings, palette, setup, newtab, closetab). What the work area shows (✻ Shepherd or
+// a tab) is mode.js.
 // Everything reads the shown space's <repo>/.herdr/shepherd/tasks.json, written by Shepherd
 // through shepherd/bin/shep.mjs. The repo is the `shepherd.dir` label on the space's Shepherd
 // terminal, else the space's folder. Answers and messages go to Shepherd with `hc send`.
@@ -28,14 +29,14 @@ function text(v) {
 }
 import { peekedKey, closePeek } from "./peek.js";
 import { renderNeeds } from "./needs.js";
-import { renderBar } from "./bar.js";
 import { renderDetail, TAB, TABS } from "./detail.js";
 import { initTerm, syncTerm, stopTerm, termAddress } from "./term.js";
 import { loadGit, loadDiff, loadFile, worktreeOf } from "./git.js";
 import { loadPr, loadProof } from "./ship.js";
 import { renderTabBar, renderCloseTab } from "./tabbar.js";
 import { renderPipeline, renderDeps } from "./views.js";
-import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
+import { renderSteer } from "./steer.js";
+import { syncMode, syncTaskTerm, showMode, spaceTabs, modeOf, openTaskTerminal } from "./mode.js";
 import { renderDigest } from "./digest.js";
 import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders, setScope } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
@@ -44,10 +45,10 @@ import { initWorkflow, renderWorkflow, initSpaceSettings, renderSpaceSettings, w
 import { PALETTE_OPEN, paletteSpec, initPalette, renderPalette } from "./palette.js";
 import {
   openNewSpace, openAddMachine, openMachine, openSpaceSettings, openUsage, openWorkflow, openSetup, readWorkflow,
-  execSafe, failLine, TERM_WINDOW, closeTermWindow, STARTING, QUEUED, QUEUE_MAX_MS, checkStartable, startStale,
+  execSafe, failLine, STARTING, QUEUED, QUEUE_MAX_MS, checkStartable, startStale,
   machineStartState, spaceByArg, waitsText,
 } from "./ui.js";
-import { renderSetup, renderNewTab, initSetup } from "./start.js";
+import { renderSetup, renderNewTab, initSetup, renderNoShepherd } from "./start.js";
 import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } from "./toast.js";
 
 const REFRESH_MS = 5000;
@@ -71,7 +72,7 @@ const REMOTE_FRESH_MS = 4000; // the shown space on another machine: one read pe
 const EMPTY = Object.freeze({ tasks: [], questions: [], chat: [], alerts: {} });
 // Copies that show every Shepherd space in All spaces; the others (detail, steer, terminal window)
 // show one task's space.
-const ALL_PANELS = ["bar", "tabs", "digest", "palette"];
+const ALL_PANELS = ["tabs", "digest", "palette"];
 
 // Module code is shared by every copy of the mod (AGENTS.md), so these are too:
 // - READS: reads of another machine's repo (4-5 ssh file reads each), by repo key:
@@ -84,7 +85,7 @@ const ALL_PANELS = ["bar", "tabs", "digest", "palette"];
 const READS = new Map();
 const TAGGED = new WeakMap();
 
-const READ_PANELS = [undefined, "bar", "spaces", "tabs", "status", "detail"];
+const READ_PANELS = [undefined, "spaces", "tabs", "status", "detail"];
 const PENDING_MAX_MS = 120000; // a read still pending after this was cut off (its copy closed): start another
 const backoffMs = (fails) => Math.min(300000, 30000 * 2 ** Math.max(0, fails - 1));
 
@@ -158,10 +159,6 @@ export default class Shepherd extends View {
       s.input.on("blur", () => { s.focused = false; });
     }
     const p = props() ?? {};
-    if (p.panel === "bar") {
-      this.barInput = InputState.new({ placeholder: "Tell Shepherd what to build, or ask about any task…" });
-      this.barInput.on("submit", () => this.say(this.barInput.value()));
-    }
     if (p.panel === "steer") {
       this.steerMode = null; // null: the menu; "redirect" | "context": the text field
       // A 3-row field per mode, each with the design's example as its placeholder (a state can't
@@ -202,12 +199,12 @@ export default class Shepherd extends View {
     // bar, a reply field or a terminal never triggers them. The board gets the keyboard when clicked
     // or from "focus" (mod.json focusable: pane.go, or a popup over it closing); popups and the
     // terminal window's title bar take it when they open (the footer takes it back when clicked).
-    if (!p.panel || ["steer", "detail", "term", "termfoot"].includes(p.panel)) {
+    if (!p.panel || ["steer", "detail"].includes(p.panel)) {
       this.keys = cx.focus_handle();
-      if (p.panel === "steer" || p.panel === "term") cx.spawn(async () => { this.keys.focus(); });
+      if (p.panel === "steer") cx.spawn(async () => { this.keys.focus(); });
     }
     // Key commands from keys.json ("shepherd.digest", "shepherd.view:pipeline", …).
-    if (!p.panel || p.panel === "bar" || p.panel === "spaces") {
+    if (!p.panel || p.panel === "spaces" || p.panel === "tabs") {
       cx.spawn(async (cx) => {
         for (;;) {
           const c = await nextCommand();
@@ -216,11 +213,11 @@ export default class Shepherd extends View {
         }
       });
     }
-    // Lines written while the space had no Shepherd: the bar sends them once it's up.
-    if (p.panel === "bar") cx.timer.every(2000, (cx) => this.flushQueue(cx));
+    // Lines written while the space had no Shepherd: the tab bar (one per window) sends them once it's up.
+    if (p.panel === "tabs") cx.timer.every(2000, (cx) => this.flushQueue(cx));
     // Panels with a Start Shepherd action ask whether it can start here: now and on the 5 s tick
     // below (never from render), so a space switch shows the answer within a tick.
-    if (["tabs", "bar"].includes(p.panel)) cx.spawn(async (cx) => this.askStartable(cx));
+    if (["tabs", "noshep"].includes(p.panel)) cx.spawn(async (cx) => this.askStartable(cx));
     if (p.panel === "status") {
       cx.timer.every(LOAD_MS, (cx) => this.readLoad(cx));
       this.readLoad(cx);
@@ -230,7 +227,7 @@ export default class Shepherd extends View {
     cx.timer.every(60000, (cx) => cx.notify());
     cx.timer.every(REFRESH_MS, (cx) => {
       this.sync(cx);
-      if (["tabs", "bar"].includes(props()?.panel)) this.askStartable(cx);
+      if (["tabs", "noshep"].includes(props()?.panel)) this.askStartable(cx);
       if (props()?.panel === "detail") { const task = this.selectedTask(); if (task) this.ensureGit(task, cx); }
     });
     this.sync(cx);
@@ -250,10 +247,10 @@ export default class Shepherd extends View {
 
   /** The space this copy is about: a steer menu's or terminal window's (props.space), the open
    *  task's in the detail while All spaces is on, else the shown one (Herdr's focused space, the
-   *  last one selected: the bar's lines go there in All spaces too). */
+   *  last one selected). */
   space() {
     const p = props() ?? {};
-    const ctx = p.space && ["steer", "term", "termfoot"].includes(p.panel) ? p.space
+    const ctx = p.space && p.panel === "steer" ? p.space
       : p.panel === "detail" && shared(SCOPE) === "all" ? parseRef(this.selectedRef() ?? "").sid : null;
     return (ctx && this.spaceById(ctx)) || this.shownSpace();
   }
@@ -597,12 +594,6 @@ export default class Shepherd extends View {
     return (shared(SENT_TEXT) ?? {})[pendingId(repo.key, q.id)] ?? "…";
   }
 
-  /** A message from the bar: plain text to Shepherd. */
-  say(text) {
-    const line = String(text ?? "").trim();
-    if (line && this.tell(line)) this.barInput.set_value("");
-  }
-
   /** The Overview's field: `re <id>: <text>` to the Shepherd of the task the field's text is for
    *  (`askTask`, a ref: ids repeat across spaces), in that task's own space. */
   askAbout(cx) {
@@ -662,9 +653,9 @@ export default class Shepherd extends View {
   }
 
 
-  /** Toast, sound and phone push for each new question. Only the bar alerts, so it happens once. */
+  /** Toast, sound and phone push for each new question. Only the tab bar alerts (one per window), so it happens once. */
   alert(repo) {
-    if (props()?.panel !== "bar") return;
+    if (props()?.panel !== "tabs") return;
     const d = this.data[repo.key];
     if (!d) return;
     const seen = new Set(shared(ALERTED) ?? []);
@@ -846,26 +837,6 @@ export default class Shepherd extends View {
     return out.sort((a, b) => a.since - b.since);
   }
 
-  /** The newest thing that happened, for the bar: a stage run's start or result ({task: "T-2",
-   *  text: "code review fail · 1 finding", result: "fail"}), an open question ({…, text: "asks: …",
-   *  result: "ask"}) or an answer ({…, text: "you answered: Merge", result: "done"}). The bar tints the task id by `result`, as the History does. */
-  lastEvent() {
-    let best = null;
-    const take = (at, ev) => { if (!best || at > best.at) best = { at, ...ev }; };
-    for (const task of this.state().tasks ?? []) {
-      for (const r of task.history ?? []) {
-        take(Date.parse(r.end ?? r.start ?? "") || 0,
-          { task: task.id, _sid: task._sid, result: r.result, text: `${STAGES[r.stage]?.title.toLowerCase() ?? r.stage} ${r.result}${r.note ? ` · ${r.note}` : ""}` });
-      }
-    }
-    // A question is an event when asked (only while it's open) and when answered ("you answered: Merge", done green).
-    for (const q of this.state().questions ?? []) {
-      if (q.answer == null) take(Date.parse(q.asked ?? "") || 0, { task: q.task, _sid: q._sid, result: "ask", text: `asks: ${q.text}` });
-      else take(Date.parse(q.answered ?? q.asked ?? "") || 0, { task: q.task, _sid: q._sid, result: "done", text: `you answered: ${q.answer}` });
-    }
-    return best;
-  }
-
   // ---- spaces ----------------------------------------------------------------------------
 
   /** shepherd/start.sh for a space, on its machine, in the background (it starts Shepherd in its
@@ -905,7 +876,7 @@ export default class Shepherd extends View {
     setShared(STARTING, now);
   }
 
-  /** Drops "starting" marks whose Shepherd now shows, or that are older than START_STALE_MS. The bar runs it. */
+  /** Drops "starting" marks whose Shepherd now shows, or that are older than START_STALE_MS. flushQueue runs it. */
   pruneStarting() {
     const marks = shared(STARTING) ?? {};
     const all = terminals();
@@ -958,7 +929,7 @@ export default class Shepherd extends View {
    *  Claude's folder trust, is blocked and waits), or QUEUE_FALLBACK_MS after it shows if it reports
    *  no status. Each line is claimed in QUEUED first (so another copy never sends it too), removed
    *  once sent and recorded in that space's chat. Lines older than QUEUE_MAX_MS, or whose space is
-   *  gone, are dropped with a toast. The bar runs it every 2 s, with pruneStarting. */
+   *  gone, are dropped with a toast. The tab bar runs it every 2 s, with pruneStarting. */
   flushQueue(cx) {
     this.pruneStarting();
     const now = Date.now();
@@ -1084,7 +1055,9 @@ export default class Shepherd extends View {
 
   /** Ask for status: Shepherd answers in its terminal (and with `say --task`, in the task's Comments), so open it. */
   askStatus(task) {
-    if (task && this.tell(`status ${task.id}?`, task.id, this.spaceOf(task))) this.openShepherd(this.spaceOf(task));
+    // The reply also goes to the task's Comments; Shepherd's terminal takes the keyboard when it's the shown space's.
+    const space = this.spaceOf(task);
+    if (task && this.tell(`status ${task.id}?`, task.id, space) && space?.id === this.shownSpace()?.id) this.openShepherd(space);
   }
 
   /** Opens a task in the detail pane by its ref (task._ref, card._ref). */
@@ -1101,21 +1074,8 @@ export default class Shepherd extends View {
       ...(atPointer ? {} : { at: { x: 420, y: 120 } }) });
   }
 
-  /** An agent's real terminal in a window: a title bar to drag it by, the terminal, a footer.
-   *  `name`: what the footer calls a terminal that's neither Shepherd nor a task's (a tab's name). */
-  openTerminal(address, taskRef, name = null) {
-    if (!address) return;
-    // A bare address (as tasks.json writes it) is on the task's space's machine.
-    const sid = taskRef ? parseRef(taskRef).sid : null;
-    const space = (sid && this.spaceById(sid)) || this.space();
-    const machine = space?.machine ?? null;
-    if (machine && !String(address).includes("/")) address = `${machine}/${address}`;
-    const bar = (panel, px) => ({ type: "block", size: { px }, content: { mod: "shepherd", props: { panel, terminal: address, task: taskRef, name, space: space?.id ?? null } } });
-    openOverlay({
-      kind: "window", key: TERM_WINDOW, width: 900, height: 640,
-      layout: { type: "column", children: [bar("term", 40), { type: "block", content: { terminal: address } }, bar("termfoot", 30)] },
-    });
-  }
+  /** T, the ▭ chip, the steer menu's Open terminal: the task on its Terminal tab (mode.js). */
+  openTerminal(_address, taskRef) { openTaskTerminal(this, taskRef); }
 
   /** D and ⌘J toggle: an open overlay copy keeps its id in shared state until close(). */
   toggleOverlay(key, spec, open) {
@@ -1134,12 +1094,18 @@ export default class Shepherd extends View {
     this.toggleOverlay(PALETTE_OPEN, paletteSpec(query ?? ""), query ? true : undefined);
   }
 
-  /** ⌘J, the bar's Terminal button, "Talk to shepherd": the shown space's Shepherd is a Claude terminal,
-   *  so this opens that terminal; with none, it starts one (or says why it can't). */
-  openShepherd(space = this.space()) {
+  /** ⌘J (and Ask for status, C): ✻ Shepherd with the keyboard in Shepherd's terminal; again, from
+   *  Shepherd's terminal: back to the board. With no Shepherd, ✻ Shepherd and a start (or why it can't). */
+  openShepherd(space = this.space(), toggle = false) {
     if (!space) return;
+    const shown = this.shownSpace();
+    if (space.id !== shown?.id) { run("space.select", { id: space.id }); }
     const sh = this.shepherd(space);
-    if (sh) return this.openTerminal(sh.address, null, "Shepherd");
+    const onShep = modeOf(space) === "shepherd";
+    // Again from Shepherd's terminal: the board takes the keyboard back (its copy gets "focus").
+    if (sh && toggle && onShep && focused()?.terminal === sh.address) { run("shepherd.focus"); return; }
+    showMode(this, "shepherd", space);
+    if (sh) { run("pane.focus", { terminal: sh.address }); return; }
     const st = this.startState(space);
     if (st.state === "ok") return this.startShepherd(space, st.known);
     if (["starting", "checking"].includes(st.state)) return;
@@ -1267,12 +1233,12 @@ export default class Shepherd extends View {
     if (input) cx.spawn(async () => { input.focus(); });
   }
 
-  /** C: the bar takes the keyboard with "add " typed (design focusChat). */
+  /** C: Shepherd's terminal takes the keyboard (the bar it typed "add " into is gone). */
   focusBar() { run("shepherd.focus-bar"); }
 
   /** A key command (keys.json `shepherd.<command>`, delivered to every shown copy): digest, history,
    *  focus, focus-bar, steer, terminal, pause, accept, open, view:<v>, scope[:all|space], tab:<1-6>, next, prev, palette[:<text>], workflow-set:<json>. The board copy
-   *  acts on all but focus-bar, which only the bar copy takes. Task commands act on the keyboard
+   *  acts on them all. Task commands act on the keyboard
    *  focus, else the open task; `:<id>` names one. */
   command(c, cx) {
     // Only the first ":" splits: an answer's JSON (shepherd.answer) has colons of its own.
@@ -1283,8 +1249,10 @@ export default class Shepherd extends View {
       if (name === "new-folder") startNewFolder(this, cx);
       return;
     }
-    if (panel === "bar") {
-      if (name === "focus-bar") { this.barInput.set_value("add "); this.barInput.focus(); }
+    // ⌘J and C come here: the tab bar always shows, the board not while a pill's tab does.
+    if (panel === "tabs") {
+      if (name === "shepherd" || name === "history") this.openShepherd(this.shownSpace(), true);
+      else if (name === "focus-bar") this.openShepherd(this.shownSpace());
       return;
     }
     if (panel) return;
@@ -1295,7 +1263,7 @@ export default class Shepherd extends View {
     if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
     else if (name === "digest") this.toggleDigest();
     // "history" is the old name: keys.json copies merged before the History window went still send it.
-    else if (name === "shepherd" || name === "history") this.openShepherd();
+    else if (["shepherd", "history", "focus-bar"].includes(name)) return; // the tab bar copy takes these
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
     else if (name === "scope") setScope(arg === "all" || (arg !== "space" && shared(SCOPE) !== "all")); // all | space | toggle
     else if (name === "needs") this.openNeeds(arg || null);
@@ -1313,7 +1281,7 @@ export default class Shepherd extends View {
     if (!task) return;
     if (name === "open") this.openTask(task._ref);
     else if (name === "steer") this.openSteer(task._ref, false);
-    else if (name === "terminal") this.openTerminal(task.terminal, task._ref);
+    else if (name === "terminal") openTaskTerminal(this, task._ref);
     else if (name === "pause") this.togglePause(task);
     else if (name === "accept") this.accept(task);
   }
@@ -1381,7 +1349,7 @@ export default class Shepherd extends View {
     if (!task) return;
     if (k === "s") this.openSteer(task._ref, false);
     else if (k === "p") this.togglePause(task);
-    else if (k === "t") this.openTerminal(task.terminal, task._ref);
+    else if (k === "t") openTaskTerminal(this, task._ref);
     else if (k === "a") this.accept(task);
     else return;
     done();
@@ -1405,23 +1373,11 @@ export default class Shepherd extends View {
     if (k === "p") this.togglePause(task);
     else if (k === "r" || k === "c") this.steerField(k === "r" ? "redirect" : "context", cx);
     else if (k === "s") { close(); this.askStatus(task); }
-    else if (k === "t") { close(); this.openTerminal(task.terminal, task._ref); }
+    else if (k === "t") { close(); openTaskTerminal(this, task._ref); }
     else if (k === "enter") { close(); this.openTask(task._ref); }
     else return;
     cx.stop_propagation();
     cx.notify();
-  }
-
-  /** The terminal window's title bar holds the keyboard when the window opens: S steers, Esc closes.
-   *  Clicking into the terminal hands it the keyboard (Herdr has no read-only terminal block), and
-   *  Esc then goes to the agent; clicking the title bar or footer takes it back. */
-  termKey(e, cx) {
-    const p = props() ?? {};
-    const k = e.key.toLowerCase();
-    if (k === "escape") closeTermWindow(p.overlay);
-    else if (k === "s" && p.task) this.openSteer(p.task, false);
-    else return;
-    cx.stop_propagation();
   }
 
   // ---- task detail ---------------------------------------------------------------------
@@ -1566,14 +1522,11 @@ export default class Shepherd extends View {
     if (p.panel === "newspace") return renderNewSpace(this, folders());
     if (p.panel === "workflow") return renderWorkflow(this);
     if (p.panel === "spacesettings") return renderSpaceSettings(this);
-    if (p.panel === "tabs") return renderTabBar(this);
+    if (p.panel === "tabs") { syncMode(this, cx); return renderTabBar(this); }
     if (p.panel === "steer") return renderSteer(this).track_focus(this.keys).on_key_down((e, cx) => this.steerKey(e, cx));
-    if (p.panel === "term") return renderTermBar(this).track_focus(this.keys).on_key_down((e, cx) => this.termKey(e, cx));
-    if (p.panel === "termfoot") return renderTermFoot(this).track_focus(this.keys)
-      .on_mouse_down("left", () => this.keys.focus()).on_key_down((e, cx) => this.termKey(e, cx));
     if (p.panel === "digest") return renderDigest(this);
     if (p.panel === "palette") return renderPalette(this);
-    if (p.panel === "bar") return renderBar(this);
+    if (p.panel === "noshep") return renderNoShepherd(this);
     if (p.panel === "detail") {
       const task = this.selectedTask();
       if (task) this.ensureGit(task, cx);
@@ -1581,8 +1534,10 @@ export default class Shepherd extends View {
       // The task's body starts at once, still inside render, where cx.notify() is refused: let the
       // foreground executor run it after this frame (cx.sleep), then switch and redraw.
       if ((task?._ref ?? null) !== this.askTask) cx.spawn(async (cx) => { await cx.sleep(0); this.askFor(this.selectedTask()?._ref ?? null); cx.notify(); });
-      // The Terminal tab reads the agent's screen only while it's shown (term.js).
-      syncTerm(this, task, cx);
+      // The Terminal tab: the agent's own terminal under the header when it can be (mode.js), else a
+      // mirror that reads its screen only while it's shown (term.js).
+      this.termMode = syncTaskTerm(this, task, task ? termAddress(this, task) : null, cx);
+      syncTerm(this, this.termMode === "mirror" ? task : null, cx);
       // 1–6 switch tabs while the detail pane holds the keyboard (the board handles them too), never
       // while typing in the Ask field, a question's reply field or the Terminal tab's field: their keys
       // bubble up here. A click in any of them stops there (detail.js, term.js), so this one doesn't take the keyboard from it.

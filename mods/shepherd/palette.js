@@ -96,7 +96,7 @@ function allRows(m) {
   add("Actions", "Open terminal of focused task", cmd("terminal"), { keys: ["T"] });
   add("Actions", "Steer focused task", cmd("steer"), { keys: ["S"] });
   add("Actions", "Pause / resume focused task", cmd("pause"), { keys: ["P"] });
-  add("Actions", "Create task", cmd("focus-bar"), { keys: ["C"] });
+  add("Actions", "Create task (tell Shepherd)", cmd("focus-bar"), { keys: ["C"] });
   add("Actions", "Reply to next question", cmd("reply"), { keys: ["R"] });
   add("Actions", "Workflow settings", cmd("workflow"), { keys: letterChip("workflow") });
   add("Actions", "Weekly usage", cmd("usage"), { keys: letterChip("usage") });

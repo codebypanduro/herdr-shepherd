@@ -237,12 +237,5 @@ export const openSetup = (machine, space = null) => openOverlay({ mod: "shepherd
 export const openPlus = () => openOverlay({ mod: "shepherd", kind: "popup", width: 210, height: 76, props: { panel: "plus" } });
 export const openMachine = (name, atPointer = false) => openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 236,
   props: { panel: "machine", machine: name ?? null }, ...popAt(atPointer) });
-/** The terminal window's key. A window isn't the top dialog or popup, so `overlay.close` without an
- *  id leaves it open; closing it by this key always works. */
-export const TERM_WINDOW = "shepherd-terminal";
-export const closeTermWindow = (id) => {
-  closeOverlay(TERM_WINDOW);
-  if (id && id !== TERM_WINDOW) closeOverlay(id);
-};
 export const openUsage = (atPointer = false) => openOverlay({ mod: "shepherd", kind: "popup", width: 260, height: 150,
   props: { panel: "usage" }, ...popAt(atPointer) });

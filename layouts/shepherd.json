@@ -50,8 +50,8 @@
           }
         },
         {
-          "id": "main",
-          "type": "row",
+          "id": "area",
+          "type": "column",
           "gap": 6,
           "padding": [
             6,
@@ -59,50 +59,113 @@
           ],
           "children": [
             {
-              "id": "board",
+              "id": "main",
+              "type": "row",
+              "gap": 6,
+              "children": [
+                {
+                  "id": "board",
+                  "type": "block",
+                  "radius": 6,
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "content": {
+                    "mod": "shepherd",
+                    "props": {
+                      "view": "board"
+                    }
+                  }
+                },
+                {
+                  "id": "detail",
+                  "type": "column",
+                  "hidden": true,
+                  "size": {
+                    "px": 620
+                  },
+                  "min": 380,
+                  "radius": 6,
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "resizable": false,
+                  "children": [
+                    {
+                      "id": "detailbody",
+                      "type": "block",
+                      "size": {
+                        "weight": 1
+                      },
+                      "content": {
+                        "mod": "shepherd",
+                        "props": {
+                          "panel": "detail"
+                        }
+                      }
+                    },
+                    {
+                      "id": "taskterm",
+                      "type": "block",
+                      "hidden": true,
+                      "size": {
+                        "weight": 1
+                      },
+                      "border": {
+                        "width": 0,
+                        "color": "border"
+                      },
+                      "content": {
+                        "agent": "focused"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "size": {
+                "weight": 7
+              }
+            },
+            {
+              "id": "term",
               "type": "block",
-              "radius": 6,
-              "border": {
-                "width": 1,
-                "color": "border"
+              "size": {
+                "weight": 3
               },
               "content": {
-                "mod": "shepherd",
-                "props": {
-                  "view": "board"
+                "tab": "active",
+                "pane": {
+                  "gap": 6,
+                  "radius": 6,
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "focus": {
+                    "width": 1,
+                    "color": "accent"
+                  },
+                  "lone": true
                 }
               }
             },
             {
-              "id": "detail",
+              "id": "noshep",
               "type": "block",
               "hidden": true,
               "size": {
-                "px": 620
-              },
-              "min": 380,
-              "radius": 6,
-              "border": {
-                "width": 1,
-                "color": "border"
+                "weight": 3
               },
               "content": {
                 "mod": "shepherd",
                 "props": {
-                  "panel": "detail"
+                  "panel": "noshep"
                 }
               }
             }
           ]
-        },
-        {
-          "id": "barroom",
-          "type": "row",
-          "size": {
-            "px": 102
-          },
-          "resizable": false,
-          "children": []
         },
         {
           "id": "status",
@@ -116,19 +179,6 @@
               "panel": "status"
             }
           }
-        }
-      ],
-      "floating": [
-        {
-          "id": "bar",
-          "content": {
-            "mod": "shepherd",
-            "props": {
-              "panel": "bar"
-            }
-          },
-          "edge": "bottom",
-          "align": "center"
         }
       ]
     }

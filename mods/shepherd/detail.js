@@ -1,6 +1,6 @@
 // Task detail: header, worktree line and six tabs (Overview, Review, Changes, Files, Proof, Terminal).
-// Changes and Files come from git in the task's worktree (see git.js), Terminal mirrors the task's
-// agent (term.js); the rest is tasks.json.
+// Changes and Files come from git in the task's worktree (see git.js); Terminal is the agent's own
+// terminal in the block under this one (mode.js), or a mirror of it (term.js); the rest is tasks.json.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
@@ -10,6 +10,7 @@ import { renderChanges, renderFiles, fileIcon, worktreeOf } from "./git.js";
 import { renderPrCard, renderProof } from "./ship.js";
 import { questionCard } from "./needs.js";
 import { renderTerm, termBlocked, termState } from "./term.js";
+import { showAgent } from "./mode.js";
 import { shepherdMark, programIcon } from "./start.js";
 
 export { TAB, TABS, currentTab };
@@ -54,7 +55,7 @@ export function renderDetail(m) {
   const wt = worktreeLine(m, task);
   const meta = (text) => div().flex_none().font_family(MONO).text_size(11).text_color(t.muted).child(text);
 
-  // The agent's terminal: a live one opens the terminal window (as T does); greyed when there's none
+  // The agent's terminal: a live one opens the Terminal tab (as T does); greyed when there's none
   // ("no agent") or it isn't running (its address, ended).
   const term = termState(m, task);
   const live = term.state === "live";
@@ -64,7 +65,7 @@ export function renderDetail(m) {
     .tooltip(live ? "Open terminal (T)" : term.state === "none" ? "No agent running"
       : term.state === "unknown" ? `${task.terminal} isn't running` : `${task.terminal} has ended`)
     .when(live, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click(() => m.openTerminal(task.terminal, task._ref)))
+      .on_click(() => m.openTerminal(null, task._ref)))
     .child(div().w(12).h(9).rounded(2).border(1).border_color(live ? t.muted : t.dim))
     .child(term.state === "none" ? "no agent" : live ? task.terminal : `${task.terminal} · ended`);
 
@@ -107,6 +108,22 @@ export function renderDetail(m) {
       .when(k === "terminal" && termBlocked(m, task), (el) => el.child(div().size(6).rounded(3).bg(t.blocked)))
       .child(div().font_family(MONO).text_size(10).text_color(t.dim).child(String(i + 1)))));
 
+  // The Terminal tab with the agent's own terminal under the header (mode.js): the detail is only its
+  // header, and its height is what the layout gives this block.
+  const head = v_flex().id("detail-head").flex_none().child(header).child(tabs)
+    .on_size_change((size, cx) => { if (Math.abs((m.headH ?? 0) - size.height) > 0.5) { m.headH = size.height; cx.notify(); } });
+  if (tab === "terminal" && m.termMode === "embed") return root.child(head);
+  if (tab === "terminal" && m.termMode === "detached") {
+    // Another agent's pane took the block (clicking Shepherd's terminal does): offer it back rather
+    // than taking the keyboard from where the person just clicked.
+    const address = termState(m, task).address;
+    return root.child(head).child(v_flex().flex_1().items_center().justify_center().gap(8).text_color(t.dim)
+      .child(div().child(`${address} runs ${task.id}'s ${STAGES[task.stage]?.title ?? task.stage}.`))
+      .child(div().id("term-show").px(10).h(26).flex().items_center().rounded(5).border(1).border_color(t.input)
+        .cursor_pointer().text_size(12).text_color(t.foreground).hover((s) => s.bg(t.hover))
+        .on_click(() => showAgent(m, address))
+        .child("Show its terminal here")));
+  }
   const body = tab === "overview" ? overview(m, task, t, where)
     : tab === "review" ? review(task, t)
     : tab === "changes" ? renderChanges(m, task, t)
@@ -114,7 +131,7 @@ export function renderDetail(m) {
     : tab === "terminal" ? renderTerm(m, task, t)
     : renderProof(m, task, t);
 
-  return root.child(header).child(tabs).child(body);
+  return root.child(head).child(body);
 }
 
 // ---- Overview ------------------------------------------------------------------------------
