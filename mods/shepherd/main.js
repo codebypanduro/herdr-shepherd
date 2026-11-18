@@ -18,6 +18,14 @@ import {
   currentTab,
 } from "./common.js";
 import { renderBoard } from "./board.js";
+
+/** A note or report as one line of text: an agent's report can be an object ({text, …}), never "[object Object]". */
+function text(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") return text(v.text ?? v.message ?? v.summary ?? v.note ?? "");
+  return String(v);
+}
 import { peekedKey, closePeek } from "./peek.js";
 import { renderNeeds } from "./needs.js";
 import { renderBar } from "./bar.js";
@@ -737,7 +745,7 @@ export default class Shepherd extends View {
       : task.wait && task.status === "queued" ? task.wait
       : task.status === "queued" && blockers.length ? `blocked by ${blockers.join(", ")}`
       : task.status === "queued" && task.stage === "tickets" ? "ready-for-agent"
-      : (last?.note || (term?.report ?? "") || task.status);
+      : (text(last?.note) || text(term?.report) || task.status);
     return {
       address,
       live: term?.state === "live",
@@ -754,7 +762,7 @@ export default class Shepherd extends View {
       maxLoops: Math.max(1, task.maxLoops ?? MAX_LOOPS),
       status,
       // A task without a status (or a note that isn't text) must not break the card's child().
-      note: typeof note === "string" ? note : note == null ? "" : String(note),
+      note: text(note),
       since,
       after: blockers,
       blocks,
@@ -831,7 +839,7 @@ export default class Shepherd extends View {
         loop: Math.max(1, parseInt(l["shepherd.loop"] ?? "1", 10) || 1),
         maxLoops: MAX_LOOPS,
         status: statusOf(x, stage),
-        note: x.report ?? (x.argv ?? []).join(" "),
+        note: text(x.report) || (x.argv ?? []).join(" "),
         since: this.since[x.address].since,
         after: [],
         asked: false,
