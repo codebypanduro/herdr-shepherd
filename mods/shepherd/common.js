@@ -105,6 +105,13 @@ export function mins(m) {
 export const money = (n) => `$${(n ?? 0).toFixed(2)}`;
 export const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n ?? 0));
 
+/** A question's one-click answer: Merge / Approve for those kinds, else its recommended answer.
+ *  A (accept) and the toast's button both use it; the toast leaves grilling questions out (design). */
+export const recAnswer = (q) => (q?.kind === "merge" ? "Merge" : q?.kind === "approve" ? "Approve" : q?.recommended ?? null);
+
+/** A question's id in shared shepherd.pending / shepherd.answered: "<repo key>#<question id>". */
+export const pendingId = (key, qid) => `${key}#${qid}`;
+
 /** A theme color with alpha, for tints (theme colors are #rrggbb). */
 export const tint = (c, a) => (/^#[0-9a-f]{6}$/i.test(c) ? `${c}${Math.round(a * 255).toString(16).padStart(2, "0")}` : c);
 

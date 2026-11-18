@@ -14,7 +14,7 @@ import {
 } from "herdr";
 import {
   TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, DIGEST_OPEN, HISTORY_OPEN,
-  localId, machineOf, palette, mins, tint,
+  localId, machineOf, palette, mins, tint, recAnswer, pendingId,
 } from "./common.js";
 import { renderBoard } from "./board.js";
 import { renderNeeds } from "./needs.js";
@@ -42,6 +42,7 @@ import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } f
 const REFRESH_MS = 5000;
 const PENDING = "shepherd.pending"; // question ids answered here that tasks.json hasn't caught up with
 const ALERTED = "shepherd.alerted"; // "<repo key>#<question id>" already alerted
+const ANSWERED = "shepherd.answered"; // "<repo key>#<question id>" answered here (never pruned by load; toasts read it)
 const ALERT_WINDOW_MS = 15 * 60000; // older questions found on first sight are not news
 const REPLY_SLOTS = 12; // InputStates can't be made in render: a fixed pool for Needs you cards
 const GIT_STALE_MS = 10000; // Changes and Files reload this often while shown
@@ -68,10 +69,12 @@ const statusOf = (x, stage) => {
 export default class Shepherd extends View {
   init(_props, cx) {
     // A notification (the layout's "toast" is this mod): no loading, keys or timers of its own, except
-    // closing a question's toast once it's answered elsewhere here.
+    // closing a question's toast once it's answered here (Needs you, the bar, A, another toast).
+    // Read props(), not init's argument: a toast copy's argument doesn't carry the notification, and
+    // a toast that missed this check ran the board's command loop and sent every toast answer twice.
     if (isToast(props() ?? {})) {
       const s = props().action?.args?.shepherd;
-      if (s?.key) cx.timer.every(1000, () => { if ((shared(PENDING) ?? []).includes(`${s.key}#${s.q}`)) closeOverlay(props().overlay); });
+      if (s?.key) cx.timer.every(1000, () => { if ((shared(ANSWERED) ?? []).includes(pendingId(s.key, s.q))) closeOverlay(props().overlay); });
       return;
     }
     this.since = {}; // address -> { stage, since }: label-only cards' time in stage
@@ -277,8 +280,8 @@ export default class Shepherd extends View {
     this.data[repo.key] = { ...next, alerts, settings, wf, orch };
     // Answers tasks.json has recorded are no longer pending.
     const pending = shared(PENDING) ?? [];
-    const open = new Set(next.questions.filter((q) => q.answer == null).map((q) => `${repo.key}#${q.id}`));
-    const still = pending.filter((k) => !k.startsWith(`${repo.key}#`) || open.has(k));
+    const open = new Set(next.questions.filter((q) => q.answer == null).map((q) => pendingId(repo.key, q.id)));
+    const still = pending.filter((k) => !k.startsWith(pendingId(repo.key, "")) || open.has(k));
     if (still.length !== pending.length) setShared(PENDING, still);
   }
 
@@ -310,7 +313,7 @@ export default class Shepherd extends View {
     const pending = new Set(shared(PENDING) ?? []);
     const { grillNo } = this.questionIndex(questions ?? []);
     return (questions ?? [])
-      .filter((q) => q.answer == null && !pending.has(`${repo.key}#${q.id}`))
+      .filter((q) => q.answer == null && !pending.has(pendingId(repo.key, q.id)))
       .map((q) => ({ ...q, taskObj: tasks.find((x) => x.id === q.task) ?? null,
         // A grilling question's number in its task's grilling (they come one at a time, no limit).
         grillNo: grillNo.get(q.id) ?? null }))
@@ -338,7 +341,9 @@ export default class Shepherd extends View {
     const repo = this.repo(space);
     // Only a sent answer is pending; a queued one shows as open until it goes.
     if (!answer || !repo || this.tell(`answer ${q.id}: ${answer}`, q.task ?? null, space) !== "sent") return;
-    setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
+    const id = pendingId(repo.key, q.id);
+    setShared(PENDING, [...(shared(PENDING) ?? []), id]);
+    setShared(ANSWERED, [...(shared(ANSWERED) ?? []), id].slice(-200));
   }
 
   /** A message from the bar: plain text to Shepherd. */
@@ -406,22 +411,24 @@ export default class Shepherd extends View {
     if (!d) return;
     const seen = new Set(shared(ALERTED) ?? []);
     const now = Date.now();
-    const fresh = (d.questions ?? []).filter((q) => q.answer == null && !seen.has(`${repo.key}#${q.id}`));
+    const fresh = (d.questions ?? []).filter((q) => q.answer == null && !seen.has(pendingId(repo.key, q.id)));
     if (!fresh.length) return;
-    setShared(ALERTED, [...seen, ...fresh.map((q) => `${repo.key}#${q.id}`)].slice(-500));
+    setShared(ALERTED, [...seen, ...fresh.map((q) => pendingId(repo.key, q.id))].slice(-500));
     const news = fresh.filter((q) => now - (Date.parse(q.asked) || 0) < ALERT_WINDOW_MS);
     if (!news.length) return;
     const a = d.alerts ?? {};
-    const space = this.space();
-    const meta = [a.sound !== false ? "♪ sound" : "", a.phone && a.ntfy ? "sent to phone" : ""].filter(Boolean).join(" · ");
+    // The space this repo belongs to, not the shown one: a watch started for an earlier space keeps
+    // loading its repo after a switch. No such space: no toast (sound and push still go).
+    const space = spaces().find((s) => this.repo(s)?.key === repo.key) ?? null;
+    const sound = a.sound !== false, phone = Boolean(a.phone && a.ntfy);
     for (const [i, q] of news.entries()) {
       const title = `${q.task} needs you`;
       // Only the newest TOAST_MAX get a toast; the toast mod (toast.js) reads the question from args.
       if (a.toast !== false && space && i >= news.length - TOAST_MAX) {
-        const rec = q.recommended ?? (q.kind === "merge" ? "Merge" : q.kind === "approve" ? "Approve" : null);
+        const rec = q.kind === "grill" ? null : recAnswer(q); // the design gives grilling questions no button
         trackToast(notify({
           title, body: q.text, level: "warning", timeout: TOAST_MS,
-          action: { name: `shepherd.needs:${space.id}`, args: { shepherd: { space: space.id, key: repo.key, q: q.id, task: q.task ?? null, rec, meta } } },
+          action: { name: `shepherd.needs:${space.id}`, args: { shepherd: { space: space.id, key: repo.key, q: q.id, task: q.task ?? null, rec, sound, phone } } },
         }));
       }
       if (a.phone && a.ntfy) {
@@ -855,14 +862,23 @@ export default class Shepherd extends View {
 
   /** A: the recommended answer (Merge, Approve, a grilling question's) of the task's open question; nothing without one. */
   accept(task) {
-    const q = this.questions().find((x) => x.task === task.id && x.recommended);
-    if (q) this.answer(q, q.recommended);
+    const q = this.questions().find((x) => x.task === task.id && recAnswer(x));
+    if (q) this.answer(q, recAnswer(q));
   }
 
   /** Needs you, in another space when `spaceId` names one (a toast's Open). */
   openNeeds(spaceId = null) {
     if (spaceId && spaceId !== this.space()?.id && spaces().some((s) => s.id === spaceId)) run("space.select", { id: spaceId });
     setShared(VIEW, "needs");
+  }
+
+  /** shepherd.answer:<json {space, q, task, text}> from a toast. The board copy answers, not the toast's:
+   *  the toast closes at once, and a Shepherd it would start (no Shepherd up) needs a copy that stays. */
+  answerFromToast(arg) {
+    let a;
+    try { a = JSON.parse(arg); } catch { return; }
+    const space = spaces().find((s) => s.id === a?.space);
+    if (space && a.q && a.text) this.answer({ id: a.q, task: a.task ?? null }, a.text, space);
   }
 
   /** R (and shepherd.reply): Needs you, with the keyboard in the oldest question's reply field. */
@@ -881,7 +897,9 @@ export default class Shepherd extends View {
    *  acts on all but focus-bar, which only the bar copy takes. Task commands act on the keyboard
    *  focus, else the open task; `:<id>` names one. */
   command(c, cx) {
-    const [name, arg] = String(c).split(":");
+    // Only the first ":" splits: an answer's JSON (shepherd.answer) has colons of its own.
+    const str = String(c), at = str.indexOf(":");
+    const [name, arg] = at < 0 ? [str, undefined] : [str.slice(0, at), str.slice(at + 1)];
     const panel = props()?.panel;
     if (panel === "spaces") {
       if (name === "new-folder") startNewFolder(this, cx);
@@ -902,6 +920,7 @@ export default class Shepherd extends View {
     else if (name === "history") this.toggleHistory();
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
     else if (name === "needs") this.openNeeds(arg || null);
+    else if (name === "answer") this.answerFromToast(arg);
     else if (name === "reply") this.replyNext(cx);
     else if (name === "tab") this.detailTab(arg);
     else if (name === "next" || name === "prev") this.moveFocus(name === "next" ? 1 : -1);
