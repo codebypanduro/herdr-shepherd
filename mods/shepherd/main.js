@@ -315,6 +315,20 @@ export default class Shepherd extends View {
       && x.labels?.["herdr.space"] === localId(space) && machineOf(x) === (space.machine ?? null)) ?? null;
   }
 
+  /** The space's Shepherd when Claude runs in it and can take a line: not while a restart runs, and
+   *  not while bin/run.sh holds its terminal with Claude down (`shepherd.up=0`: stopped, or between a
+   *  restart's two Claudes), when a line would be thrown away. A Shepherd from before run.sh has no label. */
+  shepherdUp(space = this.space(), all = terminals()) {
+    const sh = this.shepherd(space, all);
+    return sh && !this.isRestarting(space) && sh.labels?.["shepherd.up"] !== "0" ? sh : null;
+  }
+
+  /** Whether the space's Shepherd terminal is there but its Claude has stopped (no restart running). */
+  shepherdStopped(space = this.space(), all = terminals()) {
+    const sh = this.shepherd(space, all);
+    return Boolean(sh) && !this.isRestarting(space) && sh.labels?.["shepherd.up"] === "0";
+  }
+
   /** Where the space's tasks live: { machine, dir, key, workflow }, or null. */
   /** The folder a space works in: its own, else (a space Herdr lists without one, as remote spaces
    *  can be) where its panes are now (`panes()[i].cwd`, what Herdr itself goes by), else its live
@@ -881,7 +895,9 @@ export default class Shepherd extends View {
    *  current PROMPT.md and workflow) in the same terminal, so its address, tab and sub-agents stay and
    *  the new one re-adopts the running work. Shared RESTARTING marks it from here until start.sh is
    *  done: lines to Shepherd queue meanwhile (tell), and flushQueue sends them once the new one has
-   *  been idle QUEUE_IDLE_MS. With no Shepherd, it starts one. Resolves when start.sh is done. */
+   *  been idle QUEUE_IDLE_MS (it drops the old one's idle time while the mark is up). A Shepherd whose
+   *  Claude stopped (shepherdStopped) is started again the same way. With no Shepherd terminal, it
+   *  starts one. Resolves when start.sh is done. */
   restartShepherd(space) {
     if (!space) return Promise.resolve();
     const sh = this.shepherd(space);
@@ -897,25 +913,23 @@ export default class Shepherd extends View {
       const s = await checkStartable(this, machine);
       if (!s.dir) return fail(`${machine ? `${machine}: ` : ""}${s.reason}`);
       const args = [`${s.dir}/start.sh`, "--restart", "--space", localId(space), dir];
-      const r = machine ? await execSafe("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 120000 })
-        : await execSafe("sh", args, { timeout: 120000 });
+      const r = machine ? await execSafe("sh", ["-c", 'PATH="$1"; shift; exec sh "$@"', "start", s.path, ...args], { on: machine, timeout: 150000 })
+        : await execSafe("sh", args, { timeout: 150000 }); // start.sh gives up after 75 s on its own
       if (r.code !== 0) return fail(r.code === -1 ? failLine(r) : (r.stderr || r.stdout || `exit ${r.code}`).trim().split("\n").pop());
       notify({ title: "Shepherd restarted", body: `${space.name}: a fresh Shepherd in ${sh.address} takes over the running work.`, level: "info" });
     })().catch((e) => fail(String(e?.message ?? e)))
-      .finally(() => {
-        // The old Shepherd's idle time isn't the new one's: queued lines wait for its own first turn.
-        delete (this.idleSince ?? {})[sh.address];
-        delete (this.shepSeen ?? {})[sh.address];
-        this.markRestarting(space.id, false);
-      });
+      .finally(() => this.markRestarting(space.id, false));
   }
 
-  /** Sets or clears a space's shared "restarting" mark. */
-  markRestarting(id, on) {
-    const now = { ...(shared(RESTARTING) ?? {}) };
+  /** Sets or clears a space's mark in a shared `{space id: ms}` (STARTING, RESTARTING). */
+  setMark(key, id, on) {
+    const now = { ...(shared(key) ?? {}) };
     if (on) now[id] = Date.now(); else delete now[id];
-    setShared(RESTARTING, now);
+    setShared(key, now);
   }
+
+  markRestarting(id, on) { this.setMark(RESTARTING, id, on); }
+  markStarting(id, on) { this.setMark(STARTING, id, on); }
 
   /** Whether a Restart Shepherd runs for the space (from any copy). */
   isRestarting(space) {
@@ -923,15 +937,12 @@ export default class Shepherd extends View {
     return Boolean(at) && Date.now() - at < RESTART_STALE_MS;
   }
 
-  /** Sets or clears a space's shared "starting" mark. */
-  markStarting(id, on) {
-    const now = { ...(shared(STARTING) ?? {}) };
-    if (on) now[id] = Date.now(); else delete now[id];
-    setShared(STARTING, now);
-  }
-
-  /** Drops "starting" marks whose Shepherd now shows, or that are older than START_STALE_MS. flushQueue runs it. */
+  /** Drops "starting" marks whose Shepherd now shows, or that are older than START_STALE_MS, and
+   *  "restarting" marks older than RESTART_STALE_MS (their copy went away mid-restart). flushQueue runs it. */
   pruneStarting() {
+    const restarts = shared(RESTARTING) ?? {};
+    const old = Object.keys(restarts).filter((id) => Date.now() - restarts[id] >= RESTART_STALE_MS || !spaces().some((x) => x.id === id));
+    if (old.length) { const now = { ...restarts }; for (const id of old) delete now[id]; setShared(RESTARTING, now); }
     const marks = shared(STARTING) ?? {};
     const all = terminals();
     const gone = Object.keys(marks).filter((id) => {
@@ -1011,7 +1022,8 @@ export default class Shepherd extends View {
       const space = spaces().find((x) => x.id === id);
       const sh = space && this.shepherd(space, all);
       if (!sh) continue;
-      if (this.isRestarting(space)) { delete idle[sh.address]; delete seen[sh.address]; continue; }
+      // Restarting, or Claude down under run.sh: wait, and count the new Claude's idle time from scratch.
+      if (!this.shepherdUp(space, all)) { delete idle[sh.address]; delete seen[sh.address]; continue; }
       seen[sh.address] ??= now;
       if (["idle", "done"].includes(sh.status)) idle[sh.address] ??= now; else delete idle[sh.address];
       const go = (idle[sh.address] != null && now - idle[sh.address] >= QUEUE_IDLE_MS)
@@ -1085,13 +1097,18 @@ export default class Shepherd extends View {
     const text = String(line ?? "").trim();
     if (!text || !space) return null;
     const sh = this.shepherd(space);
-    if (sh && !this.queued(space).length && !this.isRestarting(space)) {
+    const up = this.shepherdUp(space);
+    if (up && !this.queued(space).length) {
       hc(["send", sh.address, text]);
       this.record("you", text, task, space);
       return "sent";
     }
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     setShared(QUEUED, [...(shared(QUEUED) ?? []), { id, space: space.id, line: text, task, at: new Date().toISOString() }]);
+    if (this.shepherdStopped(space)) {
+      notify({ title: `Shepherd stopped in ${space.name}`, body: `${waitsText(this.queued(space).length)}: click to restart Shepherd; it goes to the new one.`,
+        level: "warning", action: { name: `shepherd.restart-shepherd:${space.id}` } });
+    }
     if (sh) return "queued";
     const waits = waitsText(this.queued(space).length);
     const st = this.startState(space);

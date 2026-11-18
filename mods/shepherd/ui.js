@@ -17,6 +17,8 @@ export const STARTABLE = "shepherd.startable"; // { "<machine, '' here>": { ...s
 export const STARTING = "shepherd.starting"; // { space id: ms }: a start asked for that space, until its Shepherd shows (any copy)
 export const RESTARTING = "shepherd.restarting"; // { space id: ms }: a Restart Shepherd running for that space (any copy), until start.sh --restart is done
 export const QUEUED = "shepherd.queued"; // [{ id, space, line, task, at, sending? }]: lines waiting for a Shepherd, sent once one is up
+/** One wording for Restart Shepherd's tooltips (Space settings, the ✻ area's header). */
+export const RESTART_TIP = "A fresh Shepherd with the current instructions and workflow; running tasks keep going";
 export const QUEUE_MAX_MS = 3600000; // a queued line older than this is dropped (with a toast), never sent days later
 
 /** Where "Set up Shepherd on <machine>" clones the public repo on another machine (setup.sh), and
@@ -218,7 +220,8 @@ case "$e" in /*) ;; *) e="$1/$e" ;; esac; mkdir -p "$(dirname "$e")"; grep -qx '
 /** Tells every Shepherd on this computer that the workflow file changed (PROMPT.md "workflow changed"). */
 export function tellWorkflowChanged(file) {
   for (const x of terminals()) {
-    if (x.state === "live" && x.labels?.["herdr.role"] === "shepherd" && machineOf(x) === null) {
+    // Not to one whose Claude is down (bin/run.sh throws lines away then): a restarted one reads the file anyway.
+    if (x.state === "live" && x.labels?.["herdr.role"] === "shepherd" && x.labels?.["shepherd.up"] !== "0" && machineOf(x) === null) {
       hc(["send", x.address, `workflow changed: read ${file}`]).catch(() => null);
     }
   }

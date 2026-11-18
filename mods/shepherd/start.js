@@ -9,7 +9,7 @@ import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, terminals, run, props, openOverlay, closeOverlay } from "herdr";
 import { MONO, palette, localId, machineOf } from "./common.js";
-import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup, button, spaceByArg } from "./ui.js";
+import { SETUP_DIR, SETUP_REPO, checkStartable, setupShepherd, openSetup, button, spaceByArg, RESTART_TIP } from "./ui.js";
 
 /** The ✻ Shepherd mark on an `accent` tile. */
 export const shepherdMark = (t, size = 16) => div().size(size).flex_none().rounded(Math.round(size / 4)).bg(t.accent)
@@ -113,14 +113,15 @@ export function renderTermHead(m) {
   const space = spaces().find((s) => localId(s) === term.labels?.["herdr.space"] && (s.machine ?? null) === machineOf(term)) ?? null;
   if (!space) return div();
   const busy = m.isRestarting(space);
+  const stopped = m.shepherdStopped(space);
   return h_flex().id("shepherd-termhead").size_full().px(10).gap(8).items_center().bg(t.surface)
     .border_b(1).border_color(t.border).text_size(11.5).text_color(t.muted)
     .child(shepherdMark(t, 13))
-    .child(div().text_color(t.foreground).child("Shepherd"))
+    .child(div().text_color(t.foreground).child(stopped ? "Shepherd · stopped" : "Shepherd"))
     .child(div().flex_1().min_w(0).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(term.address))
     .child(busy ? div().flex_none().text_color(t.dim).child("Restarting…")
       : div().id("termhead-restart").flex_none().text_color(t.accent).cursor_pointer().hover((s) => s.text_color(t.foreground))
-        .tooltip("A fresh Shepherd with the current instructions; running tasks keep going")
+        .tooltip(RESTART_TIP)
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { cx.stop_propagation(); openRestart(m, space); })
         .child("↻ Restart Shepherd"));

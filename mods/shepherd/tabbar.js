@@ -114,6 +114,7 @@ export function renderTabBar(m) {
   // ✻ Shepherd first: the views and Shepherd's terminal under them; with no Shepherd, the same place
   // says so and offers Start Shepherd.
   pills.push(pill("tab-shepherd", [shepherdMark(t, 16), div().child("Shepherd"), sh && space && m.isRestarting(space) ? div().text_color(t.dim).text_size(11).child("restarting…")
+    : sh && space && m.shepherdStopped(space) ? div().text_color(t.blocked).text_size(11).child("stopped")
     : sh ? dot(sh.status) : div().text_color(t.dim).text_size(11).child("not running")],
     { selected: onShep, onClick: () => showMode(m, "shepherd", space) }));
   // The space's own tabs (Claude sessions, shells, agents opened with +). Shepherd's tab and tabs holding

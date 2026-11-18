@@ -10,7 +10,7 @@ import { spaces, terminals, run, closeOverlay, props, readTextFile, home } from 
 import { MONO, LIMITS, MAX_LOOPS, STAGES, palette, machineOf, agentIcon, stageAgent } from "./common.js";
 import { machineList, machineByName, bar, machineIcon } from "./machines.js";
 import { folders, folderOf, setFolder } from "./sidebar.js";
-import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, checkStartable, openSetup } from "./ui.js";
+import { chip, check, gitFacts, shepherdHome, readWorkflow, editJson, excludeHerdr, tellWorkflowChanged, checkStartable, openSetup, RESTART_TIP } from "./ui.js";
 import { openRestart } from "./start.js";
 
 const BUILD = ["implement", "review", "ci", "proof"];
@@ -283,7 +283,7 @@ function restartButton(m, t, s) {
   return div().id("ss-restart").flex_none().px(10).h(26).flex().items_center().rounded(5).text_size(12)
     .border(1).border_color(t.input).text_color(busy ? t.dim : t.foreground)
     .when(!busy, (el) => el.cursor_pointer().hover((x) => x.bg(t.hover)))
-    .tooltip("A fresh Shepherd with the current instructions and workflow; running tasks keep going")
+    .tooltip(RESTART_TIP)
     .on_click(() => { if (!busy) openRestart(m, s); })
     .child(busy ? "Restarting…" : "Restart");
 }

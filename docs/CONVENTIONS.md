@@ -15,6 +15,7 @@ Every terminal Shepherd starts carries these. Shepherd's own terminal has `herdr
 | `shepherd.loop` | `1`…`n` | build-loop agents |
 | `shepherd.title` | the task's title | implementer and reviewer (cards without a task use it) |
 | `shepherd.dir` | the repo's root | the Shepherd terminal (where the mods read tasks.json) |
+| `shepherd.up` | `1` while Claude runs in Shepherd's terminal, `0` while it doesn't (between a restart's two Claudes, or stopped); set by `shepherd/bin/run.sh`. Absent on a Shepherd from before run.sh | the Shepherd terminal (the mods send nothing while it's `0`) |
 | `shepherd.workflow` | the workflow file start.sh gave Shepherd (`workflow.json`, else `workflow.example.json`) | the Shepherd terminal (the status bar finds `bin/load.sh` and the board `bin/shep.mjs` beside it; on another machine, the mods read the settings from it) |
 
 ```
