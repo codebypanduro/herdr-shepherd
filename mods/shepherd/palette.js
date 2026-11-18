@@ -6,32 +6,60 @@
 // The palette is its own copy of the mod, closed as soon as a row runs, so anything that outlives it
 // (an answer that may start a Shepherd, a workflow write, the board's keyboard focus) goes to the
 // board copy as a `shepherd.<command>`; the palette never receives commands itself (no nextCommand
-// loop), so it can't loop. Its data is the copy's own load: local repos read on open, other machines'
-// from the shared read (READ_PANELS: a dialog never starts an ssh read), filtered in memory per key.
+// loop), so it can't loop. Its data is the copy's own load, as the History's: local repos read on open
+// and every 5 s tick; another machine's from the shared read (a dialog never starts one; with none
+// cached, it reads once per tick itself), filtered in memory per key, never read per keystroke.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input, ScrollHandle } from "gpui-base";
 import { props, run, setShared, closeOverlay, spaces } from "herdr";
-import { MONO, STAGES, VIEW_LIST, TABS, TAB, SELECTED, MAX_LOOPS, recAnswer, refOf, palette as colors } from "./common.js";
+import { MONO, STAGES, VIEW_LIST, TABS, TAB, MAX_LOOPS, GO_KEYS, LETTER_KEYS, recAnswer, refOf, palette as colors } from "./common.js";
 import { machineList } from "./machines.js";
 import { MODELS } from "./settings.js";
-import { setScope } from "./sidebar.js";
+import { readWorkflow } from "./ui.js";
 
 export const PALETTE_OPEN = "shepherd.paletteOpen"; // the open palette's overlay id (⌘K toggles)
 
 const GROUPS = ["Navigate", "Spaces", "Machines", "Actions", "Needs you", "Tasks", "This task", "Workflow", "Herdr"];
-const VIEW_KEYS = { board: ["G", "B"], pipeline: ["G", "P"], deps: ["G", "D"], needs: ["G", "N"] };
+/** The board's keys as chips (common.js holds the maps boardKey reads). */
+const goChips = (view) => { const k = Object.keys(GO_KEYS).find((x) => GO_KEYS[x] === view); return k ? ["G", k.toUpperCase()] : []; };
+const letterChip = (name) => { const k = Object.keys(LETTER_KEYS).find((x) => LETTER_KEYS[x] === name); return k ? [k.toUpperCase()] : []; };
+
+// ↑↓ (and ctrl-n / ctrl-p) are bound to actions in the palette's key context, at its own depth and at
+// the Input's: the focused Input may take ↑↓ as its own actions before a key-down listener above it
+// would see them. The keymap is the app's, so this runs once per module load.
+const UP = "shepherd-palette-up", DOWN = "shepherd-palette-down";
+let bound = false;
+function bindKeys(cx) {
+  if (bound) return;
+  bound = true;
+  try {
+    cx.bind_keys(["ShepherdPalette", "ShepherdPalette > Input"].flatMap((context) => [
+      { keystroke: "up", action: UP, context }, { keystroke: "down", action: DOWN, context },
+      { keystroke: "ctrl-p", action: UP, context }, { keystroke: "ctrl-n", action: DOWN, context },
+    ]));
+  } catch (e) { console.log(`shepherd palette: keys not bound: ${e?.message ?? e}`); }
+}
 
 /** The palette's dialog spec; `query` is typed in already. */
 export const paletteSpec = (query = "") => ({ mod: "shepherd", kind: "dialog", width: 600, height: 460, props: { panel: "palette", query } });
 
 export function initPalette(m, cx, InputState) {
   const q = String(props()?.query ?? "");
-  m.pal = { sel: 0, scroll: ScrollHandle.new(), input: InputState.new({ placeholder: "Type a command or search tasks…", value: q }) };
-  m.pal.input.on("change", (_e, cx) => { m.pal.sel = 0; m.pal.scroll.scroll_to_item(0); cx.notify(); });
-  m.pal.input.on("submit", () => runRow(m, paletteRows(m)[m.pal.sel]));
+  // selKey: the selected row by identity (group, tag, label), so a reload that drops or adds rows never
+  // moves ↵ onto another row; null is the first row.
+  m.pal = { selKey: null, wf: null, scroll: ScrollHandle.new(), input: InputState.new({ placeholder: "Type a command or search tasks…", value: q }) };
+  m.pal.input.on("change", (_e, cx) => { m.pal.selKey = null; m.pal.scroll.scroll_to_item(0); cx.notify(); });
+  m.pal.input.on("submit", () => { const rows = paletteRows(m); runRow(m, rows[selIndex(m, rows)]); });
+  bindKeys(cx);
   cx.spawn(async () => { m.pal.input.focus(); });
+  // The person's workflow.json, which the Workflow rows write: their "current" (Workflow settings' too).
+  cx.spawn(async (cx) => { m.pal.wf = (await readWorkflow(m).catch(() => null))?.wf ?? {}; cx.notify(); });
 }
+
+const rowKey = (r) => `${r.g}|${r.tag ?? ""}|${r.label}`;
+/** The selected row's index in `rows`: the one with the selected identity, else the first. */
+const selIndex = (m, rows) => Math.max(0, m.pal.selKey == null ? 0 : rows.findIndex((r) => rowKey(r) === m.pal.selKey));
 
 /** "shepherd.<cmd>" to the board copy (it outlives the palette). */
 const cmd = (name, arg) => () => run(`shepherd.${name}${arg != null ? `:${arg}` : ""}`);
@@ -42,21 +70,19 @@ function allRows(m) {
   const add = (g, label, act, extra = {}) => out.push({ g, label, run: act, keys: [], ...extra });
   const all = m.isAll();
 
-  for (const [v, title] of VIEW_LIST) add("Navigate", `Go to ${title.toLowerCase()}`, () => setShared("shepherd.view", v), { keys: VIEW_KEYS[v] });
+  for (const [v, title] of VIEW_LIST) add("Navigate", `Go to ${title.toLowerCase()}`, () => setShared("shepherd.view", v), { keys: goChips(v) });
   add("Navigate", "Talk to shepherd", cmd("history"), { keys: ["⌘", "J"] });
   add("Navigate", "Daily digest", cmd("digest"), { keys: ["D"] });
   add("Navigate", "Next card", cmd("next"), { keys: ["J"] });
   add("Navigate", "Previous card", cmd("prev"), { keys: ["K"] });
 
-  add("Spaces", "New space from folder…", cmd("new-space"), { keys: ["N"] });
-  // The spaces copy takes new-folder (the board ignores it); show the sidebar first, as F does.
-  add("Spaces", "New folder", () => { run("layout.show", { id: "sidebar" }); run("shepherd.new-folder"); }, { keys: ["F"] });
+  add("Spaces", "New space from folder…", cmd("new-space"), { keys: letterChip("new-space") });
+  add("Spaces", "New folder", () => m.overlayCommand("new-folder"), { keys: letterChip("new-folder") }); // as F does
   add("Spaces", all ? "Show this space only" : "Show all spaces", cmd("scope", all ? "space" : "all"));
   const shown = m.shownSpace()?.id;
   for (const s of spaces()) {
     if (s.id === shown) continue;
-    // Picking a space shows it alone, as the sidebar's rows do.
-    add("Spaces", `Go to ${s.name}`, () => { run("space.select", { id: s.id }); setScope(false, s.id); }, { meta: s.machine ?? "" });
+    add("Spaces", `Go to ${s.name}`, () => m.showSpace(s.id), { meta: s.machine ?? "" }); // alone, as the sidebar's rows do
   }
 
   add("Machines", "Add machine…", cmd("add-machine"));
@@ -70,8 +96,8 @@ function allRows(m) {
   add("Actions", "Pause / resume focused task", cmd("pause"), { keys: ["P"] });
   add("Actions", "Create task", cmd("focus-bar"), { keys: ["C"] });
   add("Actions", "Reply to next question", cmd("reply"), { keys: ["R"] });
-  add("Actions", "Workflow settings", cmd("workflow"), { keys: ["W"] });
-  add("Actions", "Weekly usage", cmd("usage"), { keys: ["U"] });
+  add("Actions", "Workflow settings", cmd("workflow"), { keys: letterChip("workflow") });
+  add("Actions", "Weekly usage", cmd("usage"), { keys: letterChip("usage") });
 
   // Needs you: every open question's answers, "T-4 · Merge". The board copy sends them (shepherd.answer),
   // to the Shepherd of the question's own space. Old grilling rounds and questions without options
@@ -83,42 +109,53 @@ function allRows(m) {
     if (rec && !Array.isArray(q.questions) && !opts.includes(rec)) opts.unshift(rec);
     for (const o of opts) {
       add("Needs you", `${q.task ?? q.id} · ${o}`, cmd("answer", JSON.stringify({ space: q._sid, q: q.id, task: q.task ?? null, text: o })),
-        { tag, meta: o === rec ? "recommended" : "" });
+        { tag, sid: q._sid, meta: o === rec ? "recommended" : "" });
     }
-    if (!opts.length) add("Needs you", `${q.task ?? q.id} · Answer in Needs you…`, cmd("needs", q._sid ?? ""), { tag });
+    if (!opts.length) add("Needs you", `${q.task ?? q.id} · Answer in Needs you…`, cmd("needs", q._sid ?? ""), { tag, sid: q._sid });
   }
 
   for (const task of m.state().tasks ?? []) {
-    add("Tasks", `${task.id} · ${task.title ?? ""}`, () => {
-      setShared(SELECTED, `task-${task._ref ?? refOf(task._sid, task.id)}`);
-      setShared(TAB, "overview");
-      run("layout.show", { id: "detail" });
-    }, { tag: m.spaceTag(task), meta: STAGES[task.stage]?.title ?? task.stage ?? "", exact: String(task.id).toLowerCase() });
+    add("Tasks", `${task.id} · ${task.title ?? ""}`, () => { setShared(TAB, "overview"); m.openTask(task._ref ?? refOf(task._sid, task.id)); },
+      { tag: m.spaceTag(task), sid: task._sid, meta: STAGES[task.stage]?.title ?? task.stage ?? "", exact: String(task.id).toLowerCase() });
   }
 
   if (m.selectedTask()) {
     TABS.forEach((tab, i) => add("This task", `Show ${tab}`, () => setShared(TAB, tab), { keys: [String(i + 1)] }));
   }
 
-  // The person's workflow.json (the board copy writes it: shepherd.workflow-set); "current" is what's
-  // in force for the shown space (its orchestra.json may override it).
-  const s = m.settings(m.shownSpace());
-  const loops = s.maxLoops ?? MAX_LOOPS;
-  const set = (path, value) => cmd("workflow-set", JSON.stringify({ path, value }));
-  for (let n = 1; n <= 5; n++) add("Workflow", `Max loops: ${n}`, set(["maxLoops"], n), { meta: n === loops ? "current" : "" });
-  for (const [stage, verb] of [["implement", "Implement"], ["review", "Review"]]) {
-    const cur = s.stages?.[stage]?.model ?? null;
-    for (const mo of MODELS) add("Workflow", `${verb} with ${mo}`, set(["stages", stage, "model"], mo), { meta: mo === cur ? "current" : "" });
+  // The person's workflow.json on this computer (the board copy writes it: shepherd.workflow-set), as
+  // Workflow settings: "current" is its value. When the shown space runs on something else (its
+  // orchestra.json, or another machine's workflow.json), that row also says "<space> uses it".
+  if (m.pal.wf) {
+    const wf = m.pal.wf;
+    const shownSpace = m.shownSpace();
+    const s = m.settings(shownSpace);
+    const meta = (mine, theirs, v) => [v === mine ? "current" : "", theirs !== mine && v === theirs ? `${shownSpace?.name ?? "this space"} uses it` : ""].filter(Boolean).join(" · ");
+    const set = (path, value) => cmd("workflow-set", JSON.stringify({ path, value }));
+    const loops = wf.maxLoops ?? MAX_LOOPS;
+    for (let n = 1; n <= 5; n++) add("Workflow", `Max loops: ${n}`, set(["maxLoops"], n), { meta: meta(loops, s.maxLoops ?? loops, n) });
+    for (const [stage, verb] of [["implement", "Implement"], ["review", "Review"]]) {
+      const cur = wf.stages?.[stage]?.model ?? null;
+      for (const mo of MODELS) add("Workflow", `${verb} with ${mo}`, set(["stages", stage, "model"], mo), { meta: meta(cur, s.stages?.[stage]?.model ?? cur, mo) });
+    }
   }
   return out;
 }
 
 /** The rows the query lets through, grouped: every word must appear in the row's group, space tag or
  *  label. A task whose id is the whole query ("t-2") comes first, so ↵ opens it rather than
- *  answering one of its questions; groups keep their order otherwise. "Herdr commands…" is always last. */
+ *  answering one of its questions; groups keep their order otherwise. Within a group the shown space's
+ *  rows come before other spaces' (All spaces: "T-4 merge" answers the shown space's T-4 first; type
+ *  the space's name for another). "Herdr commands…" is always last. Worked out once per turn. */
 export function paletteRows(m) {
   const words = String(m.pal?.input.value() ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  return m.memo(`palette:${words.join(" ")}:${Boolean(m.pal?.wf)}`, () => filterRows(m, words));
+}
+
+function filterRows(m, words) {
   const query = words.join(" ");
+  const shown = m.shownSpace()?.id ?? null;
+  const away = (r) => (r.sid && r.sid !== shown ? 1 : 0);
   const rows = allRows(m).filter((r) => {
     const hay = `${r.g} ${r.tag ?? ""} ${r.label}`.toLowerCase();
     return words.every((w) => hay.includes(w));
@@ -127,7 +164,7 @@ export function paletteRows(m) {
   const best = new Map();
   for (const r of rows) best.set(r.g, Math.min(best.get(r.g) ?? 1, rank(r)));
   const sorted = rows.map((r, i) => ({ r, i })).sort((a, b) =>
-    (best.get(a.r.g) - best.get(b.r.g)) || (GROUPS.indexOf(a.r.g) - GROUPS.indexOf(b.r.g)) || (rank(a.r) - rank(b.r)) || (a.i - b.i));
+    (best.get(a.r.g) - best.get(b.r.g)) || (GROUPS.indexOf(a.r.g) - GROUPS.indexOf(b.r.g)) || (rank(a.r) - rank(b.r)) || (away(a.r) - away(b.r)) || (a.i - b.i));
   return [...sorted.map((x) => x.r), { g: "Herdr", label: "Herdr commands…", keys: [], run: () => run("app.palette") }];
 }
 
@@ -137,15 +174,24 @@ function runRow(m, row) {
   row.run();
 }
 
-/** ↑↓ from the field: they bubble up from it. */
-export function paletteKey(m, e, cx) {
+/** ↑↓: the bound actions, and a key-down listener in case the Input lets the keys through. One
+ *  keystroke can reach both, in the same turn: a second move within 15 ms is that same key. */
+function move(m, step, cx) {
+  const now = Date.now();
+  if (now - (m.pal.movedAt ?? 0) < 15) return;
+  m.pal.movedAt = now;
+  const rows = paletteRows(m);
+  const i = Math.max(0, Math.min(rows.length - 1, selIndex(m, rows) + step));
+  m.pal.selKey = rowKey(rows[i]);
+  m.pal.scroll.scroll_to_item(m.pal.childIndex?.[i] ?? i);
+  cx.notify();
+}
+
+function paletteKey(m, e, cx) {
   const k = e.key.toLowerCase();
   if (k !== "down" && k !== "up") return;
-  const n = paletteRows(m).length;
-  m.pal.sel = Math.max(0, Math.min(n - 1, m.pal.sel + (k === "down" ? 1 : -1)));
-  m.pal.scroll.scroll_to_item(m.pal.childIndex?.[m.pal.sel] ?? m.pal.sel);
+  move(m, k === "down" ? 1 : -1, cx);
   cx.stop_propagation();
-  cx.notify();
 }
 
 const keyChip = (t, k) => div().min_w(18).h(18).px(4).flex().items_center().justify_center().rounded(4)
@@ -154,7 +200,7 @@ const keyChip = (t, k) => div().min_w(18).h(18).px(4).flex().items_center().just
 export function renderPalette(m) {
   const t = colors();
   const rows = paletteRows(m);
-  const sel = Math.min(m.pal.sel, rows.length - 1);
+  const sel = selIndex(m, rows);
   const children = [];
   const childIndex = [];
   let g = null;
@@ -174,7 +220,7 @@ export function renderPalette(m) {
         if (m.pal.pointer === undefined) { m.pal.pointer = at; return; }
         if (at === m.pal.pointer) return;
         m.pal.pointer = at;
-        if (m.pal.sel !== i) { m.pal.sel = i; cx.notify(); }
+        if (m.pal.selKey !== rowKey(r)) { m.pal.selKey = rowKey(r); cx.notify(); }
       })
       .on_click(() => runRow(m, r))
       .when(Boolean(r.tag), (el) => el.child(div().flex_none().max_w(96).truncate().font_family(MONO).text_size(10.5).text_color(t.dim).child(r.tag)))
@@ -188,6 +234,9 @@ export function renderPalette(m) {
   if (rows.length === 1) childIndex[0] = children.length - 1;
 
   return v_flex().id("shepherd-palette").size_full().bg(t.surface).text_color(t.foreground)
+    .key_context("ShepherdPalette")
+    .on_action(UP, (_e, cx) => move(m, -1, cx))
+    .on_action(DOWN, (_e, cx) => move(m, 1, cx))
     .on_key_down((e, cx) => paletteKey(m, e, cx))
     .child(h_flex().flex_none().gap(10).px(16).py(14).items_center().border_b(1).border_color(t.border)
       .child(Input.new(m.pal.input).flex_1().h(22).text_size(15).text_color(t.foreground))

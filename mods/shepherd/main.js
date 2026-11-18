@@ -13,7 +13,7 @@ import {
   hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
 import {
-  TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
+  GO_KEYS, LETTER_KEYS, TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
   SCOPE, PENDING, REMOTE_MS, localId, machineOf, palette, mins, tint, recAnswer, pendingId, refOf, parseRef,
   currentTab,
 } from "./common.js";
@@ -1215,11 +1215,15 @@ export default class Shepherd extends View {
 
   /** Needs you, in another space when `spaceId` names one (a toast's Open). */
   openNeeds(spaceId = null) {
-    if (spaceId && spaces().some((s) => s.id === spaceId)) {
-      if (spaceId !== this.space()?.id) run("space.select", { id: spaceId });
-      setScope(false, spaceId); // a toast's Open shows that space alone, as the design does
-    }
+    this.showSpace(spaceId); // a toast's Open shows that space alone, as the design does
     setShared(VIEW, "needs");
+  }
+
+  /** Shows a space alone (All spaces off), as picking its sidebar row does: a toast's Open, the palette's Go to. */
+  showSpace(spaceId) {
+    if (!spaceId || !spaces().some((s) => s.id === spaceId)) return;
+    if (spaceId !== this.shownSpace()?.id) run("space.select", { id: spaceId });
+    setScope(false, spaceId);
   }
 
   /** shepherd.answer:<json {space, q, task, text}> from a toast. The board copy answers, not the toast's:
@@ -1279,7 +1283,6 @@ export default class Shepherd extends View {
     // copy gets every command (the board's own F key calls overlayCommand directly).
     if (name === "new-folder") return;
     if (this.overlayCommand(name, arg)) return;
-    const task = arg ? this.taskById(arg) : this.keyTask();
     if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
     else if (name === "digest") this.toggleDigest();
     else if (name === "history") this.toggleHistory();
@@ -1292,8 +1295,13 @@ export default class Shepherd extends View {
     else if (name === "reply") this.replyNext(cx);
     else if (name === "tab") this.detailTab(arg);
     else if (name === "next" || name === "prev") this.moveFocus(name === "next" ? 1 : -1);
-    else if (!task) return;
-    else if (name === "open") this.openTask(task._ref);
+    else if (["open", "steer", "terminal", "pause", "accept"].includes(name)) this.taskCommand(name, arg ? this.taskById(arg) : this.keyTask());
+  }
+
+  /** The task commands: `:<ref>` names the task, else the keyboard focus or the open one. */
+  taskCommand(name, task) {
+    if (!task) return;
+    if (name === "open") this.openTask(task._ref);
     else if (name === "steer") this.openSteer(task._ref, false);
     else if (name === "terminal") this.openTerminal(task.terminal, task._ref);
     else if (name === "pause") this.togglePause(task);
@@ -1335,7 +1343,7 @@ export default class Shepherd extends View {
     const done = () => { cx.stop_propagation(); cx.notify(); };
     if (this.gAt && Date.now() - this.gAt < 1200) {
       this.gAt = 0;
-      const v = { b: "board", p: "pipeline", d: "deps", n: "needs" }[k];
+      const v = GO_KEYS[k];
       if (v) { setShared(VIEW, v); done(); }
       return;
     }
@@ -1357,7 +1365,7 @@ export default class Shepherd extends View {
     if (k === "d") { this.toggleDigest(); done(); return; }
     if (k === "c") { this.focusBar(); done(); return; }
     if (k === "r") { this.replyNext(cx); done(); return; }
-    const key = { n: "new-space", f: "new-folder", w: "workflow", u: "usage" }[k];
+    const key = LETTER_KEYS[k];
     if (key && this.overlayCommand(key)) { done(); return; }
     const task = (k === "s" || k === "t") && peeked ? this.taskById(peeked.slice(5)) : this.keyTask();
     if (!task) return;

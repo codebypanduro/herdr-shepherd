@@ -66,30 +66,29 @@ async function reloadWorkflow(m) {
   if (r.error) m.wf.error = r.error;
 }
 
-/** Sets one key path in the person's workflow.json and tells the Shepherds here; the copy's shown
- *  repo is reloaded. Resolves with an error line, or null. The palette's Workflow rows use it too
- *  (through the board copy: shepherd.workflow-set). */
-export async function writeWorkflow(m, path, value) {
-  const h = await shepherdHome(m);
-  if (!h) return "mods/shepherd isn't inside a checkout with shepherd/: no workflow file to write.";
+/** Sets one key path in the person's workflow.json, then `before()` (Workflow settings re-reads it),
+ *  tells the Shepherds here, and reloads the copy's shown repo. Resolves with an error line, or null;
+ *  never rejects. The palette's Workflow rows use it too (through the board copy: shepherd.workflow-set). */
+export async function writeWorkflow(m, path, value, before = null) {
   try {
+    const h = await shepherdHome(m);
+    if (!h) return "mods/shepherd isn't inside a checkout with shepherd/: no workflow file to write.";
     await editJson(m, h.workflow, null, (o) => {
       let at = o;
       for (const k of path.slice(0, -1)) at = (at[k] = { ...(at[k] ?? {}) });
       at[path[path.length - 1]] = value;
     }, h.example);
-  } catch (e) { return `workflow.json: ${e.message ?? e}`; }
-  tellWorkflowChanged(h.workflow);
-  const repo = m.repo();
-  if (repo) await m.load(repo);
-  return null;
+    if (before) await before();
+    tellWorkflowChanged(h.workflow);
+    const repo = m.repo();
+    if (repo) await m.load(repo);
+    return null;
+  } catch (e) { return `workflow.json: ${e?.message ?? e}`; }
 }
 
 function setWorkflow(m, cx, path, value) {
   cx.spawn(async (cx) => {
-    const error = await writeWorkflow(m, path, value);
-    if (error) m.wf.error = error;
-    else { m.wf.error = null; await reloadWorkflow(m); }
+    m.wf.error = await writeWorkflow(m, path, value, () => reloadWorkflow(m));
     cx.notify();
   });
 }
