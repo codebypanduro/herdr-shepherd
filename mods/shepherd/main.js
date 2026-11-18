@@ -13,7 +13,7 @@ import {
   hc, notify, playSound, exec, run, openOverlay, closeOverlay, nextCommand,
 } from "herdr";
 import {
-  GO_KEYS, LETTER_KEYS, TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, HISTORY_OPEN, STEER_OPEN,
+  GO_KEYS, LETTER_KEYS, TASKS, CHAT, MAX_LOOPS, STAGES, ORDER, STUCK_MIN, LIMITS, VIEW, VIEWS, SELECTED, FILTERS, DIGEST_OPEN, STEER_OPEN,
   SCOPE, PENDING, REMOTE_MS, localId, machineOf, palette, mins, tint, recAnswer, pendingId, refOf, parseRef,
   currentTab,
 } from "./common.js";
@@ -37,7 +37,6 @@ import { renderTabBar, renderCloseTab } from "./tabbar.js";
 import { renderPipeline, renderDeps } from "./views.js";
 import { renderSteer, renderTermBar, renderTermFoot } from "./steer.js";
 import { renderDigest } from "./digest.js";
-import { renderHistory } from "./history.js";
 import { initSidebar, renderSidebar, renderPlus, startNewFolder, folders, setScope } from "./sidebar.js";
 import { renderMachinePop, renderUsagePop } from "./machines.js";
 import { initAddMachine, renderAddMachine, initNewSpace, renderNewSpace } from "./dialogs.js";
@@ -72,7 +71,7 @@ const REMOTE_FRESH_MS = 4000; // the shown space on another machine: one read pe
 const EMPTY = Object.freeze({ tasks: [], questions: [], chat: [], alerts: {} });
 // Copies that show every Shepherd space in All spaces; the others (detail, steer, terminal window)
 // show one task's space.
-const ALL_PANELS = ["bar", "tabs", "history", "digest", "palette"];
+const ALL_PANELS = ["bar", "tabs", "digest", "palette"];
 
 // Module code is shared by every copy of the mod (AGENTS.md), so these are too:
 // - READS: reads of another machine's repo (4-5 ssh file reads each), by repo key:
@@ -173,12 +172,6 @@ export default class Shepherd extends View {
       };
       for (const x of Object.values(this.steerInputs)) x.on("submit", (e) => { if (e?.secondary) this.sendSteer(); });
     }
-    if (p.panel === "history") {
-      this.historyInput = InputState.new({ placeholder: "Talk to shepherd · try “add a dark mode toggle”" });
-      this.historyInput.on("submit", () => { if (this.tell(this.historyInput.value())) this.historyInput.set_value(""); });
-      this.historyScroll = ScrollHandle.new();
-      this.historyCount = 0;
-    }
     if (p.panel === "detail") {
       // The Overview's "Ask Shepherd about <id>…" field. No placeholder of its own: InputState can't
       // change one, so the detail draws "Ask Shepherd about <id>…" under it while it's empty.
@@ -199,9 +192,8 @@ export default class Shepherd extends View {
     if (p.panel === "spacesettings") initSpaceSettings(this, cx, InputState);
     if (p.panel === "setup") initSetup(this);
     if (p.panel === "palette") { initPalette(this, cx, InputState); setShared(PALETTE_OPEN, p.overlay ?? null); }
-    // D and ⌘J toggle these: the open copy's overlay id, cleared in close().
+    // D toggles this: the open copy's overlay id, cleared in close().
     if (p.panel === "digest") setShared(DIGEST_OPEN, p.overlay ?? null);
-    if (p.panel === "history") setShared(HISTORY_OPEN, p.overlay ?? null);
     if (p.panel === "steer") setShared(STEER_OPEN, p.overlay ?? null); // the board skips the peek while it's up
     // A steer menu never outlives a restart, but its id in shared state would (close() didn't run).
     if (!p.panel && shared(STEER_OPEN)) setShared(STEER_OPEN, null);
@@ -210,10 +202,9 @@ export default class Shepherd extends View {
     // bar, a reply field or a terminal never triggers them. The board gets the keyboard when clicked
     // or from "focus" (mod.json focusable: pane.go, or a popup over it closing); popups and the
     // terminal window's title bar take it when they open (the footer takes it back when clicked).
-    if (!p.panel || ["steer", "detail", "term", "termfoot", "history"].includes(p.panel)) {
+    if (!p.panel || ["steer", "detail", "term", "termfoot"].includes(p.panel)) {
       this.keys = cx.focus_handle();
       if (p.panel === "steer" || p.panel === "term") cx.spawn(async () => { this.keys.focus(); });
-      if (p.panel === "history") cx.spawn(async () => { this.historyInput.focus(); });
     }
     // Key commands from keys.json ("shepherd.digest", "shepherd.view:pipeline", …).
     if (!p.panel || p.panel === "bar" || p.panel === "spaces") {
@@ -229,7 +220,7 @@ export default class Shepherd extends View {
     if (p.panel === "bar") cx.timer.every(2000, (cx) => this.flushQueue(cx));
     // Panels with a Start Shepherd action ask whether it can start here: now and on the 5 s tick
     // below (never from render), so a space switch shows the answer within a tick.
-    if (["tabs", "bar", "history"].includes(p.panel)) cx.spawn(async (cx) => this.askStartable(cx));
+    if (["tabs", "bar"].includes(p.panel)) cx.spawn(async (cx) => this.askStartable(cx));
     if (p.panel === "status") {
       cx.timer.every(LOAD_MS, (cx) => this.readLoad(cx));
       this.readLoad(cx);
@@ -239,7 +230,7 @@ export default class Shepherd extends View {
     cx.timer.every(60000, (cx) => cx.notify());
     cx.timer.every(REFRESH_MS, (cx) => {
       this.sync(cx);
-      if (["tabs", "bar", "history"].includes(props()?.panel)) this.askStartable(cx);
+      if (["tabs", "bar"].includes(props()?.panel)) this.askStartable(cx);
       if (props()?.panel === "detail") { const task = this.selectedTask(); if (task) this.ensureGit(task, cx); }
     });
     this.sync(cx);
@@ -249,7 +240,6 @@ export default class Shepherd extends View {
     const p = props() ?? {};
     if (isToast(p)) { untrackToast(p.overlay); return; }
     if (p.panel === "digest" && shared(DIGEST_OPEN) === p.overlay) setShared(DIGEST_OPEN, null);
-    if (p.panel === "history" && shared(HISTORY_OPEN) === p.overlay) setShared(HISTORY_OPEN, null);
     if (p.panel === "steer" && shared(STEER_OPEN) === p.overlay) setShared(STEER_OPEN, null);
     if (p.panel === "palette" && shared(PALETTE_OPEN) === p.overlay) setShared(PALETTE_OPEN, null);
     closePeek(this);
@@ -1092,9 +1082,9 @@ export default class Shepherd extends View {
     this.tell(`${task.status === "paused" ? "resume" : "pause"} ${task.id}`, task.id, this.spaceOf(task));
   }
 
-  /** Ask for status: Shepherd answers with `say --task`, in the History, so show it. */
+  /** Ask for status: Shepherd answers in its terminal (and with `say --task`, in the task's Comments), so open it. */
   askStatus(task) {
-    if (task && this.tell(`status ${task.id}?`, task.id, this.spaceOf(task))) this.toggleHistory(true);
+    if (task && this.tell(`status ${task.id}?`, task.id, this.spaceOf(task))) this.openShepherd(this.spaceOf(task));
   }
 
   /** Opens a task in the detail pane by its ref (task._ref, card._ref). */
@@ -1144,8 +1134,17 @@ export default class Shepherd extends View {
     this.toggleOverlay(PALETTE_OPEN, paletteSpec(query ?? ""), query ? true : undefined);
   }
 
-  toggleHistory(open) {
-    this.toggleOverlay(HISTORY_OPEN, { mod: "shepherd", kind: "dialog", width: 760, height: 0.85, props: { panel: "history" } }, open);
+  /** ⌘J, the bar's Terminal button, "Talk to shepherd": the shown space's Shepherd is a Claude terminal,
+   *  so this opens that terminal; with none, it starts one (or says why it can't). */
+  openShepherd(space = this.space()) {
+    if (!space) return;
+    const sh = this.shepherd(space);
+    if (sh) return this.openTerminal(sh.address, null, "Shepherd");
+    const st = this.startState(space);
+    if (st.state === "ok") return this.startShepherd(space, st.known);
+    if (["starting", "checking"].includes(st.state)) return;
+    notify({ title: "No Shepherd in this space", level: "info",
+      body: st.reason ? `Can't start here: ${st.reason}` : "Start Shepherd from the tab bar." });
   }
 
   sendSteer() {
@@ -1295,7 +1294,8 @@ export default class Shepherd extends View {
     if (this.overlayCommand(name, arg)) return;
     if (name === "focus") this.keys.focus(); // pane.go, or a popup over the board closed
     else if (name === "digest") this.toggleDigest();
-    else if (name === "history") this.toggleHistory();
+    // "history" is the old name: keys.json copies merged before the History window went still send it.
+    else if (name === "shepherd" || name === "history") this.openShepherd();
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
     else if (name === "scope") setScope(arg === "all" || (arg !== "space" && shared(SCOPE) !== "all")); // all | space | toggle
     else if (name === "needs") this.openNeeds(arg || null);
@@ -1573,7 +1573,6 @@ export default class Shepherd extends View {
       .on_mouse_down("left", () => this.keys.focus()).on_key_down((e, cx) => this.termKey(e, cx));
     if (p.panel === "digest") return renderDigest(this);
     if (p.panel === "palette") return renderPalette(this);
-    if (p.panel === "history") return renderHistory(this);
     if (p.panel === "bar") return renderBar(this);
     if (p.panel === "detail") {
       const task = this.selectedTask();

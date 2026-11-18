@@ -71,7 +71,7 @@ function allRows(m) {
   const all = m.isAll();
 
   for (const [v, title] of VIEW_LIST) add("Navigate", `Go to ${title.toLowerCase()}`, () => setShared("shepherd.view", v), { keys: goChips(v) });
-  add("Navigate", "Talk to shepherd", cmd("history"), { keys: ["⌘", "J"] });
+  add("Navigate", "Talk to shepherd", cmd("shepherd"), { keys: ["⌘", "J"] });
   add("Navigate", "Daily digest", cmd("digest"), { keys: ["D"] });
   add("Navigate", "Next card", cmd("next"), { keys: ["J"] });
   add("Navigate", "Previous card", cmd("prev"), { keys: ["K"] });

@@ -253,7 +253,7 @@ function overview(m, task, t, where) {
     const asked = text.match(new RegExp(`^re ${escRe(id)}:\\s*([\\s\\S]*)$`));
     if (asked) {
       return comment({ role: "you", text: asked[1],
-        sub: c.failed ? `not kept in the History: ${c.failed}` : c.queued ? "waits for Shepherd…" : c.pending ? "sending…" : ago(c.at, now),
+        sub: c.failed ? `not kept in chat.jsonl: ${c.failed}` : c.queued ? "waits for Shepherd…" : c.pending ? "sending…" : ago(c.at, now),
         subColor: c.failed ? t.ansi1 : c.queued ? t.blocked : t.dim });
     }
     // Lines the board sent about this task: one short line each, like the History's ⎿ events.

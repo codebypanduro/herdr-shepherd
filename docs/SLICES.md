@@ -98,4 +98,6 @@ From `.herdr/slices/design-gaps.md` (the design against the build after slice 9)
 
 ### Extras
 
+**Shepherd is a terminal ✅** (the person's call, 2026-11-18: "we always run claude terminals and not chat ui's"): the History window (⌘J, `history.js`) is gone. ⌘J (`shepherd.shepherd`; `shepherd.history` still works), the bar's **Terminal ⌘J** button, its avatar and last-event line, the palette's "Talk to shepherd" and Ask for status open the Shepherd terminal in the terminal window, or start Shepherd when there is none (`openShepherd()`). chat.jsonl stays for Comments, the bar and the digest. Checked: `herdr-app check`; not yet seen in the window.
+
 **Task Terminal tab ✅** (the person's request, 2026-11-18): a 6th detail tab (key 6) that mirrors the task's agent terminal, with key buttons, Send, Open terminal ↗ and an amber dot while the agent is blocked (`term.js`). **Built:** checked live in a scratch Herdr with a stand-in trust prompt (↓ + Enter picked option 2, Send typed a line); not seen: real clicks or typing, a remote space, dark theme. Report: `.herdr/slices/task-terminal.md`.

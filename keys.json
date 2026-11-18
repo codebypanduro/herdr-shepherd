@@ -6,6 +6,6 @@
     "cmd-alt-2": "shepherd.view:pipeline",
     "cmd-alt-3": "shepherd.view:deps",
     "cmd-alt-4": "shepherd.view:needs",
-    "cmd-j": "shepherd.history"
+    "cmd-j": "shepherd.shepherd"
   }
 }

@@ -19,7 +19,6 @@ export const CHAT = ".herdr/shepherd/chat.jsonl"; // History: one {at, from, tex
 export const VIEW = "shepherd.view";
 export const SELECTED = "shepherd.selected";
 export const DIGEST_OPEN = "shepherd.digestOpen"; // the open digest's overlay id
-export const HISTORY_OPEN = "shepherd.historyOpen"; // the open History's overlay id
 export const STEER_OPEN = "shepherd.steerOpen"; // the open steer menu's overlay id (no peek over it)
 export const TAB = "shepherd.detailTab"; // the task detail's open tab
 export const FILTERS = "shepherd.filters"; // the board and Pipeline's status filters: ["working", "blocked", "done"]
