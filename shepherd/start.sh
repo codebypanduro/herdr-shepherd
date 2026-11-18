@@ -34,9 +34,12 @@ node "$HERE/bin/shep.mjs" --tasks "$FILE" init "$SPACE" >/dev/null
 # ~/.local/bin, nvm and the like: give Shepherd this shell's PATH and claude's full path.
 CLAUDE=$(command -v claude || true)
 [ -n "$CLAUDE" ] || { echo "start.sh: claude isn't on PATH here ($PATH)" >&2; exit 1; }
+# Codex is optional: stages set to a Codex model run it by this path; without it there, Shepherd's
+# hc run fails and it tells the person.
+CODEX=$(command -v codex || echo codex)
 
 PROMPT=$(mktemp "${TMPDIR:-/tmp}/shepherd-prompt.XXXXXX")
-sed -e "s#{{SHEP}}#node $HERE/bin/shep.mjs#g" -e "s#{{WORKFLOW}}#$CONFIG#g" -e "s#{{REPO}}#$REPO#g" -e "s#{{SPACE}}#$SPACE#g" \
+sed -e "s#{{SHEP}}#node $HERE/bin/shep.mjs#g" -e "s#{{WORKFLOW}}#$CONFIG#g" -e "s#{{REPO}}#$REPO#g" -e "s#{{SPACE}}#$SPACE#g" -e "s#{{CODEX}}#$CODEX#g" \
   "$HERE/PROMPT.md" > "$PROMPT"
 
 OUT=$(hc run --json --bg --keep --outlive-parent --no-parent --name "shepherd-$(echo "$SPACE" | tr -cd 'a-z0-9' | cut -c1-20)" \

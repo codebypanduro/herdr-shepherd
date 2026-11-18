@@ -7,8 +7,9 @@
 //   shep add --title "…" [--id X-1] [--source you] [--stage grill] [--max-loops 3]
 //            [--blocked-by "T-4,T-5"] [--parent T-3] [--brief "…"]                       prints the id
 //   shep ready                        queued tasks whose blockers are all done, one id per line
-//   shep start <id> <stage> [--terminal t6] [--model M] [--skill /wayfinder] [--note "…"]
-//                                     opens a stage run (status working); --skill: the skill it runs when not the stage's own
+//   shep start <id> <stage> [--terminal t6] [--model M] [--agent claude|codex] [--skill /wayfinder] [--note "…"]
+//                                     opens a stage run (status working); --skill: the skill it runs when not the stage's own;
+//                                     --agent: the program the run's agent is (default claude; a gpt/codex model means codex)
 //   shep end <id> pass|fail|ask [--note "…"] [--tokens N]                 closes the open stage run and records the
 //                                     tokens its agent used, read from the agent's own session log (see agentTokens;
 //                                     --tokens only overrides that by hand)
@@ -33,7 +34,7 @@
 //   shep say [--from shepherd|you] [--task T-3] "<text>"   a line of the History (chat.jsonl beside tasks.json)
 //   shep get <id> | shep ls
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync, readdirSync, createReadStream } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync, readdirSync, createReadStream, realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
@@ -105,8 +106,12 @@ function openRun(t) {
 // same context read again on every turn) are kept apart in `usage.cacheRead` and not counted. Only lines after an
 // earlier run of the same session ended count, so an agent kept across runs isn't counted twice. Logs are streamed
 // a line at a time (they reach tens of MB). Nothing from the log is printed or kept but the counts, the model and the
-// session id and folder. Codex agents (10j) aren't read yet.
+// session id and folder. Codex agents are read from their own logs instead (codexTokens).
 const NO_AGENT = new Set(["ci", "merge"]); // CI is a plain program; Ready to merge waits on the person.
+const AGENTS = ["claude", "codex"];
+/** The program a run's agent is: what `start --agent` said, else Codex for a gpt/codex model, else Claude Code.
+ *  The mods guess the same way for runs saved before 10j (common.js agentOf). */
+const agentOfRun = (run) => (AGENTS.includes(run.agent) ? run.agent : /codex|gpt/i.test(run.model ?? "") ? "codex" : "claude");
 const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 
 // A run's session as { id, cwd }; runs saved by the first 10e build kept a string id and `sessionCwd`.
@@ -190,6 +195,141 @@ async function agentTokens(t, run) {
   return { session, ...r };
 }
 
+// Codex keeps every session in `<CODEX_HOME or ~/.codex>/sessions/<yyyy>/<mm>/<dd>/rollout-<time>-<id>.jsonl`; the first
+// line is its `session_meta` (id, cwd, start time), and sub-agents are rollouts of their own with the root's
+// `session_id`. Nothing ties a rollout to a pid, so a run's session is the root rollout in the agent's folder that
+// began closest to the run's start (an implementer and a reviewer share a worktree, but never start together).
+// Each model response is a `token_usage_record` with its usage and `response_id`; a forked sub-agent repeats its
+// parent's records, so they count once per response id. Codex's input_tokens include the cached ones: tokens = input
+// − cached + cache writes + output (reasoning is part of output), the cached ones kept apart in `usage.cacheRead`, as
+// for Claude. Rollouts from before token_usage_record carry only running totals (`token_count` events): then the run is
+// the last total minus the total before it began.
+const codexHome = () => process.env.CODEX_HOME || join(homedir(), ".codex");
+const realDir = (d) => { try { return realpathSync(d); } catch { return d; } };
+
+async function firstLine(f) {
+  const lines = createInterface({ input: createReadStream(f, { encoding: "utf8" }), crlfDelay: Infinity });
+  try { for await (const line of lines) return line; } catch {} finally { lines.close(); }
+  return null;
+}
+
+/** Rollouts started between `from` and `to` (ms), as [{file, meta}], from the day folders around them. */
+async function codexRollouts(from, to) {
+  const root = join(codexHome(), "sessions");
+  const out = [];
+  const pad = (n) => String(n).padStart(2, "0");
+  const days = new Set();
+  // Folders are named by local date; a day either side covers time zones.
+  for (let d = from - 86400000; d <= to + 86400000; d += 86400000) {
+    const x = new Date(d);
+    days.add(join(root, String(x.getFullYear()), pad(x.getMonth() + 1), pad(x.getDate())));
+  }
+  for (const dir of days) {
+    let names = [];
+    try { names = readdirSync(dir).filter((f) => f.startsWith("rollout-") && f.endsWith(".jsonl")); } catch { continue; }
+    for (const n of names) {
+      const file = join(dir, n);
+      let meta;
+      try { const d = JSON.parse(await firstLine(file) ?? ""); if (d?.type === "session_meta") meta = d.payload; } catch {}
+      const at = Date.parse(meta?.timestamp ?? "");
+      if (meta?.id && at >= from && at <= to) out.push({ file, meta, at });
+    }
+  }
+  return out;
+}
+
+async function codexSession(run, cwd) {
+  const start = Date.parse(run.start) || 0;
+  const end = Date.parse(run.end ?? "") || Date.now();
+  // The agent starts a little before `shep start` (hc run first), and its first turn may come later.
+  const all = await codexRollouts(start - 300000, end);
+  const want = realDir(cwd);
+  const roots = all.filter((r) => !r.meta.parent_thread_id && !r.meta.source?.subagent && r.meta.cwd && realDir(r.meta.cwd) === want);
+  if (!roots.length) return null;
+  const root = roots.sort((a, b) => Math.abs(a.at - start) - Math.abs(b.at - start))[0];
+  const id = root.meta.session_id ?? root.meta.id;
+  return { id: String(root.meta.id), cwd: root.meta.cwd, agent: "codex",
+    files: all.filter((r) => r === root || (r.meta.session_id === id && r.meta.parent_thread_id)).map((r) => r.file) };
+}
+
+async function codexUsage(files, after) {
+  const seen = new Map();
+  let model = null, before = null, last = null;
+  for (const f of files) {
+    const sub = f !== files[0];
+    try {
+      const lines = createInterface({ input: createReadStream(f, { encoding: "utf8" }), crlfDelay: Infinity });
+      for await (const line of lines) {
+        if (!line.includes('"token_usage_record"') && !line.includes('"token_count"') && !line.includes('"turn_context"')) continue;
+        let d;
+        try { d = JSON.parse(line); } catch { continue; }
+        const p = d?.payload;
+        const at = Date.parse(d?.timestamp ?? "") || 0;
+        if (d?.type === "turn_context" && !sub && p?.model) { if (!after || at > after) model = p.model; continue; }
+        if (d?.type === "token_usage_record" && p?.usage) {
+          if (after && !(at > after)) continue;
+          seen.set(p.response_id ?? `${f}:${p.turn_id}:${at}`, p.usage);
+        } else if (!sub && p?.type === "token_count" && p.info?.total_token_usage) {
+          if (after && !(at > after)) before = p.info.total_token_usage;
+          else last = p.info.total_token_usage;
+        }
+      }
+    } catch {}
+  }
+  let parts = [...seen.values()];
+  // An older rollout without records: the running total's growth over the run.
+  if (!parts.length && last) {
+    const k = ["input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens"];
+    parts = [Object.fromEntries(k.map((x) => [x, Math.max(0, (last[x] ?? 0) - (before?.[x] ?? 0))]))];
+  }
+  const u = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+  for (const x of parts) {
+    const cached = x.cached_input_tokens ?? 0;
+    u.input += Math.max(0, (x.input_tokens ?? 0) - cached);
+    u.cacheRead += cached;
+    u.cacheWrite += x.cache_write_input_tokens ?? 0;
+    u.output += x.output_tokens ?? 0;
+  }
+  const messages = seen.size || (parts.length && (u.input + u.output) ? 1 : 0);
+  return { usage: u, tokens: u.input + u.cacheWrite + u.output, model, messages };
+}
+
+/** A terminal's folder (`hc get`: where it runs now, else where it started). */
+function terminalCwd(address) {
+  if (!address || address.includes("/")) return null;
+  try {
+    const info = JSON.parse(execFileSync("hc", ["get", address], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 }));
+    return info.foreground?.cwd ?? info.cwd ?? null;
+  } catch { return null; }
+}
+
+async function codexTokens(t, run) {
+  const own = Boolean(run.terminal || run.session);
+  const address = own ? run.terminal : t.terminal;
+  if (address?.includes("/")) return { why: `${address} is on another machine` };
+  // The folder noted at start (the agent may be gone by now), else its terminal's, else the task's worktree.
+  const cwd = run.session?.cwd ?? run.cwd ?? terminalCwd(address) ?? t.worktree;
+  if (!cwd) return { why: "the run has no folder to find its Codex session by" };
+  // A session already known: this run's, or an earlier run's by the same agent (a planner kept from Spec to Tickets
+  // began its session before this run did).
+  const known = run.session?.agent === "codex" ? run
+    : t.history.filter((r) => r !== run && run.terminal && r.terminal === run.terminal && r.session?.agent === "codex").pop();
+  let session = null;
+  if (known) {
+    const all = await codexRollouts((Date.parse(known.start) || 0) - 300000, Date.parse(run.end ?? "") || Date.now());
+    const root = all.find((r) => r.meta.id === known.session.id);
+    if (root) session = { ...known.session, files: [root.file, ...all.filter((r) => r !== root && r.meta.session_id === known.session.id && r.meta.parent_thread_id).map((r) => r.file)] };
+  }
+  session ??= await codexSession(run, cwd);
+  if (!session) return { why: `no Codex session in ${cwd} since the run began` };
+  const after = t.history.filter((r) => r !== run && r.session?.id === session.id && r.end)
+    .reduce((n, r) => Math.max(n, Date.parse(r.end) || 0), 0);
+  const r = await codexUsage(session.files, after);
+  if (!r.messages) return { why: `no usage in Codex session ${session.id} since the run began` };
+  const { files: _files, ...kept } = session;
+  return { session: kept, ...r };
+}
+
 // Closes a run: its end, and the tokens its agent used unless given by hand. Returns what it recorded, for `end`
 // to print; problems go to stderr.
 async function closeRun(t, run, given) {
@@ -197,13 +337,14 @@ async function closeRun(t, run, given) {
   delete run.cost;
   if (given !== undefined && !Number.isNaN(given)) { run.tokens = given; return null; }
   if (NO_AGENT.has(run.stage)) return null;
-  const r = await agentTokens(t, run);
+  const r = agentOfRun(run) === "codex" ? await codexTokens(t, run) : await agentTokens(t, run);
   if (r.why) {
     process.stderr.write(`shep: ${t.id} ${run.stage}: tokens not recorded: ${r.why}\n`);
     return null;
   }
   run.session = r.session;
   delete run.sessionCwd;
+  delete run.cwd;
   run.tokens = r.tokens;
   run.usage = r.usage;
   if (!run.model && r.model) run.model = r.model;
@@ -270,12 +411,18 @@ switch (cmd) {
         start: now(), end: null, model: opt.model ?? null, tokens: null };
       // The skill this run uses when the workflow picked another than the stage's own (Spec: /wayfinder for a big one).
       if (typeof opt.skill === "string" && opt.skill) run.skill = opt.skill;
+      if (opt.agent !== undefined && !AGENTS.includes(opt.agent)) die(`--agent one of ${AGENTS.join(" ")}`);
+      if (AGENTS.includes(opt.agent)) run.agent = opt.agent;
+      else if (!NO_AGENT.has(stage) && opt.model && agentOfRun(run) === "codex") run.agent = "codex";
       // The run keeps its own terminal, so its tokens are read from that agent even after another takes the task's,
       // and its session now (`hc get`, up to 10 s; the start time is already taken), in case the agent is gone or its
       // address reused by the time the run ends.
       if (typeof opt.terminal === "string") {
         run.terminal = opt.terminal;
-        if (!NO_AGENT.has(stage)) { const session = claudeSession(opt.terminal); if (session) run.session = session; }
+        if (NO_AGENT.has(stage)) {}
+        // A Codex session can't be found by pid: note the agent's folder now, the session is matched at the end.
+        else if (agentOfRun(run) === "codex") { const cwd = terminalCwd(opt.terminal); if (cwd) run.cwd = cwd; }
+        else { const session = claudeSession(opt.terminal); if (session) run.session = session; }
       }
       t.history.push(run);
     }
@@ -469,6 +616,16 @@ switch (cmd) {
     try {
       repo = dirname(execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim());
     } catch { die(`trust: ${wt} isn't a git worktree`); }
+    // Codex keeps its trust per repo root (a worktree counts as its repo) in config.toml; nothing to copy there,
+    // only whether its agents will stop at "Trust this folder?" (PROMPT, Codex agents).
+    const codexLine = () => {
+      let toml = "";
+      try { toml = readFileSync(join(codexHome(), "config.toml"), "utf8"); } catch { return null; }
+      const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const trusted = [repo, real(repo)].some((r) => new RegExp(`^\\[projects\\."${esc(r)}"\\]\\s*\\n\\s*trust_level\\s*=\\s*"trusted"`, "m").test(toml));
+      return trusted ? `codex: ${repo} is trusted` : `codex: ${repo} isn't trusted in Codex; a Codex agent will ask`;
+    };
+    const done = (line) => { console.log(line); const c = codexLine(); if (c) console.log(c); };
     const cfg = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
     let c;
     try { c = JSON.parse(readFileSync(cfg, "utf8")); } catch (e) { die(`trust: can't read ${cfg}: ${e.message}`); }
@@ -480,7 +637,7 @@ switch (cmd) {
     const from = [repo, real(repo)].find(answered)
       ?? Object.keys(projects).filter((k) => k !== dir && dirname(k) === siblings && answered(k))
         .sort((x, y) => KEYS.filter((k) => projects[y][k] !== undefined).length - KEYS.filter((k) => projects[x][k] !== undefined).length)[0];
-    if (!from) { console.log(`not trusted: ${repo} isn't trusted in Claude; the agent will ask`); break; }
+    if (!from) { done(`not trusted: ${repo} isn't trusted in Claude; the agent will ask`); break; }
     const mine = projects[dir] ?? {};
     const add = {};
     for (const k of KEYS) {
@@ -488,13 +645,13 @@ switch (cmd) {
       if (v === undefined || (Array.isArray(v) && !v.length && Array.isArray(mine[k]) && mine[k].length)) continue;
       if (JSON.stringify(mine[k]) !== JSON.stringify(v)) add[k] = v;
     }
-    if (!Object.keys(add).length) { console.log(`trusted already: ${dir}`); break; }
+    if (!Object.keys(add).length) { done(`trusted already: ${dir}`); break; }
     // Claude Code rewrites this file itself: read, change these keys, replace atomically.
     c.projects = { ...projects, [dir]: { ...mine, ...add } };
     const tmp = `${cfg}.shep-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(c, null, 2));
     renameSync(tmp, cfg);
-    console.log(`trusted ${dir} as ${from}: ${Object.keys(add).join(", ")}`);
+    done(`trusted ${dir} as ${from}: ${Object.keys(add).join(", ")}`);
     break;
   }
   case "get": console.log(JSON.stringify(task(need(), args[0]), null, 2)); break;
