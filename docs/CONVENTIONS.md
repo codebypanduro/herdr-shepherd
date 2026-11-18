@@ -92,6 +92,8 @@ The mods send plain lines to Shepherd's terminal with `hc send <shepherd> "<line
 
 With no Shepherd in the space, a line isn't sent or dropped: it waits in shared `shepherd.queued` (`[{id, space, line, task, at, sending?: {by, at}}]`) while the mod starts one, and the bar sends it once that Shepherd is up (see RECIPE "Starting Shepherd"); it's recorded then. While lines wait, new ones queue behind them. Whether start.sh can run on a machine is shared as `shepherd.startable` (`{"<machine, '' here>": {dir, path, at} | {reason, unreachable, missing, at}}`), and a start asked for as `shepherd.starting` (`{space id: ms}`, until its Shepherd shows).
 
+A question's toast (RECIPE "Toasts") answers with the same `answer <qid>: <text>` line, sent to the Shepherd of the space the question came from. Its notification carries `action: {name: "shepherd.needs:<space id>", args: {shepherd: {space, key, q, task, rec, meta}}}`; the toasts up are shared as `shepherd.toasts` (`[{id, at}]`, at most 3).
+
 Every line the board sends is also kept in chat.jsonl with `shep say --from you` (answers, steer, pause, status and `re` with their task). A task's Overview shows the chat lines with its task among its Comments.
 
 Sub-agents report with `hc send <shepherd> "done HRD-144: …"` or `"ask HRD-144: …"` (triagers `triage HRD-144: …`, reviewers `review HRD-144: pass|findings`, qa `proof HRD-144: pass|fail …`; CI is a plain program whose exit reaches Shepherd as a note). They never talk to the person.

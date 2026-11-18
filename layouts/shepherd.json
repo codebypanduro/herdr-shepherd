@@ -1,6 +1,7 @@
 {
   "id": "root",
   "type": "row",
+  "toast": "shepherd",
   "theme": {
     "light": "paper",
     "dark": "graphite"

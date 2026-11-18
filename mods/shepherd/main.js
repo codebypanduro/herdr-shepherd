@@ -37,6 +37,7 @@ import {
   machineStartState, spaceByArg, waitsText,
 } from "./ui.js";
 import { renderSetup, renderNewTab, initSetup } from "./start.js";
+import { renderToast, isToast, trackToast, untrackToast, TOAST_MS, TOAST_MAX } from "./toast.js";
 
 const REFRESH_MS = 5000;
 const PENDING = "shepherd.pending"; // question ids answered here that tasks.json hasn't caught up with
@@ -66,6 +67,13 @@ const statusOf = (x, stage) => {
 
 export default class Shepherd extends View {
   init(_props, cx) {
+    // A notification (the layout's "toast" is this mod): no loading, keys or timers of its own, except
+    // closing a question's toast once it's answered elsewhere here.
+    if (isToast(props() ?? {})) {
+      const s = props().action?.args?.shepherd;
+      if (s?.key) cx.timer.every(1000, () => { if ((shared(PENDING) ?? []).includes(`${s.key}#${s.q}`)) closeOverlay(props().overlay); });
+      return;
+    }
     this.since = {}; // address -> { stage, since }: label-only cards' time in stage
     this.data = {}; // repo key -> { tasks, questions, alerts, error? }
     this.watching = new Set();
@@ -150,6 +158,7 @@ export default class Shepherd extends View {
 
   async close() {
     const p = props() ?? {};
+    if (isToast(p)) { untrackToast(p.overlay); return; }
     if (p.panel === "digest" && shared(DIGEST_OPEN) === p.overlay) setShared(DIGEST_OPEN, null);
     if (p.panel === "history" && shared(HISTORY_OPEN) === p.overlay) setShared(HISTORY_OPEN, null);
   }
@@ -323,11 +332,12 @@ export default class Shepherd extends View {
     return slot.input;
   }
 
-  answer(q, text) {
+  /** `space`: the question's space when it isn't the shown one (a toast). */
+  answer(q, text, space = this.space()) {
     const answer = String(text ?? "").trim();
-    const repo = this.repo();
+    const repo = this.repo(space);
     // Only a sent answer is pending; a queued one shows as open until it goes.
-    if (!answer || !repo || this.tell(`answer ${q.id}: ${answer}`, q.task ?? null) !== "sent") return;
+    if (!answer || !repo || this.tell(`answer ${q.id}: ${answer}`, q.task ?? null, space) !== "sent") return;
     setShared(PENDING, [...(shared(PENDING) ?? []), `${repo.key}#${q.id}`]);
   }
 
@@ -402,10 +412,17 @@ export default class Shepherd extends View {
     const news = fresh.filter((q) => now - (Date.parse(q.asked) || 0) < ALERT_WINDOW_MS);
     if (!news.length) return;
     const a = d.alerts ?? {};
-    for (const q of news) {
+    const space = this.space();
+    const meta = [a.sound !== false ? "♪ sound" : "", a.phone && a.ntfy ? "sent to phone" : ""].filter(Boolean).join(" · ");
+    for (const [i, q] of news.entries()) {
       const title = `${q.task} needs you`;
-      if (a.toast !== false) {
-        notify({ title, body: q.text, level: "warning", action: { name: "layout.switch", args: { name: "shepherd" } } });
+      // Only the newest TOAST_MAX get a toast; the toast mod (toast.js) reads the question from args.
+      if (a.toast !== false && space && i >= news.length - TOAST_MAX) {
+        const rec = q.recommended ?? (q.kind === "merge" ? "Merge" : q.kind === "approve" ? "Approve" : null);
+        trackToast(notify({
+          title, body: q.text, level: "warning", timeout: TOAST_MS,
+          action: { name: `shepherd.needs:${space.id}`, args: { shepherd: { space: space.id, key: repo.key, q: q.id, task: q.task ?? null, rec, meta } } },
+        }));
       }
       if (a.phone && a.ntfy) {
         fetch(`https://ntfy.sh/${encodeURIComponent(a.ntfy)}`, {
@@ -701,14 +718,13 @@ export default class Shepherd extends View {
   /** A line to this space's Shepherd (CONVENTIONS.md "Talking to Shepherd"), kept in the chat.
    *  "sent"; or "queued" when it waits in QUEUED: there's no Shepherd (one is started, with a toast)
    *  or earlier lines still wait (it goes after them, never ahead); null for an empty line or no space. */
-  tell(line, task = null) {
+  tell(line, task = null, space = this.space()) {
     const text = String(line ?? "").trim();
-    const space = this.space();
     if (!text || !space) return null;
     const sh = this.shepherd(space);
     if (sh && !this.queued(space).length) {
       hc(["send", sh.address, text]);
-      this.record("you", text, task);
+      this.record("you", text, task, space);
       return "sent";
     }
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -843,6 +859,20 @@ export default class Shepherd extends View {
     if (q) this.answer(q, q.recommended);
   }
 
+  /** Needs you, in another space when `spaceId` names one (a toast's Open). */
+  openNeeds(spaceId = null) {
+    if (spaceId && spaceId !== this.space()?.id && spaces().some((s) => s.id === spaceId)) run("space.select", { id: spaceId });
+    setShared(VIEW, "needs");
+  }
+
+  /** R (and shepherd.reply): Needs you, with the keyboard in the oldest question's reply field. */
+  replyNext(cx) {
+    this.openNeeds();
+    const q = this.questions()[0];
+    const input = q ? this.replyInput(q.id) : null;
+    if (input) cx.spawn(async () => { input.focus(); });
+  }
+
   /** C: the bar takes the keyboard with "add " typed (design focusChat). */
   focusBar() { run("shepherd.focus-bar"); }
 
@@ -871,6 +901,8 @@ export default class Shepherd extends View {
     else if (name === "digest") this.toggleDigest();
     else if (name === "history") this.toggleHistory();
     else if (name === "view" && VIEWS.includes(arg)) setShared(VIEW, arg);
+    else if (name === "needs") this.openNeeds(arg || null);
+    else if (name === "reply") this.replyNext(cx);
     else if (name === "tab") this.detailTab(arg);
     else if (name === "next" || name === "prev") this.moveFocus(name === "next" ? 1 : -1);
     else if (!task) return;
@@ -931,6 +963,7 @@ export default class Shepherd extends View {
     if (k === "g") { this.gAt = Date.now(); done(); return; }
     if (k === "d") { this.toggleDigest(); done(); return; }
     if (k === "c") { this.focusBar(); done(); return; }
+    if (k === "r") { this.replyNext(cx); done(); return; }
     const key = { n: "new-space", f: "new-folder", w: "workflow", u: "usage" }[k];
     if (key && this.overlayCommand(key)) { done(); return; }
     const task = this.keyTask();
@@ -1053,6 +1086,7 @@ export default class Shepherd extends View {
 
   render(cx) {
     const p = props() ?? {};
+    if (isToast(p)) return renderToast(this);
     // A space switch shows another repo: load it now rather than on the next tick.
     const repo = this.repo();
     if (repo && !(repo.key in this.data)) { this.data[repo.key] = { tasks: [], questions: [], alerts: {} }; this.sync(cx); }
