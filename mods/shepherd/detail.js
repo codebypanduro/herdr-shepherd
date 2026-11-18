@@ -88,10 +88,10 @@ export function renderDetail(m) {
       .child(div().flex_none().text_color(t.border).child("·"))
       .child(div().min_w(0).truncate().child(wt.path)));
 
-  // Counts as the design: Review = the task's findings, Changes = changed files (once git has read them).
+  // Review = open findings (the person's call, 2026-11-18: a to-do count), Changes = changed files (once git has read them).
   const g = worktreeOf(task) ? m.git(task) : null;
   const counts = {
-    review: (task.findings ?? []).length || null,
+    review: (task.findings ?? []).filter((f) => f.state !== "resolved").length || null,
     changes: g && !g.error && g.files.length ? g.files.length : null,
   };
   const tabs = h_flex().flex_none().px(10).gap(2).border_b(1).border_color(t.border)
